@@ -170,7 +170,7 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* Filtros - Dashboard */}
+          {/* Filtros - Dashboard 
           {view === 'dashboard' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
               <div className="flex items-center gap-2 mb-4">
@@ -198,7 +198,7 @@ export default function AnalyticsPage() {
                 </div>
               </div>
             </div>
-          )}
+          )}*/}
         </div>
 
         {/* Conteúdo Principal */}
@@ -206,7 +206,7 @@ export default function AnalyticsPage() {
           {/* DASHBOARD GERAL */}
           {view === 'dashboard' && dashboardData && (
             <div className="space-y-6">
-              {/* Alertas e Insights */}
+              {/* Alertas e Insights
               {insights.length > 0 && (
                 <div className="space-y-3">
                   {insights.slice(0, 2).map(insight => (
@@ -244,7 +244,7 @@ export default function AnalyticsPage() {
                     </div>
                   ))}
                 </div>
-              )}
+              )} */}
 
               {/* Cards de Métricas */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -359,9 +359,6 @@ export default function AnalyticsPage() {
                               {student.value.toFixed(1)}% conclusão
                             </div>
                           </div>
-                          {student.isAtRisk && (
-                            <FaExclamationTriangle className="w-4 h-4 text-amber-500" title="Aluno em risco" />
-                          )}
                         </button>
                       ))}
                     </div>
@@ -422,7 +419,7 @@ export default function AnalyticsPage() {
 
                 {/* Coluna Direita - Detalhes */}
                 <div className="lg:col-span-2 space-y-6">
-                  {/* Alunos em Risco */}
+                  {/* Alunos em Risco 
                   {dashboardData.studentRankings.atRisk.length > 0 && (
                     <div className="bg-amber-50 rounded-xl shadow-sm border border-amber-200 overflow-hidden">
                       <div className="p-4 border-b border-amber-200">
@@ -453,7 +450,7 @@ export default function AnalyticsPage() {
                         ))}
                       </div>
                     </div>
-                  )}
+                  )}*/}
 
                   {/* Estatísticas Detalhadas */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -599,12 +596,6 @@ export default function AnalyticsPage() {
                         <FaGraduationCap className="w-3 h-3" />
                         <span>{student.studentGrade}</span>
                       </div>
-                      {student.isAtRisk && (
-                        <div className="mt-1 text-xs text-amber-600 flex items-center gap-1">
-                          <FaExclamationTriangle className="w-3 h-3" />
-                          <span>Atenção necessária</span>
-                        </div>
-                      )}
                     </div>
                     <FaArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-colors" />
                   </button>

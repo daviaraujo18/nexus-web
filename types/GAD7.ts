@@ -37,15 +37,8 @@ export interface GAD7Assessment {
 export interface GAD7Status {
   studentId: string;
   lastCompletedWeek?: number; // Última semana que completou
-  lastAssessmentId?: string; // ID da última avaliação
   needsAssessment: boolean; // Precisa preencher esta semana?
-  lastReminderSentAt?: Date; // Última vez que foi lembrado
-  totalAssessmentsCompleted: number; // Total de avaliações feitas
-  lastScore?: number; // Pontuação mais recente
-  lastSeverity?: GAD7Severity; // Severidade mais recente
-  createdAt: Date;
-  updatedAt: Date;
-  isActive: boolean;
+  lastReminder?: Date; // Última vez que foi lembrado
 }
 
 // Constantes úteis para o GAD-7
