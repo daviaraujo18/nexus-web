@@ -3,7 +3,7 @@
 
 import React, { useState, useRef } from 'react';
 import { ActivityProgress, AppActivityConfig } from '@/types/schedule';
-import { FaCheck, FaClock, FaCamera, FaTrash, FaPaperclip, FaMobile } from 'react-icons/fa';
+import { FaCheck, FaCamera, FaTrash, FaMobile } from 'react-icons/fa';
 
 interface AppActivityProps {
   activity: {
@@ -69,12 +69,6 @@ export default function AppActivity({
   const handleComplete = async () => {
     if (readOnly) return;
 
-    // Validação da foto obrigatória
-    if (!photoFile) {
-      setPhotoError('É obrigatório anexar uma foto como comprovação da atividade no app');
-      return;
-    }
-
     setIsLoading(true);
     try {
       await onComplete({
@@ -111,6 +105,19 @@ export default function AppActivity({
             <p className="text-gray-700 mt-1">{notes}</p>
           </div>
         )}
+
+        {photoPreview && (
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500 mb-2">Foto anexada:</p>
+            <div className="relative h-32 rounded-lg overflow-hidden border border-gray-200">
+              <img
+                src={photoPreview}
+                alt="Foto anexada"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -118,46 +125,61 @@ export default function AppActivity({
   return (
     <div className="space-y-6">
       <div className="space-y-6">
-        {/* Seção de foto obrigatória */}
+        {/* Campo de notas */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Anotações (opcional)
+          </label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors text-gray-700 placeholder:text-gray-400"
+            placeholder="Adicione observações sobre a atividade no app..."
+            disabled={readOnly}
+          />
+        </div>
+
+        {/* Seção de foto opcional */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <FaMobile className="text-gray-400" />
-            <label className="text-sm font-medium text-gray-700">
-              Comprovação por foto <span className="text-red-500">*</span>
-            </label>
+            <span className="text-sm font-medium text-gray-700">
+              Foto da tela do app (opcional)
+            </span>
+            <span className="text-xs text-gray-400">• tire um print como comprovação</span>
           </div>
-
-          <p className="text-sm text-gray-500">
-            Tire uma foto da tela do app como comprovação de que a atividade foi realizada.
-          </p>
 
           {photoPreview ? (
             <div className="space-y-3">
-              <div className="relative border-2 border-dashed border-green-200 rounded-lg p-4 bg-green-50">
+              <div className="relative border-2 border-gray-200 rounded-lg p-4 bg-gray-50">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <FaCamera className="text-green-600" />
+                    <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                      <FaCamera className="w-5 h-5 text-purple-600" />
+                    </div>
                     <div>
-                      <p className="font-medium text-green-800">Foto anexada</p>
-                      <p className="text-sm text-green-600">{photoFile?.name}</p>
+                      <p className="font-medium text-gray-800">Foto anexada</p>
+                      <p className="text-sm text-gray-500">{photoFile?.name}</p>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={handleRemovePhoto}
                     disabled={readOnly}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-full"
+                    className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                    title="Remover foto"
                   >
-                    <FaTrash />
+                    <FaTrash className="w-4 h-4" />
                   </button>
                 </div>
 
                 <div className="mt-4">
                   <p className="text-sm font-medium text-gray-700 mb-2">Pré-visualização:</p>
-                  <div className="relative h-48 rounded-lg overflow-hidden">
+                  <div className="relative h-40 rounded-lg overflow-hidden border border-gray-200">
                     <img
                       src={photoPreview}
-                      alt="Pré-visualização da foto"
+                      alt="Pré-visualização"
                       className="w-full h-full object-cover"
                     />
                   </div>
@@ -165,10 +187,7 @@ export default function AppActivity({
               </div>
             </div>
           ) : (
-            <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${photoError
-              ? 'border-red-300 bg-red-50'
-              : 'border-gray-300 hover:border-purple-400 hover:bg-purple-50'
-              }`}>
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-purple-400 hover:bg-purple-50 transition-colors">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -176,7 +195,6 @@ export default function AppActivity({
                 accept="image/*"
                 className="hidden"
                 disabled={readOnly}
-                required
               />
 
               <div className="flex flex-col items-center justify-center gap-3">
@@ -191,10 +209,10 @@ export default function AppActivity({
                     disabled={readOnly}
                     className="text-purple-600 hover:text-purple-700 font-medium disabled:opacity-50"
                   >
-                    Clique para selecionar uma foto
+                    Clique para adicionar um print da tela
                   </button>
                   <p className="text-sm text-gray-500 mt-1">
-                    ou arraste e solte aqui
+                    (opcional) tire um print da tela do app como comprovação
                   </p>
                 </div>
 
@@ -215,10 +233,10 @@ export default function AppActivity({
         <div className="flex gap-3 pt-4">
           <button
             onClick={handleComplete}
-            disabled={isLoading || !photoFile}
-            className="flex-1 bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            disabled={isLoading}
+            className="flex-1 bg-purple-600 text-white py-3 rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium transition-colors"
           >
-            <FaCheck />
+            <FaCheck className="w-4 h-4" />
             {isLoading ? 'Concluindo...' : 'Marcar como Concluída no App'}
           </button>
         </div>
