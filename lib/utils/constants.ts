@@ -65,3 +65,11 @@ export const GRADE_OPTIONS = [
   { value: '3ano-em', label: '3º Ano do Ensino Médio' },
   { value: 'pre-vestibular', label: 'Pré-Vestibular' },
 ];
+
+export const getSchoolLabel = (value: string) => {
+  return SCHOOL_OPTIONS.find(opt => opt.value === value)?.label || value;
+};
+
+export const getGradeLabel = (value: string) => {
+  return GRADE_OPTIONS.find(opt => opt.value === value)?.label || value;
+};
