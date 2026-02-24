@@ -214,6 +214,7 @@ export interface StudentRankingItem {
   studentId: string;
   studentName: string;
   studentGrade: string;
+  studentSchool: string;
   value: number; // métrica de ordenação
   trend: AnalyticsTrend;
   percentile: number;

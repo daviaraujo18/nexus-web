@@ -27,10 +27,11 @@ import {
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { PeriodSelector } from '@/components/analytics/common/PeriodSelector';
 import { StudentSelector } from '@/components/analytics/common/StudentSelector';
+import { getGradeLabel, getSchoolLabel } from '@/lib/utils/constants';
 
 export default function AnalyticsPage() {
   const router = useRouter();
-  
+
   // Estados para navegação - simplificado, apenas para controlar a view
   const [view, setView] = useState<'dashboard' | 'student-list'>('dashboard');
 
@@ -57,6 +58,64 @@ export default function AnalyticsPage() {
   const handleSelectStudent = (studentId: string) => {
     router.push(`/professional/analytics/student/${studentId}`);
   };
+
+  const [rankingFilters, setRankingFilters] = useState({
+    school: 'all',
+    grade: 'all'
+  });
+
+  // Função para obter lista única de escolas dos alunos
+  const getUniqueSchools = () => {
+    if (!dashboardData?.studentRankings.byEngagement) return [];
+    const schools = dashboardData.studentRankings.byEngagement
+      .map(s => s.studentSchool)
+      .filter((school, index, self) => school && self.indexOf(school) === index)
+      .sort();
+    return schools;
+  };
+
+  // Função para obter lista única de séries dos alunos
+  const getUniqueGrades = () => {
+    if (!dashboardData?.studentRankings.byEngagement) return [];
+    const grades = dashboardData.studentRankings.byEngagement
+      .map(s => s.studentGrade)
+      .filter((grade, index, self) => grade && self.indexOf(grade) === index)
+      .sort((a, b) => {
+        // Ordenar séries numericamente (1º Ano, 2º Ano, etc)
+        const numA = parseInt(a);
+        const numB = parseInt(b);
+        return numA - numB;
+      });
+    return grades;
+  };
+
+  // Função para filtrar alunos
+  const getFilteredStudents = () => {
+    if (!dashboardData?.studentRankings.byEngagement) return [];
+
+    return dashboardData.studentRankings.byEngagement.filter(student => {
+      // Filtro de escola
+      if (rankingFilters.school !== 'all' && student.studentSchool !== rankingFilters.school) {
+        return false;
+      }
+      // Filtro de série
+      if (rankingFilters.grade !== 'all' && student.studentGrade !== rankingFilters.grade) {
+        return false;
+      }
+      return true;
+    });
+  };
+
+  // Obter listas únicas
+  const uniqueSchools = getUniqueSchools();
+  const uniqueGrades = getUniqueGrades();
+  const filteredStudents = getFilteredStudents();
+  const topFilteredStudents = filteredStudents.slice(0, 8);
+
+  // Calcular média dos alunos filtrados
+  const filteredAverage = filteredStudents.length > 0
+    ? (filteredStudents.reduce((acc, s) => acc + s.value, 0) / filteredStudents.length).toFixed(1)
+    : '0.0';
 
   // Loading states
   if (dashboardLoading && !dashboardData) {
@@ -142,11 +201,10 @@ export default function AnalyticsPage() {
             <div className="flex">
               <button
                 onClick={() => setView('dashboard')}
-                className={`flex-1 py-3 px-4 font-medium rounded-lg text-center transition-all ${
-                  view === 'dashboard'
-                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
-                    : 'text-slate-600 hover:bg-slate-50'
-                }`}
+                className={`flex-1 py-3 px-4 font-medium rounded-lg text-center transition-all ${view === 'dashboard'
+                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
+                  : 'text-slate-600 hover:bg-slate-50'
+                  }`}
               >
                 <div className="flex items-center justify-center gap-2">
                   <FaChartLine className="w-4 h-4" />
@@ -156,11 +214,10 @@ export default function AnalyticsPage() {
 
               <button
                 onClick={() => setView('student-list')}
-                className={`flex-1 py-3 px-4 font-medium rounded-lg text-center transition-all ${
-                  view === 'student-list'
-                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
-                    : 'text-slate-600 hover:bg-slate-50'
-                }`}
+                className={`flex-1 py-3 px-4 font-medium rounded-lg text-center transition-all ${view === 'student-list'
+                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
+                  : 'text-slate-600 hover:bg-slate-50'
+                  }`}
               >
                 <div className="flex items-center justify-center gap-2">
                   <FaUserGraduate className="w-4 h-4" />
@@ -295,14 +352,12 @@ export default function AnalyticsPage() {
 
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
                   <div className="flex items-center justify-between mb-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      (metrics?.averageGAD7Score || 0) > 10 ? 'bg-red-100' :
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${(metrics?.averageGAD7Score || 0) > 10 ? 'bg-red-100' :
                       (metrics?.averageGAD7Score || 0) > 5 ? 'bg-amber-100' : 'bg-emerald-100'
-                    }`}>
-                      <FaHeart className={`w-5 h-5 ${
-                        (metrics?.averageGAD7Score || 0) > 10 ? 'text-red-600' :
+                      }`}>
+                      <FaHeart className={`w-5 h-5 ${(metrics?.averageGAD7Score || 0) > 10 ? 'text-red-600' :
                         (metrics?.averageGAD7Score || 0) > 5 ? 'text-amber-600' : 'text-emerald-600'
-                      }`} />
+                        }`} />
                     </div>
                     <span className="text-xs font-medium text-slate-400">Média</span>
                   </div>
@@ -343,12 +398,11 @@ export default function AnalyticsPage() {
                           onClick={() => handleSelectStudent(student.studentId)}
                           className="w-full flex items-center gap-3 p-4 hover:bg-slate-50 transition-colors text-left"
                         >
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                            index === 0 ? 'bg-yellow-100 text-yellow-700' :
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${index === 0 ? 'bg-yellow-100 text-yellow-700' :
                             index === 1 ? 'bg-slate-200 text-slate-700' :
-                            index === 2 ? 'bg-amber-100 text-amber-700' :
-                            'bg-slate-100 text-slate-600'
-                          }`}>
+                              index === 2 ? 'bg-amber-100 text-amber-700' :
+                                'bg-slate-100 text-slate-600'
+                            }`}>
                             {index + 1}
                           </div>
                           <div className="flex-1 min-w-0">
@@ -526,13 +580,12 @@ export default function AnalyticsPage() {
                           return (
                             <div key={day} className="text-center">
                               <div className="text-xs font-medium text-slate-500 mb-2">{day}</div>
-                              <div className={`p-2 rounded-lg ${
-                                completion >= 70 ? 'bg-emerald-100 text-emerald-700' :
+                              <div className={`p-2 rounded-lg ${completion >= 70 ? 'bg-emerald-100 text-emerald-700' :
                                 completion >= 50 ? 'bg-indigo-100 text-indigo-700' :
-                                completion >= 30 ? 'bg-amber-100 text-amber-700' :
-                                completion > 0 ? 'bg-rose-100 text-rose-700' :
-                                'bg-slate-100 text-slate-400'
-                              }`}>
+                                  completion >= 30 ? 'bg-amber-100 text-amber-700' :
+                                    completion > 0 ? 'bg-rose-100 text-rose-700' :
+                                      'bg-slate-100 text-slate-400'
+                                }`}>
                                 <div className="text-sm font-bold">
                                   {completion > 0 ? `${roundedCompletion}%` : '—'}
                                 </div>
@@ -557,6 +610,174 @@ export default function AnalyticsPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* RANKING DE PONTUAÇÃO COM FILTROS */}
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mt-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                      <h4 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <FaTrophy className="w-5 h-5 text-yellow-500" />
+                        <span>Ranking de Pontuação</span>
+                      </h4>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        {/* Filtro de Escola */}
+                        <select
+                          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-500"
+                          value={rankingFilters.school}
+                          onChange={(e) => setRankingFilters(prev => ({ ...prev, school: e.target.value }))}
+                        >
+                          <option value="all">Todas as escolas</option>
+                          {uniqueSchools.map(school => (
+                            <option key={school} value={school}>
+                              {getSchoolLabel(school)}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Filtro de Série */}
+                        <select
+                          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-500"
+                          value={rankingFilters.grade}
+                          onChange={(e) => setRankingFilters(prev => ({ ...prev, grade: e.target.value }))}
+                        >
+                          <option value="all">Todas as séries</option>
+                          {uniqueGrades.map(grade => (
+                            <option key={grade} value={grade}>
+                              {getGradeLabel(grade)}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Botão para limpar filtros (aparece apenas se algum filtro estiver ativo) */}
+                        {(rankingFilters.school !== 'all' || rankingFilters.grade !== 'all') && (
+                          <button
+                            onClick={() => setRankingFilters({ school: 'all', grade: 'all' })}
+                            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                          >
+                            Limpar filtros
+                          </button>
+                        )}
+
+                        {/* Indicador de atualização */}
+                        <span className="text-xs text-slate-400">
+                          Atualizado {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Lista Vertical do Ranking */}
+                    <div className="space-y-2">
+                      {topFilteredStudents.length > 0 ? (
+                        topFilteredStudents.map((student, index) => {
+                          // Cores para o pódio
+                          const podiumColors = [
+                            'bg-gradient-to-r from-yellow-50 to-yellow-100 border-yellow-200', // Ouro
+                            'bg-gradient-to-r from-slate-50 to-slate-100 border-slate-200',    // Prata
+                            'bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200',    // Bronze
+                          ];
+
+                          const isPodium = index < 3;
+
+                          return (
+                            <button
+                              key={student.studentId}
+                              onClick={() => handleSelectStudent(student.studentId)}
+                              className={`group w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 border hover:shadow-md ${isPodium
+                                  ? podiumColors[index] + ' hover:border-opacity-50'
+                                  : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/30'
+                                }`}
+                            >
+                              {/* Posição */}
+                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold flex-shrink-0 ${index === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-white' :
+                                  index === 1 ? 'bg-gradient-to-br from-slate-400 to-slate-500 text-white' :
+                                    index === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white' :
+                                      'bg-slate-100 text-slate-600'
+                                }`}>
+                                {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
+                              </div>
+
+                              {/* Informações do Aluno */}
+                              <div className="flex-1 min-w-0 text-left">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-slate-800 truncate group-hover:text-indigo-700 transition-colors">
+                                    {student.studentName}
+                                  </span>
+                                  {student.isAtRisk && (
+                                    <FaExclamationTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" title="Aluno em risco" />
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-4 text-xs text-slate-500 mt-1">
+                                  <span className="flex items-center gap-1">
+                                    <FaGraduationCap className="w-3 h-3" />
+                                    {getGradeLabel(student.studentGrade)}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <FaSchool className="w-3 h-3" />
+                                    <span className="truncate max-w-[120px]">
+                                      {getSchoolLabel(student.studentSchool)}
+                                    </span>
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Pontuação */}
+                              <div className="text-right flex-shrink-0">
+                                <div className="flex items-baseline gap-1">
+                                  <span className="text-xl font-bold text-indigo-600">{Math.round(student.value)}</span>
+                                  <span className="text-xs text-slate-400">pts</span>
+                                </div>
+
+                                {/* Badge de tendência (opcional) */}
+                                {student.trend && (
+                                  <div className={`text-xs ${student.trend === 'improving' ? 'text-emerald-600' :
+                                      student.trend === 'declining' ? 'text-red-600' :
+                                        'text-slate-400'
+                                    }`}>
+                                    {student.trend === 'improving' ? '↑' : student.trend === 'declining' ? '↓' : '→'}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Seta de navegação (aparece no hover) */}
+                              <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                <FaArrowRight className="w-4 h-4 text-indigo-400" />
+                              </div>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        // Mensagem quando não há alunos com os filtros selecionados
+                        <div className="text-center py-8 bg-slate-50 rounded-xl">
+                          <FaUserGraduate className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                          <p className="text-slate-600">Nenhum aluno encontrado com os filtros selecionados</p>
+                          <button
+                            onClick={() => setRankingFilters({ school: 'all', grade: 'all' })}
+                            className="mt-3 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                          >
+                            Limpar filtros
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Rodapé com estatísticas */}
+                    <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-4 text-xs">
+                        <span className="text-slate-500">
+                          🏆 Total: <span className="font-medium text-slate-700">{filteredStudents.length} alunos</span>
+                          {filteredStudents.length !== dashboardData?.studentRankings.byEngagement.length && (
+                            <span className="text-slate-400 ml-1">
+                              (filtrados de {dashboardData?.studentRankings.byEngagement.length})
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-slate-500">
+                          ⭐ Média: <span className="font-medium text-slate-700">{filteredAverage} pts</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -594,7 +815,7 @@ export default function AnalyticsPage() {
                       </div>
                       <div className="text-sm text-slate-500 flex items-center gap-2 mt-1">
                         <FaGraduationCap className="w-3 h-3" />
-                        <span>{student.studentGrade}</span>
+                        <span>{getGradeLabel(student.studentGrade)}</span>
                       </div>
                     </div>
                     <FaArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transition-colors" />

@@ -542,6 +542,79 @@ export class AnalyticsService {
     }
   }
 
+  private async getStudentGrade(studentId: string): Promise<string> {
+    try {
+      const docRef = doc(firestore, 'students', studentId);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        // A série está em profile.grade
+        return data.profile?.grade || 'Não informado';
+      }
+
+      return 'Não informado';
+    } catch (error) {
+      console.error('Error fetching student grade:', error);
+      return 'Não informado';
+    }
+  }
+
+  // Método auxiliar para buscar múltiplas séries de uma vez (opcional, para performance)
+  private async getStudentGrades(studentIds: string[]): Promise<Record<string, string>> {
+    const grades: Record<string, string> = {};
+
+    if (studentIds.length === 0) return grades;
+
+    try {
+      // Buscar cada documento individualmente
+      for (const studentId of studentIds) {
+        const docRef = doc(firestore, 'students', studentId);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          grades[studentId] = data.profile?.grade || 'Não informado';
+        } else {
+          grades[studentId] = 'Não informado';
+        }
+      }
+
+      console.log(`📚 Found grades for ${Object.keys(grades).length} students`);
+    } catch (error) {
+      console.error('Error fetching student grades:', error);
+    }
+
+    return grades;
+  }
+
+  private async getStudentSchools(studentIds: string[]): Promise<Record<string, string>> {
+    const schools: Record<string, string> = {};
+
+    if (studentIds.length === 0) return schools;
+
+    try {
+      // Buscar cada documento individualmente
+      for (const studentId of studentIds) {
+        const docRef = doc(firestore, 'students', studentId);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          schools[studentId] = data.profile?.school || 'Não informado';
+        } else {
+          schools[studentId] = 'Não informado';
+        }
+      }
+
+      console.log(`📚 Found grades for ${Object.keys(schools).length} students`);
+    } catch (error) {
+      console.error('Error fetching student grades:', error);
+    }
+
+    return schools;
+  }
+
   // ============================================
   // MÉTODOS DE PROCESSAMENTO (ATUALIZADOS)
   // ============================================
@@ -575,6 +648,11 @@ export class AnalyticsService {
     // Buscar nomes dos alunos
     const studentNames = await this.getStudentNames(accessibleStudentIds);
 
+    // Buscar séries dos alunos
+    const studentGrades = await this.getStudentGrades(accessibleStudentIds);
+
+    const studentSchools = await this.getStudentSchools(accessibleStudentIds);
+
     // Calcular métricas por aluno
     const studentMetrics = Array.from(studentMap.entries()).map(([studentId, data]) => {
       const latestSnapshot = data.snapshots[0];
@@ -597,7 +675,8 @@ export class AnalyticsService {
       return {
         studentId,
         studentName: studentNames[studentId] || `Aluno ${studentId.slice(0, 4)}`,
-        studentGrade: '1º Ano', // Buscar do banco quando disponível
+        studentGrade: studentGrades[studentId] || 'Não informado', // AGORA USA O NOVO MÉTODO
+        studentSchool: studentSchools[studentId] || 'Não informado', // AGORA USA O NOVO MÉTODO
         avgCompletion,
         latestCompletion: latestSnapshot?.metrics.completionRate || 0,
         improvement,
@@ -607,7 +686,7 @@ export class AnalyticsService {
       };
     });
 
-    // Ordenar rankings
+    // Ordenar rankings (restante do código permanece igual)
     return {
       byEngagement: studentMetrics
         .sort((a, b) => b.avgCompletion - a.avgCompletion)
@@ -616,6 +695,7 @@ export class AnalyticsService {
           studentId: item.studentId,
           studentName: item.studentName,
           studentGrade: item.studentGrade,
+          studentSchool: item.studentSchool,
           value: item.avgCompletion,
           trend: this.determineTrend(item.improvement),
           percentile: 100 - (index * 10),
@@ -628,6 +708,7 @@ export class AnalyticsService {
           studentId: item.studentId,
           studentName: item.studentName,
           studentGrade: item.studentGrade,
+          studentSchool: item.studentSchool,
           value: item.improvement,
           trend: this.determineTrend(item.improvement),
           percentile: 100 - (index * 10),
@@ -641,6 +722,7 @@ export class AnalyticsService {
           studentId: item.studentId,
           studentName: item.studentName,
           studentGrade: item.studentGrade,
+          studentSchool: item.studentSchool,
           value: item.gad7Improvement,
           trend: this.determineTrend(item.gad7Improvement),
           percentile: 100 - (index * 10),
@@ -652,6 +734,7 @@ export class AnalyticsService {
           studentId: item.studentId,
           studentName: item.studentName,
           studentGrade: item.studentGrade,
+          studentSchool: item.studentSchool,
           value: item.latestCompletion,
           trend: 'declining',
           percentile: 0,
