@@ -268,6 +268,7 @@ export class AnalyticsService {
   // MÉTODOS DE BUSCA NO FIRESTORE (ATUALIZADOS)
   // ============================================
 
+  // Em fetchSnapshots, linhas ~290-320
   private async fetchSnapshots(
     userId: string,
     dateRange: DateRange,
@@ -275,59 +276,35 @@ export class AnalyticsService {
     accessibleStudentIds: string[]
   ): Promise<WeeklySnapshot[]> {
     try {
-      console.log('🔍 Fetching snapshots:', {
-        userId,
-        userRole: this.userRole,
-        dateRange: {
-          startDate: dateRange.startDate.toISOString(),
-          endDate: dateRange.endDate.toISOString()
-        },
-        accessibleStudents: accessibleStudentIds.length
-      });
+      console.log('🔍 Fetching snapshots for', accessibleStudentIds.length, 'students');
 
       if (accessibleStudentIds.length === 0) {
-        console.log('⚠️ No accessible students');
         return [];
       }
 
       const snapshotsRef = collection(firestore, 'weeklySnapshots');
+      const snapshots: WeeklySnapshot[] = [];
 
-      // Query principal - buscar por studentIds (mais eficiente que por professionalId)
-      let q = query(
-        snapshotsRef,
-        where('studentId', 'in', accessibleStudentIds.slice(0, 10)), // Firestore limit de 10 por in
-        where('weekStartDate', '>=', Timestamp.fromDate(dateRange.startDate)),
-        where('weekEndDate', '<=', Timestamp.fromDate(dateRange.endDate)),
-        orderBy('weekStartDate', 'desc')
-      );
+      // Processar em batches de 10 (limitação do Firestore)
+      for (let i = 0; i < accessibleStudentIds.length; i += 10) {
+        const batch = accessibleStudentIds.slice(i, i + 10);
 
-      // Se tiver mais de 10 alunos, precisamos fazer múltiplas queries
-      if (accessibleStudentIds.length > 10) {
-        const snapshots: WeeklySnapshot[] = [];
+        const q = query(
+          snapshotsRef,
+          where('studentId', 'in', batch),
+          where('weekStartDate', '>=', Timestamp.fromDate(dateRange.startDate)),
+          where('weekEndDate', '<=', Timestamp.fromDate(dateRange.endDate)),
+          orderBy('weekStartDate', 'desc')
+        );
 
-        // Dividir em chunks de 10
-        for (let i = 0; i < accessibleStudentIds.length; i += 10) {
-          const chunk = accessibleStudentIds.slice(i, i + 10);
-          const chunkQuery = query(
-            snapshotsRef,
-            where('studentId', 'in', chunk),
-            where('weekStartDate', '>=', Timestamp.fromDate(dateRange.startDate)),
-            where('weekEndDate', '<=', Timestamp.fromDate(dateRange.endDate)),
-            orderBy('weekStartDate', 'desc')
-          );
+        const snapshot = await getDocs(q);
+        snapshots.push(...this.mapSnapshots(snapshot));
 
-          const chunkSnapshot = await getDocs(chunkQuery);
-          snapshots.push(...this.mapSnapshots(chunkSnapshot));
-        }
-
-        console.log('📊 Total snapshots found:', snapshots.length);
-        return snapshots;
+        console.log(`📊 Batch ${i / 10 + 1}: ${snapshot.size} snapshots`);
       }
 
-      const snapshot = await getDocs(q);
-      console.log('📊 Snapshots found:', snapshot.size);
-
-      return this.mapSnapshots(snapshot);
+      console.log('📊 Total snapshots:', snapshots.length);
+      return snapshots;
     } catch (error) {
       console.error('❌ Error fetching snapshots:', error);
       return [];
@@ -341,65 +318,51 @@ export class AnalyticsService {
     accessibleStudentIds: string[]
   ): Promise<GAD7Assessment[]> {
     try {
+      console.log('🔍 Fetching GAD7 assessments for period:', {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        studentsCount: accessibleStudentIds.length
+      });
+
       if (accessibleStudentIds.length === 0) return [];
 
       const assessmentsRef = collection(firestore, 'gad7Assessments');
+      const assessments: GAD7Assessment[] = [];
 
-      // Se for coordenador, buscar por studentIds
-      if (this.userRole === 'coordinator') {
-        let q = query(
+      // Buscar em batches de 10
+      for (let i = 0; i < accessibleStudentIds.length; i += 10) {
+        const batch = accessibleStudentIds.slice(i, i + 10);
+
+        const q = query(
           assessmentsRef,
-          where('studentId', 'in', accessibleStudentIds.slice(0, 10)),
-          where('completedAt', '>=', Timestamp.fromDate(dateRange.startDate)),
-          where('completedAt', '<=', Timestamp.fromDate(dateRange.endDate)),
-          orderBy('completedAt', 'desc')
-        );
-
-        if (accessibleStudentIds.length > 10) {
-          const assessments: GAD7Assessment[] = [];
-
-          for (let i = 0; i < accessibleStudentIds.length; i += 10) {
-            const chunk = accessibleStudentIds.slice(i, i + 10);
-            const chunkQuery = query(
-              assessmentsRef,
-              where('studentId', 'in', chunk),
-              where('completedAt', '>=', Timestamp.fromDate(dateRange.startDate)),
-              where('completedAt', '<=', Timestamp.fromDate(dateRange.endDate)),
-              orderBy('completedAt', 'desc')
-            );
-
-            const chunkSnapshot = await getDocs(chunkQuery);
-            assessments.push(...chunkSnapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data()
-            })) as GAD7Assessment[]);
-          }
-
-          return assessments;
-        }
-
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as GAD7Assessment[];
-      }
-      // Se for profissional, buscar por professionalId
-      else {
-        let q = query(
-          assessmentsRef,
-          where('professionalId', '==', userId),
+          where('studentId', 'in', batch),
           where('completedAt', '>=', Timestamp.fromDate(dateRange.startDate)),
           where('completedAt', '<=', Timestamp.fromDate(dateRange.endDate)),
           orderBy('completedAt', 'desc')
         );
 
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({
+        console.log(`📊 GAD7 Batch ${i / 10 + 1}: found ${snapshot.size} assessments`);
+
+        assessments.push(...snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
-        })) as GAD7Assessment[];
+        })) as GAD7Assessment[]);
       }
+
+      console.log('📊 Total GAD7 assessments found:', assessments.length);
+
+      // Log dos primeiros para debug
+      if (assessments.length > 0) {
+        console.log('📝 Sample GAD7:', assessments.slice(0, 3).map(a => ({
+          studentId: a.studentId,
+          score: a.totalScore,
+          severity: a.severity,
+          date: a.completedAt
+        })));
+      }
+
+      return assessments;
     } catch (error) {
       console.error('❌ Error fetching GAD7 assessments:', error);
       return [];
@@ -615,6 +578,37 @@ export class AnalyticsService {
     return schools;
   }
 
+  private async getStudentTotalPoints(studentIds: string[]): Promise<Record<string, number>> {
+    // 1. Tipagem corrigida para Record<string, number>
+    const totalPoints: Record<string, number> = {};
+
+    if (studentIds.length === 0) return totalPoints;
+
+    try {
+      // 2. Busca em paralelo para ser muito mais rápido
+      await Promise.all(
+        studentIds.map(async (studentId) => {
+          const docRef = doc(firestore, 'students', studentId);
+          const docSnap = await getDoc(docRef);
+
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            // 3. Garante que o valor seja um número, ou 0 se não existir
+            totalPoints[studentId] = Number(data.profile?.totalPoints) || 0;
+          } else {
+            totalPoints[studentId] = 0;
+          }
+        })
+      );
+
+      console.log(`📚 Found grades for ${Object.keys(totalPoints).length} students`);
+    } catch (error) {
+      console.error('Error fetching student grades:', error);
+    }
+
+    return totalPoints;
+  }
+
   // ============================================
   // MÉTODOS DE PROCESSAMENTO (ATUALIZADOS)
   // ============================================
@@ -625,7 +619,14 @@ export class AnalyticsService {
     filters: AnalyticsFilters,
     accessibleStudentIds: string[]
   ): Promise<ComparativeAnalysis['studentRankings']> {
-    // Agrupar por aluno
+
+    // Buscar nomes, séries, escolas e pontos de TODOS os alunos acessíveis
+    const studentNames = await this.getStudentNames(accessibleStudentIds);
+    const studentGrades = await this.getStudentGrades(accessibleStudentIds);
+    const studentSchools = await this.getStudentSchools(accessibleStudentIds);
+    const studentTotalPoints = await this.getStudentTotalPoints(accessibleStudentIds);
+
+    // Mapear dados dos alunos que têm snapshots/assessments
     const studentMap = new Map<string, {
       snapshots: WeeklySnapshot[];
       assessments: GAD7Assessment[];
@@ -645,38 +646,30 @@ export class AnalyticsService {
       studentMap.get(assessment.studentId)!.assessments.push(assessment);
     });
 
-    // Buscar nomes dos alunos
-    const studentNames = await this.getStudentNames(accessibleStudentIds);
+    // Criar métricas para TODOS os alunos acessíveis
+    const studentMetrics = accessibleStudentIds.map(studentId => {
+      const data = studentMap.get(studentId) || { snapshots: [], assessments: [] };
 
-    // Buscar séries dos alunos
-    const studentGrades = await this.getStudentGrades(accessibleStudentIds);
-
-    const studentSchools = await this.getStudentSchools(accessibleStudentIds);
-
-    // Calcular métricas por aluno
-    const studentMetrics = Array.from(studentMap.entries()).map(([studentId, data]) => {
       const latestSnapshot = data.snapshots[0];
       const avgCompletion = data.snapshots.length > 0
         ? data.snapshots.reduce((sum, s) => sum + s.metrics.completionRate, 0) / data.snapshots.length
         : 0;
 
-      // Calcular melhoria
+      // Calcular melhoria (0 se não houver dados)
       const firstSnapshot = data.snapshots[data.snapshots.length - 1];
       const improvement = firstSnapshot && latestSnapshot
         ? latestSnapshot.metrics.completionRate - firstSnapshot.metrics.completionRate
         : 0;
 
-      // Calcular melhoria no GAD7
       const gad7Improvement = this.calculateGAD7Improvement(data.assessments);
-
-      // Determinar se está em risco
       const isAtRisk = this.isStudentAtRisk(data.snapshots, data.assessments);
 
       return {
         studentId,
         studentName: studentNames[studentId] || `Aluno ${studentId.slice(0, 4)}`,
-        studentGrade: studentGrades[studentId] || 'Não informado', // AGORA USA O NOVO MÉTODO
-        studentSchool: studentSchools[studentId] || 'Não informado', // AGORA USA O NOVO MÉTODO
+        studentGrade: studentGrades[studentId] || 'Não informado',
+        studentSchool: studentSchools[studentId] || 'Não informado',
+        studentTotalPoints: Number(studentTotalPoints[studentId]) || 0,
         avgCompletion,
         latestCompletion: latestSnapshot?.metrics.completionRate || 0,
         improvement,
@@ -686,48 +679,65 @@ export class AnalyticsService {
       };
     });
 
-    // Ordenar rankings (restante do código permanece igual)
+    // Agora sim, gerar rankings com TODOS os alunos
     return {
       byEngagement: studentMetrics
         .sort((a, b) => b.avgCompletion - a.avgCompletion)
-        .slice(0, 10)
         .map((item, index) => ({
           studentId: item.studentId,
           studentName: item.studentName,
           studentGrade: item.studentGrade,
           studentSchool: item.studentSchool,
+          studentTotalPoints: item.studentTotalPoints,
           value: item.avgCompletion,
           trend: this.determineTrend(item.improvement),
-          percentile: 100 - (index * 10),
+          percentile: 100 - (index * (100 / studentMetrics.length)),
           isAtRisk: item.isAtRisk
         })),
-      byImprovement: studentMetrics
-        .sort((a, b) => b.improvement - a.improvement)
-        .slice(0, 10)
+
+      byPoints: studentMetrics
+        .sort((a, b) => b.studentTotalPoints - a.studentTotalPoints)
         .map((item, index) => ({
           studentId: item.studentId,
           studentName: item.studentName,
           studentGrade: item.studentGrade,
           studentSchool: item.studentSchool,
-          value: item.improvement,
+          studentTotalPoints: item.studentTotalPoints,
+          value: item.avgCompletion,
           trend: this.determineTrend(item.improvement),
-          percentile: 100 - (index * 10),
+          percentile: 100 - (index * (100 / studentMetrics.length)),
           isAtRisk: item.isAtRisk
         })),
+
+      byImprovement: studentMetrics
+        .sort((a, b) => b.improvement - a.improvement)
+        .map((item, index) => ({
+          studentId: item.studentId,
+          studentName: item.studentName,
+          studentGrade: item.studentGrade,
+          studentSchool: item.studentSchool,
+          studentTotalPoints: item.studentTotalPoints,
+          value: item.improvement,
+          trend: this.determineTrend(item.improvement),
+          percentile: 100 - (index * (100 / studentMetrics.length)),
+          isAtRisk: item.isAtRisk
+        })),
+
       byGAD7Improvement: studentMetrics
         .filter(m => m.gad7Improvement !== 0)
         .sort((a, b) => b.gad7Improvement - a.gad7Improvement)
-        .slice(0, 10)
         .map((item, index) => ({
           studentId: item.studentId,
           studentName: item.studentName,
           studentGrade: item.studentGrade,
           studentSchool: item.studentSchool,
+          studentTotalPoints: item.studentTotalPoints,
           value: item.gad7Improvement,
           trend: this.determineTrend(item.gad7Improvement),
-          percentile: 100 - (index * 10),
+          percentile: 100 - (index * (100 / studentMetrics.length)),
           isAtRisk: item.isAtRisk
         })),
+
       atRisk: studentMetrics
         .filter(m => m.isAtRisk)
         .map(item => ({
@@ -735,6 +745,7 @@ export class AnalyticsService {
           studentName: item.studentName,
           studentGrade: item.studentGrade,
           studentSchool: item.studentSchool,
+          studentTotalPoints: item.studentTotalPoints,
           value: item.latestCompletion,
           trend: 'declining',
           percentile: 0,
@@ -853,6 +864,7 @@ export class AnalyticsService {
       },
       studentRankings: {
         byEngagement: [],
+        byPoints: [],
         byImprovement: [],
         byGAD7Improvement: [],
         atRisk: []

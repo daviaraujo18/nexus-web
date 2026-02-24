@@ -178,6 +178,7 @@ export interface ComparativeAnalysis {
   // Ranking de alunos
   studentRankings: {
     byEngagement: StudentRankingItem[];
+    byPoints: StudentRankingItem[];
     byImprovement: StudentRankingItem[];
     byGAD7Improvement: StudentRankingItem[];
     atRisk: StudentRankingItem[];
@@ -215,6 +216,7 @@ export interface StudentRankingItem {
   studentName: string;
   studentGrade: string;
   studentSchool: string;
+  studentTotalPoints: number;
   value: number; // métrica de ordenação
   trend: AnalyticsTrend;
   percentile: number;

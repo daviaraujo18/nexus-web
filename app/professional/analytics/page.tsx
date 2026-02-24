@@ -91,9 +91,11 @@ export default function AnalyticsPage() {
 
   // Função para filtrar alunos
   const getFilteredStudents = () => {
-    if (!dashboardData?.studentRankings.byEngagement) return [];
+    if (!dashboardData?.studentRankings.byPoints) return [];
 
-    return dashboardData.studentRankings.byEngagement.filter(student => {
+    console.log('=====HERE====')
+    console.log(dashboardData?.studentRankings.byPoints)
+    return dashboardData.studentRankings.byPoints.filter(student => {
       // Filtro de escola
       if (rankingFilters.school !== 'all' && student.studentSchool !== rankingFilters.school) {
         return false;
@@ -110,12 +112,21 @@ export default function AnalyticsPage() {
   const uniqueSchools = getUniqueSchools();
   const uniqueGrades = getUniqueGrades();
   const filteredStudents = getFilteredStudents();
-  const topFilteredStudents = filteredStudents.slice(0, 8);
+  const topFilteredStudents = filteredStudents;
 
   // Calcular média dos alunos filtrados
   const filteredAverage = filteredStudents.length > 0
-    ? (filteredStudents.reduce((acc, s) => acc + s.value, 0) / filteredStudents.length).toFixed(1)
+    ? (filteredStudents.reduce((acc, s) => acc + s.studentTotalPoints, 0) / filteredStudents.length).toFixed(1)
     : '0.0';
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
+  // Calcular alunos da página atual
+  const paginatedStudents = filteredStudents.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   // Loading states
   if (dashboardLoading && !dashboardData) {
@@ -654,7 +665,7 @@ export default function AnalyticsPage() {
                             onClick={() => setRankingFilters({ school: 'all', grade: 'all' })}
                             className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
                           >
-                            Limpar filtros 
+                            Limpar filtros
                           </button>
                         )}
 
@@ -668,7 +679,8 @@ export default function AnalyticsPage() {
                     {/* Lista Vertical do Ranking */}
                     <div className="space-y-2">
                       {topFilteredStudents.length > 0 ? (
-                        topFilteredStudents.map((student, index) => {
+                        paginatedStudents.map((student, index) => {
+                          const globalIndex = (currentPage - 1) * itemsPerPage + index;
                           // Cores para o pódio
                           const podiumColors = [
                             'bg-gradient-to-r from-yellow-50 to-yellow-100 border-yellow-200', // Ouro
@@ -683,15 +695,15 @@ export default function AnalyticsPage() {
                               key={student.studentId}
                               onClick={() => handleSelectStudent(student.studentId)}
                               className={`group w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 border hover:shadow-md ${isPodium
-                                  ? podiumColors[index] + ' hover:border-opacity-50'
-                                  : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/30'
+                                ? podiumColors[index] + ' hover:border-opacity-50'
+                                : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/30'
                                 }`}
                             >
                               {/* Posição */}
                               <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold flex-shrink-0 ${index === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-white' :
-                                  index === 1 ? 'bg-gradient-to-br from-slate-400 to-slate-500 text-white' :
-                                    index === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white' :
-                                      'bg-slate-100 text-slate-600'
+                                index === 1 ? 'bg-gradient-to-br from-slate-400 to-slate-500 text-white' :
+                                  index === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white' :
+                                    'bg-slate-100 text-slate-600'
                                 }`}>
                                 {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
                               </div>
@@ -724,15 +736,15 @@ export default function AnalyticsPage() {
                               {/* Pontuação */}
                               <div className="text-right flex-shrink-0">
                                 <div className="flex items-baseline gap-1">
-                                  <span className="text-xl font-bold text-indigo-600">{Math.round(student.value)}</span>
+                                  <span className="text-xl font-bold text-indigo-600">{Math.round(student.studentTotalPoints)}</span>
                                   <span className="text-xs text-slate-400">pts</span>
                                 </div>
 
                                 {/* Badge de tendência (opcional) */}
                                 {student.trend && (
                                   <div className={`text-xs ${student.trend === 'improving' ? 'text-emerald-600' :
-                                      student.trend === 'declining' ? 'text-red-600' :
-                                        'text-slate-400'
+                                    student.trend === 'declining' ? 'text-red-600' :
+                                      'text-slate-400'
                                     }`}>
                                     {student.trend === 'improving' ? '↑' : student.trend === 'declining' ? '↓' : '→'}
                                   </div>
@@ -759,6 +771,29 @@ export default function AnalyticsPage() {
                           </button>
                         </div>
                       )}
+
+                      {/**
+                      {filteredStudents.length > itemsPerPage && (
+                        <div className="flex justify-center gap-2 mt-4">
+                          <button
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentPage === 1}
+                            className="px-3 py-1 border rounded disabled:opacity-50 text-gray-500"
+                          >
+                            Anterior
+                          </button>
+                          <span className="px-3 py-1 text-gray-500">
+                            Página {currentPage} de {Math.ceil(filteredStudents.length / itemsPerPage)}
+                          </span>
+                          <button
+                            onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredStudents.length / itemsPerPage), p + 1))}
+                            disabled={currentPage === Math.ceil(filteredStudents.length / itemsPerPage)}
+                            className="px-3 py-1 border rounded disabled:opacity-50 text-gray-500"
+                          >
+                            Próxima
+                          </button>
+                        </div>
+                      )} */}
                     </div>
 
                     {/* Rodapé com estatísticas */}
