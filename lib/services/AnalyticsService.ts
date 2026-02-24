@@ -166,6 +166,7 @@ export class AnalyticsService {
         studentName: studentData.name,
         studentGrade: studentData.grade || 'Não informado',
         studentSchool: studentData.school || 'Não informado',
+        studentTotalPoints: studentData.totalPoints,
         profileImage: studentData.profileImage,
         currentMetrics,
         trends,

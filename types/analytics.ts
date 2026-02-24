@@ -72,6 +72,7 @@ export interface StudentAnalyticsSummary {
   studentId: string;
   studentName: string;
   studentGrade: string;
+  studentTotalPoints: number;
   studentSchool: string;
   profileImage?: string;
   
