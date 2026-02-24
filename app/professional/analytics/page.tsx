@@ -654,7 +654,7 @@ export default function AnalyticsPage() {
                             onClick={() => setRankingFilters({ school: 'all', grade: 'all' })}
                             className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
                           >
-                            Limpar filtros
+                            Limpar filtros 
                           </button>
                         )}
 
