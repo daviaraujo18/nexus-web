@@ -4,7 +4,7 @@ import { firestore } from '@/firebase/config';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 
 export class ExportService {
-  
+
   async exportToPDF(
     data: ComparativeAnalysis | StudentAnalyticsSummary,
     config: ReportConfig,
@@ -13,10 +13,10 @@ export class ExportService {
     try {
       // Aqui você implementaria a geração real de PDF
       // Usando bibliotecas como jsPDF, react-pdf, etc.
-      
+
       // Garantir que o data está no formato correto para o tipo de relatório
       let reportData: ComparativeAnalysis;
-      
+
       if ('period' in data && 'summary' in data) {
         // Já é ComparativeAnalysis
         reportData = data as ComparativeAnalysis;
@@ -63,6 +63,7 @@ export class ExportService {
               studentId: data.studentId,
               studentName: data.studentName,
               studentGrade: data.studentGrade,
+              studentSchool: data.studentSchool,
               value: data.currentMetrics.completionRate,
               trend: data.trends.completionRate,
               percentile: 50,
@@ -74,6 +75,7 @@ export class ExportService {
               studentId: data.studentId,
               studentName: data.studentName,
               studentGrade: data.studentGrade,
+              studentSchool: data.studentSchool,
               value: data.currentMetrics.completionRate,
               trend: 'declining',
               percentile: 0,
@@ -89,7 +91,7 @@ export class ExportService {
           classHeatmap: {}
         };
       }
-      
+
       const report: ExportedReport = {
         id: `report-${Date.now()}`,
         generatedAt: new Date(),
@@ -100,17 +102,17 @@ export class ExportService {
         fileSize: 1024 * 1024, // Mock: 1MB
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 dias
       };
-      
+
       // Salvar metadados no Firestore
       await this.saveReportMetadata(report);
-      
+
       return report;
     } catch (error) {
       console.error('Error exporting to PDF:', error);
       throw error;
     }
   }
-  
+
   async exportToCSV(
     data: ComparativeAnalysis,
     professionalId: string
@@ -128,7 +130,7 @@ export class ExportService {
         'Severidade',
         'Tendência'
       ];
-      
+
       const rows = data.studentRankings.byEngagement.map(student => {
         return [
           student.studentName,
@@ -142,12 +144,12 @@ export class ExportService {
           student.trend
         ];
       });
-      
+
       const csvContent = [
         headers.join(','),
         ...rows.map(row => row.join(','))
       ].join('\n');
-      
+
       // Aqui você faria upload para storage e retornaria URL
       return `data:text/csv;charset=utf-8,${encodeURIComponent(csvContent)}`;
     } catch (error) {
@@ -155,7 +157,7 @@ export class ExportService {
       throw error;
     }
   }
-  
+
   async generateStudentReportCard(
     studentSummary: StudentAnalyticsSummary,
     professionalId: string
@@ -182,10 +184,10 @@ export class ExportService {
       format: 'pdf',
       includeCharts: true
     };
-    
+
     return this.exportToPDF(studentSummary, config, professionalId);
   }
-  
+
   async generateClassReport(
     comparativeData: ComparativeAnalysis,
     professionalId: string
@@ -206,10 +208,10 @@ export class ExportService {
       format: 'pdf',
       includeCharts: true
     };
-    
+
     return this.exportToPDF(comparativeData, config, professionalId);
   }
-  
+
   private async saveReportMetadata(report: ExportedReport): Promise<void> {
     try {
       const reportsRef = collection(firestore, 'exportedReports');
@@ -224,25 +226,25 @@ export class ExportService {
       // Não falhar a exportação por causa do metadata
     }
   }
-  
+
   formatDateRange(dateRange: { startDate: Date; endDate: Date }): string {
-    const options: Intl.DateTimeFormatOptions = { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: 'numeric' 
+    const options: Intl.DateTimeFormatOptions = {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
     };
-    
+
     return `${dateRange.startDate.toLocaleDateString('pt-BR', options)} - ${dateRange.endDate.toLocaleDateString('pt-BR', options)}`;
   }
-  
+
   formatNumber(value: number, decimals: number = 1): string {
     return value.toFixed(decimals).replace('.', ',');
   }
-  
+
   formatPercentage(value: number): string {
     return `${this.formatNumber(value)}%`;
   }
-  
+
   getSeverityColor(severity: string): string {
     const colors = {
       minimal: '#10b981', // verde
@@ -252,7 +254,7 @@ export class ExportService {
     };
     return colors[severity as keyof typeof colors] || '#6b7280';
   }
-  
+
   getTrendIcon(trend: string): string {
     const icons = {
       improving: '↑',
