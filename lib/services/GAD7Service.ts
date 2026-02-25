@@ -22,6 +22,8 @@ export class GAD7Service {
     STATUS: 'gad7Status'
   };
 
+  static readonly ASSESSMENT_INTERVAL_WEEKS = 4; // 4 semanas = 1 mês
+
   // Perguntas GAD-7 em português (validadas)
   static readonly QUESTIONS = [
     {
@@ -101,7 +103,6 @@ export class GAD7Service {
    */
   static async needsAssessment(studentId: string): Promise<boolean> {
     try {
-      // Primeiro, garantir que status existe
       const statusRef = doc(firestore, this.COLLECTIONS.STATUS, studentId);
       const statusDoc = await getDoc(statusRef);
 
@@ -115,22 +116,24 @@ export class GAD7Service {
 
       const status = statusDoc.data() as GAD7Status;
 
-      // Se já completou esta semana, não precisa
-      if (status.lastCompletedWeek === currentWeek) {
-        return false;
+      // Se NUNCA completou, precisa
+      if (!status.lastCompletedWeek) {
+        return true;
       }
 
-      // Verificar se já completou alguma avaliação esta semana
-      const q = query(
-        collection(firestore, this.COLLECTIONS.ASSESSMENTS),
-        where('studentId', '==', studentId),
-        where('weekNumber', '==', currentWeek),
-        where('isActive', '==', true),
-        limit(1)
-      );
+      // ⭐ NOVA LÓGICA: Verificar se passaram 4 semanas desde a última avaliação
+      const weeksSinceLastAssessment = currentWeek - status.lastCompletedWeek;
+      const needsNewAssessment = weeksSinceLastAssessment >= this.ASSESSMENT_INTERVAL_WEEKS;
 
-      const snapshot = await getDocs(q);
-      return snapshot.empty; // Precisa se não houver avaliação
+      console.log('📊 Verificação GAD-7:', {
+        currentWeek,
+        lastCompletedWeek: status.lastCompletedWeek,
+        weeksSinceLastAssessment,
+        needsNewAssessment,
+        interval: this.ASSESSMENT_INTERVAL_WEEKS
+      });
+
+      return needsNewAssessment;
 
     } catch (error) {
       console.error('Erro ao verificar necessidade de avaliação:', error);
@@ -166,7 +169,7 @@ export class GAD7Service {
     responses: GAD7Response
   ): Promise<string> {
     try {
-      // Validar que todas as perguntas foram respondidas
+      // Validar respostas
       const allQuestionsAnswered = this.QUESTIONS.every(q =>
         responses[q.id] !== undefined
       );
@@ -175,17 +178,19 @@ export class GAD7Service {
         throw new Error('Por favor, responda todas as perguntas');
       }
 
-      // Calcular pontuação total
+      // Calcular pontuação
       const totalScore = this.QUESTIONS.reduce(
         (sum, q) => sum + (responses[q.id] || 0),
         0
       );
 
-      // Determinar severidade
       const severity = this.calculateSeverity(totalScore);
-
       const currentWeek = this.getCurrentWeekNumber();
-      const assessmentId = `gad7_${studentId}_${currentWeek}_${Date.now()}`;
+      
+      // NOVO: Calcular em qual "mês" estamos (agrupamento de 4 semanas)
+      const monthGroup = Math.floor((currentWeek - 1) / this.ASSESSMENT_INTERVAL_WEEKS) + 1;
+
+      const assessmentId = `gad7_${studentId}_month${monthGroup}_${Date.now()}`;
 
       const assessment: Omit<GAD7Assessment, 'id'> = {
         studentId,
@@ -207,7 +212,7 @@ export class GAD7Service {
         updatedAt: serverTimestamp()
       });
 
-      // Atualizar status do aluno
+      // Atualizar status do aluno (agora com a semana atual)
       await this.updateStudentStatus(studentId, currentWeek);
 
       return assessmentId;
