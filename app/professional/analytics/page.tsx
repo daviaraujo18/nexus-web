@@ -624,22 +624,24 @@ export default function AnalyticsPage() {
 
                   {/* RANKING DE PONTUAÇÃO COM FILTROS */}
                   <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mt-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                    {/* Header - Adaptado para mobile */}
+                    <div className="flex flex-col gap-3 mb-4">
                       <h4 className="font-semibold text-slate-800 flex items-center gap-2">
-                        <FaTrophy className="w-5 h-5 text-yellow-500" />
-                        <span>Ranking de Pontuação</span>
+                        <FaTrophy className="w-5 h-5 text-yellow-500 flex-shrink-0" />
+                        <span className="truncate">Ranking de Pontuação</span>
                       </h4>
 
-                      <div className="flex flex-wrap items-center gap-3">
+                      {/* Filtros - Agora com scroll horizontal no mobile */}
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
                         {/* Filtro de Escola */}
                         <select
-                          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-500"
+                          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-500 flex-shrink-0 max-w-[140px] sm:max-w-none"
                           value={rankingFilters.school}
                           onChange={(e) => setRankingFilters(prev => ({ ...prev, school: e.target.value }))}
                         >
-                          <option value="all">Todas as escolas</option>
+                          <option value="all">Todas escolas</option>
                           {uniqueSchools.map(school => (
-                            <option key={school} value={school}>
+                            <option key={school} value={school} className="truncate">
                               {getSchoolLabel(school)}
                             </option>
                           ))}
@@ -647,11 +649,11 @@ export default function AnalyticsPage() {
 
                         {/* Filtro de Série */}
                         <select
-                          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-500"
+                          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-500 flex-shrink-0 max-w-[120px] sm:max-w-none"
                           value={rankingFilters.grade}
                           onChange={(e) => setRankingFilters(prev => ({ ...prev, grade: e.target.value }))}
                         >
-                          <option value="all">Todas as séries</option>
+                          <option value="all">Todas séries</option>
                           {uniqueGrades.map(grade => (
                             <option key={grade} value={grade}>
                               {getGradeLabel(grade)}
@@ -659,33 +661,35 @@ export default function AnalyticsPage() {
                           ))}
                         </select>
 
-                        {/* Botão para limpar filtros (aparece apenas se algum filtro estiver ativo) */}
+                        {/* Botão limpar filtros (versão mobile com ícone) */}
                         {(rankingFilters.school !== 'all' || rankingFilters.grade !== 'all') && (
                           <button
                             onClick={() => setRankingFilters({ school: 'all', grade: 'all' })}
-                            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                            className="flex-shrink-0 px-3 py-1.5 text-sm bg-indigo-50 text-indigo-600 rounded-lg font-medium hover:bg-indigo-100 transition-colors whitespace-nowrap"
                           >
-                            Limpar filtros
+                            <span className="hidden sm:inline">Limpar filtros</span>
+                            <span className="sm:hidden">Limpar</span>
                           </button>
                         )}
 
-                        {/* Indicador de atualização */}
-                        <span className="text-xs text-slate-400">
-                          Atualizado {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        {/* Indicador de atualização - escondido no mobile muito pequeno */}
+                        <span className="hidden xs:inline-flex text-xs text-slate-400 flex-shrink-0 ml-auto">
+                          {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
                     </div>
 
-                    {/* Lista Vertical do Ranking */}
+                    {/* Lista Vertical do Ranking - Adaptada para mobile */}
                     <div className="space-y-2">
                       {topFilteredStudents.length > 0 ? (
                         paginatedStudents.map((student, index) => {
                           const globalIndex = (currentPage - 1) * itemsPerPage + index;
+
                           // Cores para o pódio
                           const podiumColors = [
-                            'bg-gradient-to-r from-yellow-50 to-yellow-100 border-yellow-200', // Ouro
-                            'bg-gradient-to-r from-slate-50 to-slate-100 border-slate-200',    // Prata
-                            'bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200',    // Bronze
+                            'bg-gradient-to-r from-yellow-50 to-yellow-100 border-yellow-200',
+                            'bg-gradient-to-r from-slate-50 to-slate-100 border-slate-200',
+                            'bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200',
                           ];
 
                           const isPodium = index < 3;
@@ -694,124 +698,154 @@ export default function AnalyticsPage() {
                             <button
                               key={student.studentId}
                               onClick={() => handleSelectStudent(student.studentId)}
-                              className={`group w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 border hover:shadow-md ${isPodium
+                              className={`group w-full flex items-center gap-2 sm:gap-4 p-2 sm:p-3 rounded-xl transition-all duration-200 border hover:shadow-md ${isPodium
                                 ? podiumColors[index] + ' hover:border-opacity-50'
                                 : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/30'
                                 }`}
                             >
-                              {/* Posição */}
-                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold flex-shrink-0 ${index === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-white' :
-                                index === 1 ? 'bg-gradient-to-br from-slate-400 to-slate-500 text-white' :
-                                  index === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white' :
-                                    'bg-slate-100 text-slate-600'
-                                }`}>
+                              {/* Posição - Tamanho adaptativo */}
+                              <div className={`
+              w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center font-bold flex-shrink-0 text-sm sm:text-base
+              ${index === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-white' :
+                                  index === 1 ? 'bg-gradient-to-br from-slate-400 to-slate-500 text-white' :
+                                    index === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white' :
+                                      'bg-slate-100 text-slate-600'
+                                }
+            `}>
                                 {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
                               </div>
 
-                              {/* Informações do Aluno */}
+                              {/* Informações do Aluno - Layout responsivo */}
                               <div className="flex-1 min-w-0 text-left">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium text-slate-800 truncate group-hover:text-indigo-700 transition-colors">
+                                <div className="flex items-center gap-1 sm:gap-2">
+                                  <span className="font-medium text-slate-800 truncate group-hover:text-indigo-700 transition-colors text-sm sm:text-base">
                                     {student.studentName}
                                   </span>
                                   {student.isAtRisk && (
-                                    <FaExclamationTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" title="Aluno em risco" />
+                                    <FaExclamationTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500 flex-shrink-0" title="Aluno em risco" />
                                   )}
                                 </div>
 
-                                <div className="flex items-center gap-4 text-xs text-slate-500 mt-1">
-                                  <span className="flex items-center gap-1">
-                                    <FaGraduationCap className="w-3 h-3" />
-                                    {getGradeLabel(student.studentGrade)}
+                                {/* Badges de informação - Empilham no mobile muito pequeno */}
+                                <div className="flex flex-col xs:flex-row xs:items-center gap-1 xs:gap-2 sm:gap-4 text-xs text-slate-500 mt-0.5">
+                                  <span className="flex items-center gap-1 truncate">
+                                    <FaGraduationCap className="w-3 h-3 flex-shrink-0" />
+                                    <span className="truncate">{getGradeLabel(student.studentGrade)}</span>
                                   </span>
-                                  <span className="flex items-center gap-1">
-                                    <FaSchool className="w-3 h-3" />
-                                    <span className="truncate max-w-[120px]">
+                                  <span className="hidden xs:flex text-slate-300">•</span>
+                                  <span className="flex items-center gap-1 truncate">
+                                    <FaSchool className="w-3 h-3 flex-shrink-0" />
+                                    <span className="truncate max-w-[80px] xs:max-w-[100px] sm:max-w-[120px]">
                                       {getSchoolLabel(student.studentSchool)}
                                     </span>
                                   </span>
                                 </div>
                               </div>
 
-                              {/* Pontuação */}
-                              <div className="text-right flex-shrink-0">
-                                <div className="flex items-baseline gap-1">
-                                  <span className="text-xl font-bold text-indigo-600">{Math.round(student.studentTotalPoints)}</span>
-                                  <span className="text-xs text-slate-400">pts</span>
+                              {/* Pontuação - Layout compacto no mobile */}
+                              <div className="text-right flex-shrink-0 ml-1 sm:ml-2">
+                                <div className="flex items-baseline gap-0.5 sm:gap-1">
+                                  <span className="text-base sm:text-xl font-bold text-indigo-600">
+                                    {Math.round(student.studentTotalPoints)}
+                                  </span>
+                                  <span className="text-[10px] sm:text-xs text-slate-400">pts</span>
                                 </div>
 
-                                {/* Badge de tendência (opcional) */}
+                                {/* Badge de tendência */}
                                 {student.trend && (
-                                  <div className={`text-xs ${student.trend === 'improving' ? 'text-emerald-600' :
-                                    student.trend === 'declining' ? 'text-red-600' :
-                                      'text-slate-400'
-                                    }`}>
-                                    {student.trend === 'improving' ? '↑' : student.trend === 'declining' ? '↓' : '→'}
+                                  <div className={`
+                                      text-[10px] sm:text-xs mt-0.5
+                                    ${student.trend === 'improving' ? 'text-emerald-600' :
+                                      student.trend === 'declining' ? 'text-red-600' : 'text-slate-400'
+                                    }
+                                  `}>
+                                    {student.trend === 'improving' ? '↑' :
+                                      student.trend === 'declining' ? '↓' : '→'}
                                   </div>
                                 )}
                               </div>
 
-                              {/* Seta de navegação (aparece no hover) */}
-                              <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                              {/* Seta de navegação - Escondida no mobile para economizar espaço */}
+                              <div className="hidden sm:block opacity-0 group-hover:opacity-100 transition-opacity">
                                 <FaArrowRight className="w-4 h-4 text-indigo-400" />
                               </div>
                             </button>
                           );
                         })
                       ) : (
-                        // Mensagem quando não há alunos com os filtros selecionados
-                        <div className="text-center py-8 bg-slate-50 rounded-xl">
-                          <FaUserGraduate className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                          <p className="text-slate-600">Nenhum aluno encontrado com os filtros selecionados</p>
+                        // Mensagem quando não há alunos
+                        <div className="text-center py-6 sm:py-8 bg-slate-50 rounded-xl">
+                          <FaUserGraduate className="w-8 h-8 sm:w-12 sm:h-12 text-slate-300 mx-auto mb-2 sm:mb-3" />
+                          <p className="text-sm sm:text-base text-slate-600 px-4">
+                            Nenhum aluno encontrado com os filtros selecionados
+                          </p>
                           <button
                             onClick={() => setRankingFilters({ school: 'all', grade: 'all' })}
-                            className="mt-3 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                            className="mt-2 sm:mt-3 text-xs sm:text-sm text-indigo-600 hover:text-indigo-700 font-medium"
                           >
                             Limpar filtros
                           </button>
                         </div>
                       )}
 
-                      {/**
+                      {/* Paginação - Adaptada para mobile 
                       {filteredStudents.length > itemsPerPage && (
-                        <div className="flex justify-center gap-2 mt-4">
+                        <div className="flex items-center justify-center gap-1 sm:gap-2 mt-4">
                           <button
                             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                             disabled={currentPage === 1}
-                            className="px-3 py-1 border rounded disabled:opacity-50 text-gray-500"
+                            className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border rounded-lg disabled:opacity-50 text-gray-600 hover:bg-slate-50 transition-colors"
                           >
-                            Anterior
+                            <span className="hidden xs:inline">Anterior</span>
+                            <span className="xs:hidden">←</span>
                           </button>
-                          <span className="px-3 py-1 text-gray-500">
-                            Página {currentPage} de {Math.ceil(filteredStudents.length / itemsPerPage)}
+
+                          <span className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm text-gray-600">
+                            <span className="hidden xs:inline">Página </span>
+                            {currentPage} de {Math.ceil(filteredStudents.length / itemsPerPage)}
                           </span>
+
                           <button
                             onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredStudents.length / itemsPerPage), p + 1))}
                             disabled={currentPage === Math.ceil(filteredStudents.length / itemsPerPage)}
-                            className="px-3 py-1 border rounded disabled:opacity-50 text-gray-500"
+                            className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border rounded-lg disabled:opacity-50 text-gray-600 hover:bg-slate-50 transition-colors"
                           >
-                            Próxima
+                            <span className="hidden xs:inline">Próxima</span>
+                            <span className="xs:hidden">→</span>
                           </button>
                         </div>
-                      )} */}
+                      )}*/}
                     </div>
 
-                    {/* Rodapé com estatísticas */}
-                    <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-4 text-xs">
-                        <span className="text-slate-500">
-                          🏆 Total: <span className="font-medium text-slate-700">{filteredStudents.length} alunos</span>
-                          {filteredStudents.length !== dashboardData?.studentRankings.byEngagement.length && (
-                            <span className="text-slate-400 ml-1">
-                              (filtrados de {dashboardData?.studentRankings.byEngagement.length})
-                            </span>
-                          )}
+                    {/* Rodapé com estatísticas - Adaptado para mobile 
+                    <div className="mt-4 pt-3 border-t border-slate-100">
+                      <div className="flex flex-col xs:flex-row xs:items-center justify-between gap-2 text-xs">
+                        <span className="text-slate-500 flex items-center gap-1">
+                          <span>🏆</span>
+                          <span className="truncate">
+                            Total: <span className="font-medium text-slate-700">{filteredStudents.length} alunos</span>
+                            {filteredStudents.length !== dashboardData?.studentRankings.byEngagement.length && (
+                              <span className="text-slate-400 ml-1 hidden sm:inline">
+                                (filtrados de {dashboardData?.studentRankings.byEngagement.length})
+                              </span>
+                            )}
+                          </span>
                         </span>
-                        <span className="text-slate-500">
-                          ⭐ Média: <span className="font-medium text-slate-700">{filteredAverage} pts</span>
+
+                        <span className="text-slate-500 flex items-center gap-1">
+                          <span>⭐</span>
+                          <span className="truncate">
+                            Média: <span className="font-medium text-slate-700">{filteredAverage} pts</span>
+                          </span>
                         </span>
                       </div>
-                    </div>
+
+                      {filteredStudents.length !== dashboardData?.studentRankings.byEngagement.length && (
+                        <p className="xs:hidden text-[10px] text-slate-400 mt-1 text-center">
+                          Filtrados de {dashboardData?.studentRankings.byEngagement.length} alunos totais
+                        </p>
+                      )}
+                    </div>*/}
                   </div>
                 </div>
               </div>

@@ -122,8 +122,9 @@ export default function StudentNavbar({
             </span>
           </div>
 
-          {/* Notifications */}
+          {/**  Notifications */}
           <div className="relative">
+            {/**
             <button
               className="p-2 rounded-lg bg-white/10 text-white/80 hover:bg-white/20 hover:text-white 
                        transition-all duration-200 hover:-translate-y-0.5 relative"
@@ -136,9 +137,8 @@ export default function StudentNavbar({
                   {unreadCount}
                 </span>
               )}
-            </button>
+            </button> */}
 
-            {/* Notifications Dropdown */}
             {showNotifications && (
               <>
                 <div
