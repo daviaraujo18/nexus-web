@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import NotificationManager from '@/components/notifications/NotificationManager';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import StudentSidebar from '@/components/layout/StudentSidebar';
 import StudentNavbar from '@/components/layout/StudentNavbar';
@@ -28,23 +29,19 @@ export default function StudentLayout({
   // ✅ TRAVAR SCROLL DO BODY quando sidebar está aberta no mobile
   useEffect(() => {
     if (isMobile && sidebarOpen) {
-      // Salva o scroll position atual
       const scrollY = window.scrollY;
-      
-      // Adiciona classes para travar o body
+
       document.body.style.position = 'fixed';
       document.body.style.top = `-${scrollY}px`;
       document.body.style.width = '100%';
-      document.body.style.overflowY = 'scroll'; // Mantém a scrollbar visível
-      
-      // Cleanup function
+      document.body.style.overflowY = 'scroll';
+
       return () => {
         document.body.style.position = '';
         document.body.style.top = '';
         document.body.style.width = '';
         document.body.style.overflowY = '';
-        
-        // Restaura o scroll position
+
         window.scrollTo(0, scrollY);
       };
     }
@@ -61,7 +58,7 @@ export default function StudentLayout({
     <ProtectedRoute allowedRoles={['student']}>
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 lg:flex">
         {/* ✅ Sidebar - Desktop: fixa e altura total */}
-        <div className={`lg:fixed lg:inset-y-0 lg:left-0 ${sidebarOpen ? "lg:z-40" : ""}`}>
+        <div className={`lg:fixed lg:inset-y-0 lg:left-0 ${sidebarOpen ? 'lg:z-40' : ''}`}>
           <StudentSidebar
             open={sidebarOpen}
             onNavigate={() => setSidebarOpen(false)}
@@ -69,12 +66,14 @@ export default function StudentLayout({
         </div>
 
         {/* ✅ Main Content - Desktop: margin-left igual à largura da sidebar */}
-        <div className={`
-          flex-1 flex flex-col min-h-screen
-          transition-all duration-300 ease-in-out
-          ${sidebarOpen ? 'lg:ml-72' : 'lg:ml-0'}
-          ${isMobile && sidebarOpen ? 'overflow-hidden h-screen' : ''}
-        `}>
+        <div
+          className={`
+            flex-1 flex flex-col min-h-screen
+            transition-all duration-300 ease-in-out
+            ${sidebarOpen ? 'lg:ml-72' : 'lg:ml-0'}
+            ${isMobile && sidebarOpen ? 'overflow-hidden h-screen' : ''}
+          `}
+        >
           {/* Navbar */}
           <StudentNavbar
             toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
@@ -85,7 +84,12 @@ export default function StudentLayout({
           {/* Page Content */}
           <main className="flex-1">
             <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-gray-200/70 shadow-sm h-full">
+              <div className="p-4">
+                <NotificationManager />
+              </div>
+
               {children}
+
               {/* Footer */}
               <footer className="mt-6 text-center text-sm text-gray-500">
                 <p className="px-4">

@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, isSupported, Messaging } from 'firebase/messaging';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
@@ -27,36 +27,48 @@ export const storage = getStorage(app);
 let messaging: Messaging | null = null;
 
 if (typeof window !== 'undefined') {
-  // Só inicializar no cliente
-  isSupported().then((supported) => {
-    if (supported) {
-      try {
-        messaging = getMessaging(app);
-        console.log('✅ Firebase Messaging inicializado');
-      } catch (error) {
-        console.error('❌ Erro ao inicializar Firebase Messaging:', error);
+  isSupported()
+    .then((supported) => {
+      if (supported) {
+        try {
+          messaging = getMessaging(app);
+          console.log('✅ Firebase Messaging inicializado');
+        } catch (error) {
+          console.error('❌ Erro ao inicializar Firebase Messaging:', error);
+        }
+      } else {
+        console.warn('⚠️ Este navegador não suporta Firebase Messaging');
       }
-    } else {
-      console.warn('⚠️ Este navegador não suporta Firebase Messaging');
-    }
-  }).catch((error) => {
-    console.error('❌ Erro ao verificar suporte do Firebase Messaging:', error);
-  });
+    })
+    .catch((error) => {
+      console.error('❌ Erro ao verificar suporte do Firebase Messaging:', error);
+    });
 }
 
 // Firebase Functions
 const functions = getFunctions(app, 'southamerica-east1');
 
-// Em desenvolvimento, conectar ao emulador
-// MODIFICAR a configuração do emulador
+// Em desenvolvimento, conectar aos emuladores
 if (process.env.NODE_ENV === 'development') {
   try {
-    // MANTER assim - está correto
-    connectFunctionsEmulator(functions, 'localhost', 5001);
-    console.log('🔧 Firebase Functions conectado ao emulador');
-    
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099');
+    console.log('🔧 Firebase Auth conectado ao emulador');
   } catch (error) {
-    console.warn('⚠️ Não foi possível conectar ao emulador de Functions:', error);
+    console.warn('⚠️ Não foi possível conectar Auth ao emulador:', error);
+  }
+
+  try {
+    connectFirestoreEmulator(firestore, '127.0.0.1', 8080);
+    console.log('🔧 Firestore conectado ao emulador');
+  } catch (error) {
+    console.warn('⚠️ Não foi possível conectar Firestore ao emulador:', error);
+  }
+
+  try {
+    connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+    console.log('🔧 Firebase Functions conectado ao emulador');
+  } catch (error) {
+    console.warn('⚠️ Não foi possível conectar Functions ao emulador:', error);
   }
 }
 

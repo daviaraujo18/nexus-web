@@ -1,6 +1,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { CallableContext } from 'firebase-functions/v1/https';
+import { createHash } from 'crypto';
 
 // Inicializar Firebase Admin
 if (!admin.apps.length) {
@@ -11,7 +12,7 @@ const db = admin.firestore();
 
 /**
  * Cloud Function para gerenciar tokens FCM dos usuários
- * 
+ *
  * Triggered quando:
  * 1. Um usuário se registra
  * 2. Um token precisa ser salvo/atualizado
@@ -19,7 +20,10 @@ const db = admin.firestore();
  */
 export const saveUserFCMToken = functions
   .region('southamerica-east1')
-  .https.onCall(async ( data: { token: string; deviceInfo?: any }, context: CallableContext ) => {
+  .https.onCall(async (
+    data: { token: string; deviceInfo?: any },
+    context: CallableContext
+  ) => {
     try {
       // Verificar autenticação
       if (!context.auth) {
@@ -28,30 +32,32 @@ export const saveUserFCMToken = functions
           'Usuário não autenticado'
         );
       }
-      
+
       const { token, deviceInfo } = data;
       const userId = context.auth.uid;
-      
+
       if (!token) {
         throw new functions.https.HttpsError(
           'invalid-argument',
           'Token FCM é obrigatório'
         );
       }
-      
+
       console.log(`💾 Salvando token FCM para usuário ${userId}`);
-      
+
       // Gerar ID único para o token (baseado no hash)
-      const tokenHash = await generateTokenHash(token);
+      const tokenHash = generateTokenHash(token);
       const tokenId = `${userId}_${tokenHash.substring(0, 16)}`;
-      
+
       // Preparar dados do token
       const tokenData = {
         tokenId,
         userId,
         token,
         deviceInfo: deviceInfo || {
-          platform: getPlatform(),
+          platform: getPlatformFromUserAgent(
+            String(context.rawRequest.headers['user-agent'] || '')
+          ),
           userAgent: context.rawRequest.headers['user-agent'] || 'unknown',
           timestamp: admin.firestore.FieldValue.serverTimestamp()
         },
@@ -60,25 +66,25 @@ export const saveUserFCMToken = functions
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         lastUsedAt: admin.firestore.FieldValue.serverTimestamp()
       };
-      
+
       // Salvar/atualizar token
       await db.collection('userFCMTokens')
         .doc(tokenId)
         .set(tokenData, { merge: true });
-      
+
       console.log(`✅ Token FCM salvo para usuário ${userId} (ID: ${tokenId})`);
-      
+
       // Atualizar preferências do usuário para habilitar push
       await updateUserNotificationPreferences(userId);
-      
+
       return {
         success: true,
         tokenId,
         message: 'Token FCM salvo com sucesso'
       };
-      
     } catch (error: any) {
       console.error('❌ Erro ao salvar token FCM:', error);
+
       throw new functions.https.HttpsError(
         'internal',
         error.message || 'Erro ao salvar token FCM'
@@ -99,53 +105,55 @@ export const removeUserFCMToken = functions
           'Usuário não autenticado'
         );
       }
-      
+
       const { token } = data;
       const userId = context.auth.uid;
-      
+
       if (!token) {
         throw new functions.https.HttpsError(
           'invalid-argument',
           'Token FCM é obrigatório'
         );
       }
-      
-      console.log(`🗑️  Removendo token FCM para usuário ${userId}`);
-      
+
+      console.log(`🗑️ Removendo token FCM para usuário ${userId}`);
+
       // Buscar token específico
       const tokensSnapshot = await db.collection('userFCMTokens')
         .where('userId', '==', userId)
         .where('token', '==', token)
         .get();
-      
+
       if (tokensSnapshot.empty) {
         return {
           success: true,
           message: 'Token não encontrado ou já removido'
         };
       }
-      
+
       // Marcar como inativo (não deletar para histórico)
       const batch = db.batch();
+
       tokensSnapshot.forEach(doc => {
         batch.update(doc.ref, {
           isActive: false,
           deactivatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          deactivationReason: 'user_request'
+          deactivationReason: 'user_request',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
       });
-      
+
       await batch.commit();
-      
+
       console.log(`✅ Token FCM removido para usuário ${userId}`);
-      
+
       return {
         success: true,
         message: 'Token FCM removido com sucesso'
       };
-      
     } catch (error: any) {
       console.error('❌ Erro ao remover token FCM:', error);
+
       throw new functions.https.HttpsError(
         'internal',
         error.message || 'Erro ao remover token FCM'
@@ -163,57 +171,56 @@ export const cleanupOldTokens = functions
   .onRun(async () => {
     try {
       console.log('🧹 Iniciando limpeza de tokens FCM antigos...');
-      
+
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      
+
       // Buscar tokens inativos há mais de 30 dias
       const oldTokensSnapshot = await db.collection('userFCMTokens')
         .where('isActive', '==', false)
         .where('deactivatedAt', '<', thirtyDaysAgo)
         .limit(1000)
         .get();
-      
+
       console.log(`📊 Tokens antigos encontrados: ${oldTokensSnapshot.size}`);
-      
+
       // Deletar em batch
       const batch = db.batch();
+
       oldTokensSnapshot.forEach(doc => {
         batch.delete(doc.ref);
       });
-      
+
       await batch.commit();
-      
+
       console.log(`✅ ${oldTokensSnapshot.size} tokens antigos removidos`);
-      
+
       return null;
-      
     } catch (error) {
       console.error('❌ Erro na limpeza de tokens:', error);
       throw error;
     }
   });
 
-// ========== FUNÇÕES AUXILIARES ==========
+/* =========================
+   FUNÇÕES AUXILIARES
+========================= */
 
-async function generateTokenHash(token: string): Promise<string> {
-  // Usar Web Crypto API para gerar hash seguro
-  const encoder = new TextEncoder();
-  const data = encoder.encode(token);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+function generateTokenHash(token: string): string {
+  return createHash('sha256')
+    .update(token)
+    .digest('hex');
 }
 
-function getPlatform(): string {
-  const userAgent = navigator.userAgent.toLowerCase();
-  
-  if (userAgent.includes('android')) return 'android';
-  if (userAgent.includes('iphone') || userAgent.includes('ipad')) return 'ios';
-  if (userAgent.includes('windows')) return 'windows';
-  if (userAgent.includes('mac')) return 'macos';
-  if (userAgent.includes('linux')) return 'linux';
-  
+function getPlatformFromUserAgent(userAgent: string): string {
+  const normalizedUserAgent = userAgent.toLowerCase();
+
+  if (normalizedUserAgent.includes('android')) return 'android';
+  if (normalizedUserAgent.includes('iphone') || normalizedUserAgent.includes('ipad')) return 'ios';
+  if (normalizedUserAgent.includes('windows')) return 'windows';
+  if (normalizedUserAgent.includes('mac')) return 'macos';
+  if (normalizedUserAgent.includes('linux')) return 'linux';
+
   return 'web';
 }
 
@@ -221,7 +228,7 @@ async function updateUserNotificationPreferences(userId: string): Promise<void> 
   try {
     const prefsRef = db.collection('notificationPreferences').doc(userId);
     const prefsDoc = await prefsRef.get();
-    
+
     if (prefsDoc.exists) {
       // Atualizar existente
       await prefsRef.update({
@@ -240,8 +247,8 @@ async function updateUserNotificationPreferences(userId: string): Promise<void> 
           sms: false
         },
         allowedHours: {
-          start: "08:00",
-          end: "21:00"
+          start: '08:00',
+          end: '21:00'
         },
         allowedDays: [1, 2, 3, 4, 5],
         types: {
@@ -257,7 +264,7 @@ async function updateUserNotificationPreferences(userId: string): Promise<void> 
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
     }
-    
+
     console.log(`✅ Preferências atualizadas para usuário ${userId}`);
   } catch (error) {
     console.error('❌ Erro ao atualizar preferências:', error);

@@ -29,6 +29,7 @@ const registerSchema = z.object({
   email: z.string().email('Email inválido'),
   password: z.string().min(6),
   confirmPassword: z.string(),
+
   // Campos opcionais
   cpf: z.string().optional(),
   birthday: z.string().optional(),
@@ -87,8 +88,8 @@ interface AuthFormProps {
   defaultUserType?: 'student' | 'professional';
   onSuccess?: (result: any) => void;
   onError?: (error: AuthError) => void;
-  onSubmit?: (data: any) => Promise<void>; // ← NOVO
-  loading?: boolean; // ← NOVO
+  onSubmit?: (data: any) => Promise<void>;
+  loading?: boolean;
 }
 
 /* =========================
@@ -99,15 +100,17 @@ export default function AuthForm({
   mode,
   defaultUserType = 'student',
   onSuccess,
-  onError
+  onError,
+  onSubmit: externalSubmit,
+  loading: externalLoading = false
 }: AuthFormProps) {
-
   const [userType, setUserType] =
     useState<'student' | 'professional'>(defaultUserType);
 
-  const [loading, setLoading] = useState(false);
+  const [internalLoading, setInternalLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const loading = externalLoading || internalLoading;
   const schema = mode === 'login' ? loginSchema : registerSchema;
 
   const {
@@ -120,41 +123,45 @@ export default function AuthForm({
     resolver: zodResolver(schema),
     defaultValues: mode === 'register'
       ? {
-        type: userType,
-        name: '',
-        email: '',
-        password: '',
-        confirmPassword: '',
-        role: 'psychologist' // Valor padrão
-      }
+          type: userType,
+          name: '',
+          email: '',
+          password: '',
+          confirmPassword: '',
+          role: 'psychologist'
+        }
       : {
-        email: '',
-        password: ''
-      }
+          email: '',
+          password: ''
+        }
   });
 
   const password = watch('password');
   const confirmPassword = watch('confirmPassword');
-  const currentRole = watch('role');
 
-  const onSubmit = async (data: AuthFormData) => {
-    setLoading(true);
+  const handleFormSubmit = async (data: AuthFormData) => {
     setError('');
 
     try {
+      // ✅ Quando houver submit externo, respeitar o container
+      if (externalSubmit) {
+        await externalSubmit(data);
+        return;
+      }
+
+      setInternalLoading(true);
+
       let result;
 
       if (mode === 'login') {
         result = await AuthService.login(data.email, data.password);
       } else {
-        // Crie um objeto completo com todos os dados
         const registerData = {
           type: userType,
           name: data.name || '',
           email: data.email,
           password: data.password,
           confirmPassword: data.confirmPassword || '',
-          // Inclua todos os campos condicionalmente
           ...(userType === 'student' && {
             cpf: data.cpf,
             birthday: data.birthday,
@@ -185,7 +192,7 @@ export default function AuthForm({
       setError(authError.message);
       onError?.(authError);
     } finally {
-      setLoading(false);
+      setInternalLoading(false);
     }
   };
 
@@ -196,8 +203,7 @@ export default function AuthForm({
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           ⚠️ {error}
@@ -278,7 +284,6 @@ export default function AuthForm({
       >
         {loading ? 'Processando...' : mode === 'login' ? 'Entrar' : 'Criar conta'}
       </button>
-
     </form>
   );
 }
