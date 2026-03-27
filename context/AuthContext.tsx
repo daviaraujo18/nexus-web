@@ -1,108 +1,120 @@
-// context/AuthContext.tsx - REFATORADO E CORRIGIDO
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+} from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/firebase/config';
-import { AuthContextType, User, LoginResult, RegisterResult, AuthError } from '@/types';
+import { AuthContextType, User, LoginResult, RegisterResult } from '@/types';
 import { usePathname, useRouter } from 'next/navigation';
 import { AuthService } from '@/lib/auth/AuthService';
 import { UserService } from '@/lib/auth/UserService';
 import { NotificationService } from '@/lib/services/NotificationService';
-import { getToken } from 'firebase/messaging';
-import { messaging } from '@/firebase/config';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
   const router = useRouter();
   const pathname = usePathname();
-  const [profileReady, setProfileReady] = useState(false);
 
+  const buildFallbackUser = (
+    userId: string,
+    userType: 'student' | 'professional',
+    email?: string | null
+  ): User =>
+    ({
+      id: userId,
+      userId,
+      email: email ?? '',
+      name: 'Usuário',
+      role: userType,
+      type: userType,
+      active: true,
+      profile:
+        userType === 'student'
+          ? {
+              totalPoints: 0,
+              streak: 0,
+              level: 1,
+            }
+          : undefined,
+    } as unknown as User);
 
-  // Função para buscar usuário completo
-  const fetchUserData = async (userId: string): Promise<User | null> => {
-    const getFullData = async () => {
-      const userType = await UserService.getUserType(userId);
-      return await UserService.getUser(userId, userType) as User;
-    };
-
+  const fetchUserData = async (
+    userId: string,
+    userType?: 'student' | 'professional',
+    email?: string | null
+  ): Promise<User | null> => {
     try {
-      const data = await getFullData();
-      setProfileReady(true);
-      return data;
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'User profile not found or inactive') {
-        console.log('⏳ Profile ainda não criado, aguardando...');
-        setProfileReady(false);
+      const resolvedType = userType ?? (await UserService.getUserType(userId, email ?? undefined));
+      const data = (await UserService.getUser(userId, resolvedType)) as User;
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        try {
-          const retryData = await getFullData();
-          setProfileReady(true);
-          return retryData;
-        } catch {
-          setProfileReady(false);
-          return null;
-        }
+      return {
+        ...data,
+        id: (data as any).id ?? userId,
+        userId: (data as any).userId ?? userId,
+        role: (data as any).role ?? resolvedType,
+        type: (data as any).type ?? resolvedType,
+        profile:
+          resolvedType === 'student'
+            ? {
+                totalPoints: (data as any)?.profile?.totalPoints ?? 0,
+                streak: (data as any)?.profile?.streak ?? 0,
+                level: (data as any)?.profile?.level ?? 1,
+              }
+            : (data as any)?.profile,
+      } as User;
+    } catch (error) {
+      console.warn('⚠️ Falha ao buscar perfil completo, usando fallback:', error);
+      if (userType) {
+        return buildFallbackUser(userId, userType, email);
       }
-
-      setProfileReady(false);
       return null;
     }
   };
 
-  // Login unificado com redirecionamento
+  const registerFCMToken = async (userId: string) => {
+    try {
+      console.log('🔄 Registrando token FCM para notificações...');
+      const token = await NotificationService.requestFCMToken(userId);
+
+      if (token) {
+        console.log('✅ Token FCM registrado com sucesso');
+      } else {
+        console.log('⚠️ Token FCM não obtido');
+      }
+    } catch (error) {
+      console.warn('⚠️ Erro ao registrar token FCM:', error);
+    }
+  };
+
   const login = async (email: string, password: string): Promise<LoginResult> => {
     setLoading(true);
+
     try {
       const result = await AuthService.login(email, password);
 
-      // Buscar dados completos do usuário
-      const userData = await fetchUserData(result.userId);
-      if (userData) {
-        setUser(userData);
+      const userData =
+        (await fetchUserData(result.userId, result.userType, email)) ??
+        buildFallbackUser(result.userId, result.userType, email);
 
-        // Redirecionar baseado no tipo
-        if (result.userType === 'professional') {
-          router.push('/professional/dashboard');
-        } else {
-          router.push('/student/dashboard');
-        }
-      }
+      setUser(userData);
 
-      if (result.success) {
-        // REGISTRAR TOKEN FCM APÓS LOGIN BEM-SUCEDIDO
-        try {
-          // Aguardar um pouco para garantir que o usuário está carregado
-          setTimeout(async () => {
-            if (user && user.id) {
-              console.log('🔄 Registrando token FCM para notificações...');
+      await registerFCMToken(result.userId);
 
-              // Solicitar permissão e token FCM
-              const token = await NotificationService.requestFCMToken(user.id);
+      const targetPath =
+        result.userType === 'student'
+          ? '/student/dashboard'
+          : '/professional/dashboard';
 
-              if (token) {
-                console.log('✅ Token FCM registrado com sucesso');
-
-                // Configurar listener para mensagens em foreground
-                NotificationService.setupForegroundMessageListener((payload) => {
-                  console.log('Notificação recebida em foreground:', payload);
-                  // Aqui você pode mostrar um toast ou atualizar UI
-                });
-              } else {
-                console.log('⚠️ Token FCM não obtido (usuário pode ter negado)');
-              }
-            }
-          }, 1000);
-        } catch (fcmError) {
-          console.warn('⚠️ Erro ao registrar token FCM:', fcmError);
-          // Não falhar o login por causa do FCM
-        }
-      }
+      router.replace(targetPath);
 
       return result;
     } catch (error: any) {
@@ -113,17 +125,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Registro unificado com redirecionamento
   const register = async (data: any): Promise<RegisterResult> => {
     setLoading(true);
+
     try {
       const result = await AuthService.register(data);
 
-      // Se registro foi bem sucedido, fazer login automático
       if (result.success && result.userId) {
-        // Em produção, aqui faríamos login automático ou redirecionaria para confirmação
-        // Por enquanto, redirecionar para login
-        router.push('/login');
+        router.replace('/login');
       }
 
       return result;
@@ -135,50 +144,55 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Logout com redirecionamento
   const logout = async (): Promise<void> => {
     try {
       await AuthService.logout();
       setUser(null);
-      router.push('/login');
+      router.replace('/login');
     } catch (error: any) {
       console.error('❌ Erro no logout:', error);
       throw error;
     }
   };
 
-  // Listener de estado de autenticação SIMPLIFICADO
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          const userData = await fetchUserData(firebaseUser.uid);
-          setUser(userData);
-        } catch (error) {
-          console.error('Error fetching user on auth state change:', error);
+      try {
+        if (!firebaseUser) {
           setUser(null);
+          setLoading(false);
+          return;
         }
-      } else {
+
+        const resolvedType = await UserService.getUserType(
+          firebaseUser.uid,
+          firebaseUser.email ?? undefined
+        );
+
+        const userData =
+          (await fetchUserData(firebaseUser.uid, resolvedType, firebaseUser.email)) ??
+          buildFallbackUser(firebaseUser.uid, resolvedType, firebaseUser.email);
+
+        setUser(userData);
+      } catch (error) {
+        console.warn('⚠️ Erro ao hidratar usuário autenticado:', error);
         setUser(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Redirecionamento baseado em autenticação - LÓGICA SIMPLIFICADA
   useEffect(() => {
     if (loading) return;
-
-    // 🚨 NOVA TRAVA
-    if (!profileReady) return;
 
     const publicPaths = ['/login', '/register', '/', '/forgot-password'];
     const isPublicPath = publicPaths.includes(pathname);
 
     if (!user && !isPublicPath) {
-      router.push('/login');
+      router.replace('/login');
       return;
     }
 
@@ -188,18 +202,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           ? '/student/dashboard'
           : '/professional/dashboard';
 
-      router.push(targetPath);
+      router.replace(targetPath);
       return;
     }
 
     if (user) {
       if (user.role === 'student' && pathname.startsWith('/professional')) {
-        router.push('/student/dashboard');
+        router.replace('/student/dashboard');
       } else if (user.role !== 'student' && pathname.startsWith('/student')) {
-        router.push('/professional/dashboard');
+        router.replace('/professional/dashboard');
       }
     }
-  }, [user, loading, profileReady, pathname]);
+  }, [user, loading, pathname, router]);
 
   const value: AuthContextType = {
     user,
@@ -209,17 +223,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     logout,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
+
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
+
   return context;
 };

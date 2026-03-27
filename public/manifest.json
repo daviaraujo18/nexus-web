@@ -1,0 +1,6 @@
+{
+  "name": "Nexus",
+  "short_name": "Nexus",
+  "start_url": "/",
+  "display": "standalone"
+}

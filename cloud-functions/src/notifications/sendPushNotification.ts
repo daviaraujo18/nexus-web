@@ -1,203 +1,211 @@
-import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
-import cors from 'cors';
+import * as functions from 'firebase-functions';
 
-// Inicializar Firebase Admin
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const db = admin.firestore();
-
-/* =========================
-   TYPES
-========================= */
-
-interface SendPushNotificationBody {
-  userId?: string;
-  title?: string;
-  body?: string;
-  data?: Record<string, unknown>;
-  type?: string;
-}
-
-/* =========================
-   FUNCTION
-========================= */
+type TokenDoc = {
+  docId: string;
+  token: string;
+  updatedAtMillis: number;
+};
 
 export const sendPushNotification = functions
   .region('southamerica-east1')
-  .https.onRequest((req, res) => {
-    const corsHandler = cors({ origin: true });
+  .https.onCall(async (data, context) => {
+    try {
+      console.log('🔥 sendPushNotification payload:', JSON.stringify(data));
 
-    return corsHandler(req, res, async () => {
-      try {
-        // Permitir apenas POST
-        if (req.method !== 'POST') {
-          res.status(405).json({
-            success: false,
-            error: 'Método não permitido'
-          });
-          return;
+      const payload = data ?? {};
+
+      const userId =
+        typeof payload.userId === 'string' ? payload.userId : null;
+
+      const title =
+        typeof payload.title === 'string'
+          ? payload.title
+          : typeof payload?.notification?.title === 'string'
+            ? payload.notification.title
+            : null;
+
+      const body =
+        typeof payload.body === 'string'
+          ? payload.body
+          : typeof payload?.notification?.body === 'string'
+            ? payload.notification.body
+            : null;
+
+      const extraData =
+        payload?.data && typeof payload.data === 'object'
+          ? payload.data
+          : {};
+
+      if (!userId) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'userId é obrigatório.'
+        );
+      }
+
+      if (!title || !body) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'title e body são obrigatórios.'
+        );
+      }
+
+      const db = admin.firestore();
+
+      const tokensSnap = await db
+        .collection('userFCMTokens')
+        .where('userId', '==', userId)
+        .where('active', '==', true)
+        .get();
+
+      console.log('🔥 DOCS DE TOKEN:', tokensSnap.size);
+
+      if (tokensSnap.empty) {
+        throw new functions.https.HttpsError(
+          'not-found',
+          'Nenhum token FCM ativo encontrado para o usuário.'
+        );
+      }
+
+      const rawTokenDocs: TokenDoc[] = tokensSnap.docs
+        .map((docSnap) => {
+          const data = docSnap.data();
+          const token = data?.token;
+          const updatedAt = data?.updatedAt;
+          const createdAt = data?.createdAt;
+
+          const updatedAtMillis =
+            updatedAt && typeof updatedAt.toMillis === 'function'
+              ? updatedAt.toMillis()
+              : createdAt && typeof createdAt.toMillis === 'function'
+                ? createdAt.toMillis()
+                : 0;
+
+          return {
+            docId: docSnap.id,
+            token,
+            updatedAtMillis,
+          };
+        })
+        .filter((item): item is TokenDoc => typeof item.token === 'string' && item.token.length > 0);
+
+      if (rawTokenDocs.length === 0) {
+        throw new functions.https.HttpsError(
+          'not-found',
+          'Nenhum token FCM válido encontrado.'
+        );
+      }
+
+      rawTokenDocs.sort((a, b) => b.updatedAtMillis - a.updatedAtMillis);
+
+      const uniqueTokenDocs: TokenDoc[] = [];
+      const duplicateDocIdsToDisable: string[] = [];
+      const seenTokens = new Set<string>();
+
+      for (const item of rawTokenDocs) {
+        if (seenTokens.has(item.token)) {
+          duplicateDocIdsToDisable.push(item.docId);
+          continue;
         }
 
-        const {
-          userId,
+        seenTokens.add(item.token);
+        uniqueTokenDocs.push(item);
+      }
+
+      if (duplicateDocIdsToDisable.length > 0) {
+        await Promise.all(
+          duplicateDocIdsToDisable.map((docId) =>
+            db.collection('userFCMTokens').doc(docId).update({
+              active: false,
+              invalidatedAt: admin.firestore.Timestamp.now(),
+              lastErrorCode: 'duplicate-token-doc',
+              lastErrorMessage: 'Documento duplicado do mesmo token foi desativado.',
+            })
+          )
+        );
+      }
+
+      const tokens = uniqueTokenDocs.map((item) => item.token);
+
+      const message: admin.messaging.MulticastMessage = {
+        tokens,
+        notification: {
           title,
           body,
-          data = {},
-          type = 'custom'
-        } = (req.body || {}) as SendPushNotificationBody;
-
-        // Validar payload mínimo
-        if (!userId || !title || !body) {
-          res.status(400).json({
-            success: false,
-            error: 'Parâmetros obrigatórios ausentes: userId, title, body'
-          });
-          return;
-        }
-
-        console.log('📥 Payload recebido:', { userId, title, type });
-
-        // Buscar tokens ativos do usuário
-        const tokensSnapshot = await db
-          .collection('userFCMTokens')
-          .where('userId', '==', userId)
-          .where('isActive', '==', true)
-          .get();
-
-        if (tokensSnapshot.empty) {
-          res.status(404).json({
-            success: false,
-            error: 'Nenhum token ativo encontrado para o usuário'
-          });
-          return;
-        }
-
-        const tokenDocs = tokensSnapshot.docs.filter(doc => !!doc.data().token);
-        const tokens = tokenDocs.map(doc => String(doc.data().token));
-
-        if (tokens.length === 0) {
-          res.status(404).json({
-            success: false,
-            error: 'Nenhum token válido encontrado para o usuário'
-          });
-          return;
-        }
-
-        console.log('✅ Tokens encontrados:', tokens.length);
-
-        // Converter data para string, como o FCM exige
-        const stringifiedData = Object.entries(data).reduce<Record<string, string>>(
+        },
+        data: Object.entries(extraData).reduce<Record<string, string>>(
           (acc, [key, value]) => {
-            acc[key] = String(value);
+            acc[key] =
+              typeof value === 'string' ? value : JSON.stringify(value);
             return acc;
           },
           {}
-        );
-
-        const message: admin.messaging.MulticastMessage = {
-          tokens,
+        ),
+        webpush: {
           notification: {
             title,
-            body
+            body,
+            icon: '/icons/icon-192x192.png',
           },
-          data: {
-            ...stringifiedData,
-            type: String(type)
-          },
-          webpush: {
-            notification: {
-              title,
-              body,
-              icon: '/icons/icon-192x192.png',
-              badge: '/icons/badge-72x72.png'
-            }
-          }
-        };
+        },
+      };
 
-        console.log('📤 Enviando push via FCM...');
+      const response = await admin.messaging().sendEachForMulticast(message);
 
-        const response = await admin.messaging().sendEachForMulticast(message);
+      const failures = response.responses
+        .map((r, index) => ({
+          success: r.success,
+          errorCode: r.error?.code ?? null,
+          errorMessage: r.error?.message ?? null,
+          token: tokens[index] ?? null,
+          docId: uniqueTokenDocs[index]?.docId ?? null,
+        }))
+        .filter((item) => !item.success);
 
-        console.log('📊 Resultado do envio:', {
-          successCount: response.successCount,
-          failureCount: response.failureCount
-        });
+      console.log('🔥 RESULTADO FCM:', {
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+        failures,
+      });
 
-        // Limpar tokens inválidos
-        await cleanupInvalidTokens(tokenDocs, response.responses);
-
-        // Salvar histórico da notificação
-        await db.collection('notifications').add({
-          userId,
-          title,
-          body,
-          type,
-          channels: ['push'],
-          status: response.successCount > 0 ? 'sent' : 'failed',
-          data,
-          successCount: response.successCount,
-          failureCount: response.failureCount,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        console.log('✅ Histórico salvo em notifications');
-
-        res.status(200).json({
-          success: response.successCount > 0,
-          successCount: response.successCount,
-          failureCount: response.failureCount,
-          message: 'Notificação processada com sucesso'
-        });
-      } catch (error: any) {
-        console.error('❌ Erro ao enviar push notification:', error);
-
-        res.status(500).json({
-          success: false,
-          error: error.message || 'Erro interno ao enviar notificação'
-        });
+      for (const failure of failures) {
+        if (
+          failure.docId &&
+          (
+            failure.errorCode === 'messaging/registration-token-not-registered' ||
+            failure.errorCode === 'messaging/invalid-registration-token'
+          )
+        ) {
+          await db.collection('userFCMTokens').doc(failure.docId).update({
+            active: false,
+            invalidatedAt: admin.firestore.Timestamp.now(),
+            lastErrorCode: failure.errorCode,
+            lastErrorMessage: failure.errorMessage,
+          });
+        }
       }
-    });
-  });
 
-/* =========================
-   HELPERS
-========================= */
+      return {
+        success: true,
+        sent: response.successCount,
+        failed: response.failureCount,
+        failures,
+      };
+    } catch (error) {
+      console.error('❌ ERRO FINAL sendPushNotification:', error);
 
-async function cleanupInvalidTokens(
-  tokenDocs: FirebaseFirestore.QueryDocumentSnapshot[],
-  responses: admin.messaging.SendResponse[]
-): Promise<void> {
-  const batch = db.batch();
-  let hasUpdates = false;
-
-  for (let index = 0; index < responses.length; index += 1) {
-    const response = responses[index];
-
-    if (!response.success) {
-      const errorCode = response.error?.code || '';
-
-      // Tokens inválidos/expirados
-      if (
-        errorCode.includes('registration-token-not-registered') ||
-        errorCode.includes('invalid-registration-token')
-      ) {
-        batch.update(tokenDocs[index].ref, {
-          isActive: false,
-          deactivatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          deactivationReason: errorCode,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        hasUpdates = true;
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
       }
+
+      throw new functions.https.HttpsError(
+        'internal',
+        'Falha ao enviar push.'
+      );
     }
-  }
-
-  if (hasUpdates) {
-    await batch.commit();
-  }
-}
+  });

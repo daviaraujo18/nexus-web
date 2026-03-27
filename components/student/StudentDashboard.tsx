@@ -1,4 +1,3 @@
-// components/student/StudentDashboard.tsx - VERSÃO RESPONSIVA
 'use client';
 
 import React, { useState } from 'react';
@@ -28,7 +27,12 @@ interface StudentDashboardProps {
 export default function StudentDashboard({ showHeader = true }: StudentDashboardProps) {
   const { user } = useAuth();
   const student = user?.role === 'student' ? user : null;
-  
+  const profile = student?.profile ?? {
+    totalPoints: 0,
+    streak: 0,
+    level: 1,
+  };
+
   const {
     todayActivities,
     instances,
@@ -40,7 +44,6 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
 
   const [todaysDate] = useState(new Date());
 
-  // Formatadores
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('pt-BR', {
       weekday: 'long',
@@ -57,10 +60,11 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     return 'Boa noite';
   };
 
-  // Estatísticas calculadas
   const completedToday = todayActivities.filter(a => a.status === 'completed').length;
   const pendingToday = todayActivities.filter(a => a.status === 'pending').length;
-  const completionRate = totalTodayActivities > 0 ? Math.round((completedToday / totalTodayActivities) * 100) : 0;
+  const completionRate = totalTodayActivities > 0
+    ? Math.round((completedToday / totalTodayActivities) * 100)
+    : 0;
 
   const getMotivationalMessage = () => {
     const messages = [
@@ -81,7 +85,9 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
             <div className="w-16 h-16 border-4 border-purple-200 rounded-full"></div>
             <div className="w-16 h-16 border-4 border-purple-600 border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
           </div>
-          <p className="mt-4 text-slate-600 font-medium text-sm md:text-base">Preparando seu dashboard...</p>
+          <p className="mt-4 text-slate-600 font-medium text-sm md:text-base">
+            Preparando seu dashboard...
+          </p>
         </div>
       </div>
     );
@@ -94,7 +100,9 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <span className="text-2xl">⚠️</span>
           </div>
-          <h2 className="text-lg md:text-xl font-semibold text-slate-800 mb-2">Erro ao carregar</h2>
+          <h2 className="text-lg md:text-xl font-semibold text-slate-800 mb-2">
+            Erro ao carregar
+          </h2>
           <p className="text-slate-600 mb-6 text-sm md:text-base">{error}</p>
           <button
             onClick={refresh}
@@ -109,7 +117,6 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
 
   return (
     <div className="min-h-screen">
-      {/* Header com Boas-vindas - Design Inspirador */}
       {showHeader && (
         <div className="bg-gradient-to-r from-indigo-500 to-violet-500 rounded-xl md:rounded-2xl p-4 md:p-6 mb-4 md:mb-6 text-white shadow-xl shadow-indigo-200">
           <div className="mb-6 md:mb-8">
@@ -120,16 +127,17 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaCrown />
                 </span>
               </h1>
-              <p className="text-indigo-100 text-sm md:text-base">{getMotivationalMessage()}</p>
+              <p className="text-indigo-100 text-sm md:text-base">
+                {getMotivationalMessage()}
+              </p>
             </div>
-            
+
             <div className="flex items-center gap-2 text-indigo-100 text-xs md:text-sm">
               <FaCalendarDay className="w-3 h-3 md:w-4 md:h-4" />
               <span className="font-medium">{formatDate(todaysDate)}</span>
             </div>
           </div>
 
-          {/* Stats Overview - Design Inspirador */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
             <div className="bg-white/20 backdrop-blur-sm rounded-lg md:rounded-xl p-3 md:p-4 border border-white/30 shadow-lg">
               <div className="flex items-center gap-2 md:gap-3">
@@ -137,8 +145,12 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaTrophy className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{student?.profile.totalPoints || 0}</div>
-                  <div className="text-xs md:text-sm text-white/90 truncate">Pontos Totais</div>
+                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">
+                    {profile.totalPoints ?? 0}
+                  </div>
+                  <div className="text-xs md:text-sm text-white/90 truncate">
+                    Pontos Totais
+                  </div>
                 </div>
               </div>
             </div>
@@ -149,8 +161,12 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaFire className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{student?.profile.streak || 0}</div>
-                  <div className="text-xs md:text-sm text-white/90 truncate">Dias Seguidos</div>
+                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">
+                    {profile.streak ?? 0}
+                  </div>
+                  <div className="text-xs md:text-sm text-white/90 truncate">
+                    Dias Seguidos
+                  </div>
                 </div>
               </div>
             </div>
@@ -161,8 +177,12 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaChartLine className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">Nível {student?.profile.level || 1}</div>
-                  <div className="text-xs md:text-sm text-white/90 truncate">Seu Nível</div>
+                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">
+                    Nível {profile.level ?? 1}
+                  </div>
+                  <div className="text-xs md:text-sm text-white/90 truncate">
+                    Seu Nível
+                  </div>
                 </div>
               </div>
             </div>
@@ -173,18 +193,20 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaCheckCircle className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{completionRate}%</div>
-                  <div className="text-xs md:text-sm text-white/90 truncate">Hoje</div>
+                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">
+                    {completionRate}%
+                  </div>
+                  <div className="text-xs md:text-sm text-white/90 truncate">
+                    Hoje
+                  </div>
                 </div>
               </div>
             </div>
-          </div> 
+          </div>
         </div>
       )}
 
-      {/* Conteúdo Principal - Grid responsivo */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-        {/* SEÇÃO PRINCIPAL - Atividades */}
         <div className="lg:col-span-2 space-y-4 md:space-y-6">
           <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6">
             <div className="flex flex-row sm:flex-row sm:items-center justify-between gap-2 mb-4 md:mb-6">
@@ -202,7 +224,9 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
             {totalTodayActivities === 0 ? (
               <div className="text-center py-8 md:py-12 border-2 border-dashed border-slate-200 rounded-xl">
                 <FaLightbulb className="w-10 h-10 md:w-12 md:h-12 text-slate-300 mx-auto mb-4" />
-                <h3 className="text-lg md:text-xl font-bold text-slate-700 mb-2">Dia de descanso! 🎉</h3>
+                <h3 className="text-lg md:text-xl font-bold text-slate-700 mb-2">
+                  Dia de descanso! 🎉
+                </h3>
                 <p className="text-slate-500 mb-6 px-2 md:px-0 text-sm md:text-base max-w-md mx-auto">
                   Você não tem atividades programadas para hoje. Aproveite para revisar conteúdos ou explorar novos aprendizados!
                 </p>
@@ -225,61 +249,47 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
               </div>
             ) : (
               <>
-                {/* Progresso do Dia - Design Inspirador */}
                 <div className="bg-slate-50 rounded-xl p-4 md:p-5 mb-4 md:mb-6 border border-slate-200">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 md:mb-4">
                     <div>
-                      <div className="text-slate-600 font-medium text-sm md:text-base mb-1">Progresso do Dia</div>
-                      <div className="text-2xl md:text-3xl font-bold text-slate-800">{completionRate}%</div>
+                      <div className="text-slate-600 font-medium text-sm md:text-base mb-1">
+                        Progresso do Dia
+                      </div>
+                      <div className="text-2xl md:text-3xl font-bold text-slate-800">
+                        {completionRate}%
+                      </div>
                     </div>
                     <div className="flex items-center gap-2 text-slate-500 text-sm">
                       <FaClock className="w-3 h-3 md:w-4 md:h-4" />
                       <span className="font-medium">
-                        {todayActivities.reduce((total, a) => total + a.activitySnapshot.metadata.estimatedDuration, 0)} min total
+                        {todayActivities.reduce(
+                          (total, a) => total + a.activitySnapshot.metadata.estimatedDuration,
+                          0
+                        )}{' '}
+                        min total
                       </span>
                     </div>
                   </div>
                   <div className="w-full h-2 md:h-3 bg-slate-200 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full transition-all duration-500"
                       style={{ width: `${completionRate}%` }}
                     />
                   </div>
                 </div>
 
-                {/* Componente TodayActivities mantido */}
                 <div>
                   <TodayActivities
                     activities={todayActivities}
                     onActivityUpdate={refresh}
                   />
                 </div>
-
-                {/* Quick Actions - Mobile hidden, Desktop visible 
-                <div className="hidden md:flex gap-4 mt-6">
-                  <Link
-                    href="/student/schedules"
-                    className="flex-1 inline-flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white px-4 py-3 md:px-6 md:py-4 rounded-xl font-bold hover:shadow-lg hover:shadow-indigo-200 transition-all text-sm md:text-base"
-                  >
-                    <FaCalendarDay className="w-4 h-4 md:w-5 md:h-5" />
-                    <span className="whitespace-nowrap">Ver Cronograma Completo</span>
-                  </Link>
-                  <Link
-                    href="/student/programs"
-                    className="flex-1 inline-flex items-center justify-center gap-3 bg-white text-indigo-600 border-2 border-slate-200 px-4 py-3 md:px-6 md:py-4 rounded-xl font-bold hover:bg-slate-50 transition-colors text-sm md:text-base"
-                  >
-                    <FaBook className="w-4 h-4 md:w-5 md:h-5" />
-                    <span className="whitespace-nowrap">Meus Programas</span>
-                  </Link>
-                </div>*/}
               </>
             )}
           </div>
         </div>
 
-        {/* SIDEBAR - Design Inspirador */}
         <div className="space-y-4 md:space-y-6">
-          {/* Cronogramas */}
           <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6">
             <div className="flex justify-between items-center mb-3 md:mb-4">
               <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm md:text-base">
@@ -304,7 +314,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                     href={`/student/schedules/${instance.id}`}
                     className="flex items-center gap-2 md:gap-3 p-3 md:p-4 bg-slate-50 rounded-lg md:rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors"
                   >
-                    <div 
+                    <div
                       className="w-2 h-2 md:w-3 md:h-3 rounded-full flex-shrink-0"
                       style={{ backgroundColor: '#8b5cf6' }}
                     />
@@ -314,16 +324,18 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                       </div>
                       <div className="flex items-center gap-2 md:gap-3 mt-1">
                         <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                          <div 
+                          <div
                             className="h-full rounded-full"
-                            style={{ 
+                            style={{
                               width: `${instance.progressCache?.completionPercentage || 0}%`,
                               backgroundColor: '#8b5cf6'
                             }}
                           />
                         </div>
                         <span className="text-xs md:text-sm font-semibold text-slate-600 min-w-6 md:min-w-10">
-                          {(instance.progressCache?.completionPercentage) && Math.round(instance.progressCache?.completionPercentage) || 0}%
+                          {(instance.progressCache?.completionPercentage &&
+                            Math.round(instance.progressCache?.completionPercentage)) || 0}
+                          %
                         </span>
                       </div>
                     </div>
@@ -333,11 +345,12 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
             )}
           </div>
 
-          {/* Lembretes */}
           <div className="bg-amber-50 rounded-xl md:rounded-2xl p-4 md:p-6 border border-amber-200">
             <div className="flex items-center gap-2 mb-3">
               <FaBell className="w-4 h-4 md:w-5 md:h-5 text-amber-600" />
-              <h4 className="font-bold text-amber-800 text-sm md:text-base">Lembretes</h4>
+              <h4 className="font-bold text-amber-800 text-sm md:text-base">
+                Lembretes
+              </h4>
             </div>
             <div className="space-y-2">
               {pendingToday > 0 && (
@@ -345,9 +358,9 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   Você tem {pendingToday} atividades pendentes para hoje
                 </div>
               )}
-              {student?.profile.streak !== undefined && student?.profile.streak > 0 && (
+              {(profile.streak ?? 0) > 0 && (
                 <div className="text-amber-700 text-xs md:text-sm bg-white/50 p-2 md:p-3 rounded-lg">
-                  Sequência de {student.profile.streak} dias! Continue assim! 🔥
+                  Sequência de {profile.streak} dias! Continue assim! 🔥
                 </div>
               )}
               {instances.length > 0 && (
@@ -357,26 +370,6 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
               )}
             </div>
           </div>
-
-          {/* Quick Actions para Mobile
-          {totalTodayActivities > 0 && (
-            <div className="md:hidden grid grid-cols-2 gap-3">
-              <Link
-                href="/student/schedules"
-                className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white px-4 py-3 rounded-lg font-semibold hover:shadow-md transition-all text-sm"
-              >
-                <FaCalendarDay className="w-3 h-3" />
-                <span>Cronograma</span>
-              </Link>
-              <Link
-                href="/student/programs"
-                className="inline-flex items-center justify-center gap-2 bg-white text-indigo-600 border border-slate-200 px-4 py-3 rounded-lg font-semibold hover:bg-slate-50 transition-colors text-sm"
-              >
-                <FaBook className="w-3 h-3" />
-                <span>Programas</span>
-              </Link>
-            </div>
-          )} */}
         </div>
       </div>
     </div>
