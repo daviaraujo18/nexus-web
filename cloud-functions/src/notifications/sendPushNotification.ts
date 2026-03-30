@@ -11,13 +11,42 @@ type TokenDoc = {
   updatedAtMillis: number;
 };
 
+type RawPayload = {
+  userId?: unknown;
+  title?: unknown;
+  body?: unknown;
+  notification?: {
+    title?: unknown;
+    body?: unknown;
+  };
+  data?: Record<string, unknown>;
+};
+
+function toStringMap(data: Record<string, unknown>): Record<string, string> {
+  return Object.entries(data).reduce<Record<string, string>>((acc, [key, value]) => {
+    if (value === undefined || value === null) {
+      return acc;
+    }
+
+    acc[key] = typeof value === 'string' ? value : JSON.stringify(value);
+    return acc;
+  }, {});
+}
+
 export const sendPushNotification = functions
   .region('southamerica-east1')
   .https.onCall(async (data, context) => {
     try {
       console.log('🔥 sendPushNotification payload:', JSON.stringify(data));
 
-      const payload = data ?? {};
+      if (!context.auth) {
+        throw new functions.https.HttpsError(
+          'unauthenticated',
+          'Usuário não autenticado.'
+        );
+      }
+
+      const payload = (data ?? {}) as RawPayload;
 
       const userId =
         typeof payload.userId === 'string' ? payload.userId : null;
@@ -25,19 +54,19 @@ export const sendPushNotification = functions
       const title =
         typeof payload.title === 'string'
           ? payload.title
-          : typeof payload?.notification?.title === 'string'
+          : typeof payload.notification?.title === 'string'
             ? payload.notification.title
             : null;
 
       const body =
         typeof payload.body === 'string'
           ? payload.body
-          : typeof payload?.notification?.body === 'string'
+          : typeof payload.notification?.body === 'string'
             ? payload.notification.body
             : null;
 
-      const extraData =
-        payload?.data && typeof payload.data === 'object'
+      const rawExtraData =
+        payload.data && typeof payload.data === 'object'
           ? payload.data
           : {};
 
@@ -74,10 +103,10 @@ export const sendPushNotification = functions
 
       const rawTokenDocs: TokenDoc[] = tokensSnap.docs
         .map((docSnap) => {
-          const data = docSnap.data();
-          const token = data?.token;
-          const updatedAt = data?.updatedAt;
-          const createdAt = data?.createdAt;
+          const docData = docSnap.data();
+          const token = docData?.token;
+          const updatedAt = docData?.updatedAt;
+          const createdAt = docData?.createdAt;
 
           const updatedAtMillis =
             updatedAt && typeof updatedAt.toMillis === 'function'
@@ -92,7 +121,10 @@ export const sendPushNotification = functions
             updatedAtMillis,
           };
         })
-        .filter((item): item is TokenDoc => typeof item.token === 'string' && item.token.length > 0);
+        .filter(
+          (item): item is TokenDoc =>
+            typeof item.token === 'string' && item.token.length > 0
+        );
 
       if (rawTokenDocs.length === 0) {
         throw new functions.https.HttpsError(
@@ -118,13 +150,16 @@ export const sendPushNotification = functions
       }
 
       if (duplicateDocIdsToDisable.length > 0) {
+        console.log('🧹 Desativando duplicados:', duplicateDocIdsToDisable);
+
         await Promise.all(
           duplicateDocIdsToDisable.map((docId) =>
             db.collection('userFCMTokens').doc(docId).update({
               active: false,
               invalidatedAt: admin.firestore.Timestamp.now(),
               lastErrorCode: 'duplicate-token-doc',
-              lastErrorMessage: 'Documento duplicado do mesmo token foi desativado.',
+              lastErrorMessage:
+                'Documento duplicado do mesmo token foi desativado.',
             })
           )
         );
@@ -132,25 +167,73 @@ export const sendPushNotification = functions
 
       const tokens = uniqueTokenDocs.map((item) => item.token);
 
+      console.log('🔥 TOKENS VÁLIDOS PARA ENVIO:', tokens.length);
+
+      const route =
+        typeof rawExtraData.route === 'string'
+          ? rawExtraData.route
+          : typeof rawExtraData.url === 'string'
+            ? rawExtraData.url
+            : typeof rawExtraData.clickAction === 'string'
+              ? rawExtraData.clickAction
+              : '/student/notifications';
+
+      const normalizedExtraData: Record<string, unknown> = {
+        ...rawExtraData,
+        route,
+        url:
+          typeof rawExtraData.url === 'string'
+            ? rawExtraData.url
+            : route,
+        clickAction:
+          typeof rawExtraData.clickAction === 'string'
+            ? rawExtraData.clickAction
+            : route,
+        type:
+          typeof rawExtraData.type === 'string'
+            ? rawExtraData.type
+            : 'general',
+        tag:
+          typeof rawExtraData.tag === 'string'
+            ? rawExtraData.tag
+            : 'nexus-notification',
+      };
+
+      const stringData = toStringMap(normalizedExtraData);
+
       const message: admin.messaging.MulticastMessage = {
         tokens,
         notification: {
           title,
           body,
         },
-        data: Object.entries(extraData).reduce<Record<string, string>>(
-          (acc, [key, value]) => {
-            acc[key] =
-              typeof value === 'string' ? value : JSON.stringify(value);
-            return acc;
-          },
-          {}
-        ),
+        data: stringData,
         webpush: {
           notification: {
             title,
             body,
-            icon: '/icons/icon-192x192.png',
+            icon:
+              typeof rawExtraData.icon === 'string'
+                ? rawExtraData.icon
+                : '/icons/icon-192x192.png',
+            badge:
+              typeof rawExtraData.badge === 'string'
+                ? rawExtraData.badge
+                : '/icons/badge-72x72.png',
+            tag:
+              typeof normalizedExtraData.tag === 'string'
+                ? normalizedExtraData.tag
+                : 'nexus-notification',
+            data: {
+              url: stringData.url,
+              clickAction: stringData.clickAction,
+              type: stringData.type,
+              entityId: stringData.entityId ?? '',
+              sentAt: stringData.sentAt ?? new Date().toISOString(),
+            },
+          },
+          fcmOptions: {
+            link: route,
           },
         },
       };
@@ -158,10 +241,10 @@ export const sendPushNotification = functions
       const response = await admin.messaging().sendEachForMulticast(message);
 
       const failures = response.responses
-        .map((r, index) => ({
-          success: r.success,
-          errorCode: r.error?.code ?? null,
-          errorMessage: r.error?.message ?? null,
+        .map((result, index) => ({
+          success: result.success,
+          errorCode: result.error?.code ?? null,
+          errorMessage: result.error?.message ?? null,
           token: tokens[index] ?? null,
           docId: uniqueTokenDocs[index]?.docId ?? null,
         }))
@@ -191,7 +274,7 @@ export const sendPushNotification = functions
       }
 
       return {
-        success: true,
+        success: response.failureCount === 0,
         sent: response.successCount,
         failed: response.failureCount,
         failures,

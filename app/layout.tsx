@@ -5,6 +5,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
 import { initMessaging } from '@/firebase/config';
+import ForegroundNotificationsBootstrap from '@/components/notifications/ForegroundNotificationsBootstrap';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -44,7 +45,7 @@ export default function RootLayout({
       }
     };
 
-    start();
+    void start();
   }, []);
 
   return (
@@ -55,7 +56,10 @@ export default function RootLayout({
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <ForegroundNotificationsBootstrap />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );
