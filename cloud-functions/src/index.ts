@@ -1,13 +1,15 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
 
-export { saveUserFCMToken } from './notifications/saveUserFCMToken';
-export { removeUserFCMToken } from './notifications/removeUserFCMToken';
-export { sendPushNotification } from './notifications/sendPushNotification';
-
 if (!admin.apps.length) {
   admin.initializeApp();
 }
+
+export { saveUserFCMToken } from './notifications/saveUserFCMToken';
+export { removeUserFCMToken } from './notifications/removeUserFCMToken';
+export { sendPushNotification } from './notifications/sendPushNotification';
+export { getUserNotificationPreferences } from './notifications/getUserNotificationPreferences';
+export { saveUserNotificationPreferences } from './notifications/saveUserNotificationPreferences';
 
 export const healthCheck = functions
   .region('southamerica-east1')
