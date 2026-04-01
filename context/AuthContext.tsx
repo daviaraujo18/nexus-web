@@ -9,13 +9,165 @@ import React, {
 } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/firebase/config';
-import { AuthContextType, User, LoginResult, RegisterResult } from '@/types';
+import { AuthContextType, User, LoginResult, RegisterResult, Student, Professional } from '@/types';
 import { usePathname, useRouter } from 'next/navigation';
 import { AuthService } from '@/lib/auth/AuthService';
 import { UserService } from '@/lib/auth/UserService';
 import { NotificationService } from '@/lib/services/NotificationService';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+type ResolvedUserType = 'student' | 'professional';
+
+const buildFallbackUser = (
+  userId: string,
+  userType: ResolvedUserType,
+  email?: string | null
+): User => {
+  const now = new Date();
+
+  if (userType === 'student') {
+    const fallbackStudent: Student = {
+      id: userId,
+      email: email ?? '',
+      name: 'Usuário',
+      role: 'student',
+      createdAt: now,
+      updatedAt: now,
+      isActive: true,
+      profileComplete: false,
+      profile: {
+        cpf: '',
+        birthday: now,
+        school: '',
+        grade: '',
+        assignedProfessionals: [],
+        assignedPrograms: [],
+        streak: 0,
+        totalPoints: 0,
+        level: 1,
+        achievements: [],
+      },
+    };
+
+    return fallbackStudent;
+  }
+
+  const fallbackProfessional: Professional = {
+    id: userId,
+    email: email ?? '',
+    name: 'Usuário',
+    role: 'psychologist',
+    createdAt: now,
+    updatedAt: now,
+    isActive: true,
+    profileComplete: false,
+    profile: {
+      cpf: '',
+      assignedStudents: [],
+      canCreatePrograms: false,
+      canManageStudents: false,
+      canApproveRegistrations: false,
+      verified: false,
+    },
+  };
+
+  return fallbackProfessional;
+};
+
+const normalizeUserData = (
+  rawData: any,
+  userId: string,
+  resolvedType: ResolvedUserType,
+  email?: string | null
+): User => {
+  const now = new Date();
+
+  if (resolvedType === 'student') {
+    const normalizedStudent: Student = {
+      ...rawData,
+      id: userId,
+      email: rawData?.email ?? email ?? '',
+      name: rawData?.name ?? 'Usuário',
+      role: 'student',
+      createdAt: rawData?.createdAt instanceof Date ? rawData.createdAt : now,
+      updatedAt: rawData?.updatedAt instanceof Date ? rawData.updatedAt : now,
+      isActive: typeof rawData?.isActive === 'boolean' ? rawData.isActive : true,
+      lastLoginAt: rawData?.lastLoginAt,
+      profileComplete:
+        typeof rawData?.profileComplete === 'boolean' ? rawData.profileComplete : false,
+      consentVersion: rawData?.consentVersion,
+      consentDate: rawData?.consentDate,
+      profile: {
+        cpf: rawData?.profile?.cpf ?? '',
+        birthday: rawData?.profile?.birthday instanceof Date ? rawData.profile.birthday : now,
+        phone: rawData?.profile?.phone,
+        school: rawData?.profile?.school ?? '',
+        grade: rawData?.profile?.grade ?? '',
+        parentName: rawData?.profile?.parentName,
+        parentEmail: rawData?.profile?.parentEmail,
+        parentPhone: rawData?.profile?.parentPhone,
+        medicalInfo: rawData?.profile?.medicalInfo,
+        address: rawData?.profile?.address,
+        assignedProfessionals: Array.isArray(rawData?.profile?.assignedProfessionals)
+          ? rawData.profile.assignedProfessionals
+          : [],
+        assignedPrograms: Array.isArray(rawData?.profile?.assignedPrograms)
+          ? rawData.profile.assignedPrograms
+          : [],
+        streak: rawData?.profile?.streak ?? 0,
+        totalPoints: rawData?.profile?.totalPoints ?? 0,
+        level: rawData?.profile?.level ?? 1,
+        achievements: Array.isArray(rawData?.profile?.achievements)
+          ? rawData.profile.achievements
+          : [],
+      },
+    };
+
+    return normalizedStudent;
+  }
+
+  const professionalRole: Professional['role'] =
+    rawData?.role === 'psychologist' ||
+    rawData?.role === 'psychiatrist' ||
+    rawData?.role === 'monitor' ||
+    rawData?.role === 'coordinator'
+      ? rawData.role
+      : 'psychologist';
+
+  const normalizedProfessional: Professional = {
+    ...rawData,
+    id: userId,
+    email: rawData?.email ?? email ?? '',
+    name: rawData?.name ?? 'Usuário',
+    role: professionalRole,
+    createdAt: rawData?.createdAt instanceof Date ? rawData.createdAt : now,
+    updatedAt: rawData?.updatedAt instanceof Date ? rawData.updatedAt : now,
+    isActive: typeof rawData?.isActive === 'boolean' ? rawData.isActive : true,
+    lastLoginAt: rawData?.lastLoginAt,
+    profileComplete:
+      typeof rawData?.profileComplete === 'boolean' ? rawData.profileComplete : false,
+    consentVersion: rawData?.consentVersion,
+    consentDate: rawData?.consentDate,
+    profile: {
+      cpf: rawData?.profile?.cpf ?? '',
+      licenseNumber: rawData?.profile?.licenseNumber,
+      specialization: rawData?.profile?.specialization,
+      institution: rawData?.profile?.institution,
+      department: rawData?.profile?.department,
+      assignedStudents: Array.isArray(rawData?.profile?.assignedStudents)
+        ? rawData.profile.assignedStudents
+        : [],
+      canCreatePrograms: !!rawData?.profile?.canCreatePrograms,
+      canManageStudents: !!rawData?.profile?.canManageStudents,
+      canApproveRegistrations: !!rawData?.profile?.canApproveRegistrations,
+      verified: !!rawData?.profile?.verified,
+      verificationDate: rawData?.profile?.verificationDate,
+    },
+  };
+
+  return normalizedProfessional;
+};
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -24,53 +176,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
 
-  const buildFallbackUser = (
-    userId: string,
-    userType: 'student' | 'professional',
-    email?: string | null
-  ): User =>
-    ({
-      id: userId,
-      userId,
-      email: email ?? '',
-      name: 'Usuário',
-      role: userType,
-      type: userType,
-      active: true,
-      profile:
-        userType === 'student'
-          ? {
-              totalPoints: 0,
-              streak: 0,
-              level: 1,
-            }
-          : undefined,
-    } as unknown as User);
-
   const fetchUserData = async (
     userId: string,
-    userType?: 'student' | 'professional',
+    userType?: ResolvedUserType,
     email?: string | null
   ): Promise<User | null> => {
     try {
-      const resolvedType = userType ?? (await UserService.getUserType(userId, email ?? undefined));
-      const data = (await UserService.getUser(userId, resolvedType)) as User;
+      const resolvedType =
+        userType ?? (await UserService.getUserType(userId, email ?? undefined));
 
-      return {
-        ...data,
-        id: (data as any).id ?? userId,
-        userId: (data as any).userId ?? userId,
-        role: (data as any).role ?? resolvedType,
-        type: (data as any).type ?? resolvedType,
-        profile:
-          resolvedType === 'student'
-            ? {
-                totalPoints: (data as any)?.profile?.totalPoints ?? 0,
-                streak: (data as any)?.profile?.streak ?? 0,
-                level: (data as any)?.profile?.level ?? 1,
-              }
-            : (data as any)?.profile,
-      } as User;
+      const data = await UserService.getUser(userId, resolvedType);
+
+      return normalizeUserData(data, userId, resolvedType, email);
     } catch (error) {
       console.warn('⚠️ Falha ao buscar perfil completo, usando fallback:', error);
       if (userType) {
@@ -80,12 +197,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const registerFCMToken = async (userId: string) => {
+  const registerFCMToken = async () => {
     try {
       console.log('🔄 Registrando token FCM para notificações...');
-      const token = await NotificationService.requestFCMToken(userId);
+      const token = await NotificationService.getFCMToken();
 
       if (token) {
+        await NotificationService.saveFCMToken(token);
         console.log('✅ Token FCM registrado com sucesso');
       } else {
         console.log('⚠️ Token FCM não obtido');
@@ -107,7 +225,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       setUser(userData);
 
-      await registerFCMToken(result.userId);
+      await registerFCMToken();
 
       const targetPath =
         result.userType === 'student'

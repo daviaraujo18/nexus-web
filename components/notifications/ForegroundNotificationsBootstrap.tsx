@@ -7,7 +7,7 @@ type ToastItem = {
   id: string;
   title: string;
   body: string;
-  route?: string;
+  route: string;
 };
 
 export default function ForegroundNotificationsBootstrap() {
@@ -110,28 +110,26 @@ export default function ForegroundNotificationsBootstrap() {
                 {toast.body}
               </div>
 
-              {toast.route && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    window.focus();
-                    window.location.href = toast.route;
-                    removeToast(toast.id);
-                  }}
-                  style={{
-                    marginTop: '14px',
-                    background: '#ffffff',
-                    color: '#111827',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '8px 12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Abrir
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  window.focus();
+                  window.location.href = toast.route;
+                  removeToast(toast.id);
+                }}
+                style={{
+                  marginTop: '14px',
+                  background: '#ffffff',
+                  color: '#111827',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Abrir
+              </button>
             </div>
 
             <button

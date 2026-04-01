@@ -42,23 +42,57 @@ type PushFailure = {
   docId?: string | null;
 };
 
-type StoredNotificationPreferences = {
-  enabled?: boolean;
+type NotificationPreferencesPayload = {
+  enabled?: unknown;
   channels?: {
-    push?: boolean;
-    in_app?: boolean;
-    email?: boolean;
+    push?: unknown;
+    in_app?: unknown;
+    email?: unknown;
   };
   allowedHours?: {
-    start?: string;
-    end?: string;
+    start?: unknown;
+    end?: unknown;
   };
-  allowedDays?: number[];
-  types?: Partial<Record<NotificationType, boolean>>;
+  allowedDays?: unknown;
+  types?: {
+    activity_reminder?: unknown;
+    therapeutic_reminder?: unknown;
+    educational_reminder?: unknown;
+    achievement?: unknown;
+    schedule_update?: unknown;
+    message?: unknown;
+  };
   therapeuticSettings?: {
-    avoidEveningNotifications?: boolean;
-    weekendReducedFrequency?: boolean;
-    maxDailyNotifications?: number;
+    avoidEveningNotifications?: unknown;
+    weekendReducedFrequency?: unknown;
+    maxDailyNotifications?: unknown;
+  };
+};
+
+type NormalizedNotificationPreferences = {
+  enabled: boolean;
+  channels: {
+    push: boolean;
+    in_app: boolean;
+    email: boolean;
+  };
+  allowedHours: {
+    start: string;
+    end: string;
+  };
+  allowedDays: number[];
+  types: {
+    activity_reminder: boolean;
+    therapeutic_reminder: boolean;
+    educational_reminder: boolean;
+    achievement: boolean;
+    schedule_update: boolean;
+    message: boolean;
+  };
+  therapeuticSettings: {
+    avoidEveningNotifications: boolean;
+    weekendReducedFrequency: boolean;
+    maxDailyNotifications: number;
   };
 };
 
@@ -77,6 +111,80 @@ function getString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
+function asNonEmptyString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function asAllowedDays(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [1, 2, 3, 4, 5];
+  }
+
+  const unique = new Set<number>();
+
+  for (const item of value) {
+    if (Number.isInteger(item) && item >= 0 && item <= 6) {
+      unique.add(item);
+    }
+  }
+
+  return unique.size > 0 ? Array.from(unique).sort((a, b) => a - b) : [1, 2, 3, 4, 5];
+}
+
+function asMaxDailyNotifications(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 4;
+  }
+
+  const rounded = Math.round(value);
+  return Math.min(Math.max(rounded, 1), 20);
+}
+
+function normalizeStoredPreferences(
+  raw: NotificationPreferencesPayload | null | undefined,
+): NormalizedNotificationPreferences {
+  const data = raw ?? {};
+
+  return {
+    enabled: asBoolean(data.enabled, true),
+    channels: {
+      push: asBoolean(data.channels?.push, false),
+      in_app: asBoolean(data.channels?.in_app, true),
+      email: asBoolean(data.channels?.email, false),
+    },
+    allowedHours: {
+      start: asNonEmptyString(data.allowedHours?.start, '08:00'),
+      end: asNonEmptyString(data.allowedHours?.end, '20:00'),
+    },
+    allowedDays: asAllowedDays(data.allowedDays),
+    types: {
+      activity_reminder: asBoolean(data.types?.activity_reminder, true),
+      therapeutic_reminder: asBoolean(data.types?.therapeutic_reminder, true),
+      educational_reminder: asBoolean(data.types?.educational_reminder, true),
+      achievement: asBoolean(data.types?.achievement, true),
+      schedule_update: asBoolean(data.types?.schedule_update, true),
+      message: asBoolean(data.types?.message, true),
+    },
+    therapeuticSettings: {
+      avoidEveningNotifications: asBoolean(
+        data.therapeuticSettings?.avoidEveningNotifications,
+        false,
+      ),
+      weekendReducedFrequency: asBoolean(
+        data.therapeuticSettings?.weekendReducedFrequency,
+        false,
+      ),
+      maxDailyNotifications: asMaxDailyNotifications(
+        data.therapeuticSettings?.maxDailyNotifications,
+      ),
+    },
+  };
+}
+
 function getNotificationType(value: unknown): NormalizedNotificationType {
   const rawType = getString(value);
 
@@ -87,15 +195,6 @@ function getNotificationType(value: unknown): NormalizedNotificationType {
   return (ALLOWED_NOTIFICATION_TYPES as readonly string[]).includes(rawType)
     ? (rawType as NotificationType)
     : 'generic_notification';
-}
-
-function isWithinAllowedDays(days?: number[]): boolean {
-  if (!Array.isArray(days) || days.length === 0) {
-    return true;
-  }
-
-  const today = new Date().getDay();
-  return days.includes(today);
 }
 
 function parseHourToMinutes(value?: string): number | null {
@@ -121,11 +220,16 @@ function parseHourToMinutes(value?: string): number | null {
   return hour * 60 + minute;
 }
 
+function isWithinAllowedDays(days: number[]): boolean {
+  const today = new Date().getDay();
+  return days.includes(today);
+}
+
 function isWithinAllowedHours(
-  allowedHours?: { start?: string; end?: string },
+  allowedHours: { start: string; end: string },
 ): boolean {
-  const startMinutes = parseHourToMinutes(allowedHours?.start);
-  const endMinutes = parseHourToMinutes(allowedHours?.end);
+  const startMinutes = parseHourToMinutes(allowedHours.start);
+  const endMinutes = parseHourToMinutes(allowedHours.end);
 
   if (startMinutes === null || endMinutes === null) {
     return true;
@@ -138,32 +242,31 @@ function isWithinAllowedHours(
     return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
   }
 
-  // janela atravessando meia-noite
   return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
 }
 
 function isTypeEnabled(
-  preferences: StoredNotificationPreferences | null,
+  preferences: NormalizedNotificationPreferences,
   notificationType: NormalizedNotificationType,
 ): boolean {
   if (notificationType === 'generic_notification') {
     return true;
   }
 
-  return preferences?.types?.[notificationType] ?? true;
+  return preferences.types[notificationType];
 }
 
-async function getUserPreferences(
+async function loadNormalizedPreferences(
   db: admin.firestore.Firestore,
   userId: string,
-): Promise<StoredNotificationPreferences | null> {
+): Promise<NormalizedNotificationPreferences> {
   const docSnap = await db.collection('userNotificationPreferences').doc(userId).get();
 
   if (!docSnap.exists) {
-    return null;
+    return normalizeStoredPreferences(null);
   }
 
-  return docSnap.data() as StoredNotificationPreferences;
+  return normalizeStoredPreferences(docSnap.data() as NotificationPreferencesPayload);
 }
 
 function getSkipResponse(reason: string) {
@@ -219,15 +322,14 @@ export const sendPushNotification = functions
       }
 
       const db = admin.firestore();
-
       const notificationType = getNotificationType(rawExtraData.type);
-      const preferences = await getUserPreferences(db, userId);
+      const preferences = await loadNormalizedPreferences(db, userId);
 
-      if (preferences?.enabled === false) {
+      if (!preferences.enabled) {
         return getSkipResponse('notifications-disabled');
       }
 
-      if (preferences?.channels?.push === false) {
+      if (!preferences.channels.push) {
         return getSkipResponse('push-channel-disabled');
       }
 
@@ -235,11 +337,11 @@ export const sendPushNotification = functions
         return getSkipResponse('notification-type-disabled');
       }
 
-      if (!isWithinAllowedDays(preferences?.allowedDays)) {
+      if (!isWithinAllowedDays(preferences.allowedDays)) {
         return getSkipResponse('outside-allowed-days');
       }
 
-      if (!isWithinAllowedHours(preferences?.allowedHours)) {
+      if (!isWithinAllowedHours(preferences.allowedHours)) {
         return getSkipResponse('outside-allowed-hours');
       }
 

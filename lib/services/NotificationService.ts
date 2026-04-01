@@ -82,6 +82,19 @@ type SendPushPayload = {
   data?: Record<string, unknown>;
 };
 
+type GetUserNotificationPreferencesResponse = {
+  preferences?: Partial<FullUserNotificationPreferences> | null;
+};
+
+type SaveUserNotificationPreferencesPayload = {
+  userId: string;
+  preferences: FullUserNotificationPreferences;
+};
+
+type GetUserNotificationPreferencesPayload = {
+  userId: string;
+};
+
 const isBrowser = typeof window !== 'undefined';
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -143,6 +156,53 @@ function getDefaultFullPreferences(
       avoidEveningNotifications: false,
       weekendReducedFrequency: false,
       maxDailyNotifications: 4,
+    },
+  };
+}
+
+function normalizePreferences(
+  preferences: Partial<FullUserNotificationPreferences> | null | undefined,
+  devicePrefs?: Partial<UserNotificationPreferences>,
+): FullUserNotificationPreferences {
+  const defaults = getDefaultFullPreferences(devicePrefs);
+
+  return {
+    enabled: preferences?.enabled ?? defaults.enabled,
+    channels: {
+      push: preferences?.channels?.push ?? defaults.channels.push,
+      in_app: preferences?.channels?.in_app ?? defaults.channels.in_app,
+      email: preferences?.channels?.email ?? defaults.channels.email,
+    },
+    allowedHours: {
+      start: preferences?.allowedHours?.start ?? defaults.allowedHours.start,
+      end: preferences?.allowedHours?.end ?? defaults.allowedHours.end,
+    },
+    allowedDays: Array.isArray(preferences?.allowedDays)
+      ? preferences.allowedDays.filter(
+          (day): day is number => Number.isInteger(day) && day >= 0 && day <= 6,
+        )
+      : defaults.allowedDays,
+    types: {
+      activity_reminder:
+        preferences?.types?.activity_reminder ?? defaults.types.activity_reminder,
+      therapeutic_reminder:
+        preferences?.types?.therapeutic_reminder ?? defaults.types.therapeutic_reminder,
+      educational_reminder:
+        preferences?.types?.educational_reminder ?? defaults.types.educational_reminder,
+      achievement: preferences?.types?.achievement ?? defaults.types.achievement,
+      schedule_update: preferences?.types?.schedule_update ?? defaults.types.schedule_update,
+      message: preferences?.types?.message ?? defaults.types.message,
+    },
+    therapeuticSettings: {
+      avoidEveningNotifications:
+        preferences?.therapeuticSettings?.avoidEveningNotifications ??
+        defaults.therapeuticSettings!.avoidEveningNotifications,
+      weekendReducedFrequency:
+        preferences?.therapeuticSettings?.weekendReducedFrequency ??
+        defaults.therapeuticSettings!.weekendReducedFrequency,
+      maxDailyNotifications:
+        preferences?.therapeuticSettings?.maxDailyNotifications ??
+        defaults.therapeuticSettings!.maxDailyNotifications,
     },
   };
 }
@@ -375,10 +435,6 @@ export class NotificationService {
     return this.getFCMToken();
   }
 
-  static async getCurrentToken(): Promise<string | null> {
-    return this.getFCMToken();
-  }
-
   static async getUserPreferences(_userId: string): Promise<UserNotificationPreferences> {
     const supportStatus = await this.getSupportStatus();
     const fcmStatus = await this.getFCMStatus();
@@ -391,41 +447,44 @@ export class NotificationService {
     };
   }
 
-  static async getPreferences(userId: string): Promise<FullUserNotificationPreferences> {
-    const devicePrefs = await this.getUserPreferences(userId);
-    return getDefaultFullPreferences(devicePrefs);
-  }
-
   static async loadPreferences(userId: string): Promise<FullUserNotificationPreferences> {
-    return this.getPreferences(userId);
+    try {
+      const devicePrefs = await this.getUserPreferences(userId);
+
+      const getUserNotificationPreferences = httpsCallable<
+        GetUserNotificationPreferencesPayload,
+        GetUserNotificationPreferencesResponse
+      >(functions, 'getUserNotificationPreferences');
+
+      const response = await getUserNotificationPreferences({ userId });
+      const persisted = response.data?.preferences ?? null;
+
+      return normalizePreferences(persisted, devicePrefs);
+    } catch (error) {
+      errorLog('Erro ao carregar preferências do backend. Aplicando fallback local:', error);
+
+      const devicePrefs = await this.getUserPreferences(userId);
+      return getDefaultFullPreferences(devicePrefs);
+    }
   }
 
   static async updatePreferences(
-    _userId: string,
-    preferences: FullUserNotificationPreferences,
-  ): Promise<void> {
-    debugLog('Preferências atualizadas localmente (mock):', preferences);
-  }
-
-  static async updateUserPreferences(
     userId: string,
     preferences: FullUserNotificationPreferences,
   ): Promise<void> {
-    await this.updatePreferences(userId, preferences);
-  }
+    const normalized = normalizePreferences(preferences);
 
-  static async savePreferences(
-    userId: string,
-    preferences: FullUserNotificationPreferences,
-  ): Promise<void> {
-    await this.updatePreferences(userId, preferences);
-  }
+    const saveUserNotificationPreferences = httpsCallable<
+      SaveUserNotificationPreferencesPayload,
+      { success: boolean }
+    >(functions, 'saveUserNotificationPreferences');
 
-  static async saveUserPreferences(
-    userId: string,
-    preferences: FullUserNotificationPreferences,
-  ): Promise<void> {
-    await this.updatePreferences(userId, preferences);
+    await saveUserNotificationPreferences({
+      userId,
+      preferences: normalized,
+    });
+
+    debugLog('Preferências persistidas com sucesso.');
   }
 
   static async sendFCMPushNotification(

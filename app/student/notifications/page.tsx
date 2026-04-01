@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import {
   NotificationService,
   type UserNotificationPreferences,
+  type FullUserNotificationPreferences,
 } from '@/lib/services/NotificationService';
 import {
   FaMobileAlt,
@@ -16,33 +17,9 @@ import {
   FaInfoCircle,
   FaFlask,
 } from 'react-icons/fa';
+import { auth } from '@/firebase/config';
 
-type Preferences = {
-  enabled: boolean;
-  channels: {
-    push: boolean;
-    in_app: boolean;
-    email: boolean;
-  };
-  allowedHours: {
-    start: string;
-    end: string;
-  };
-  allowedDays: number[];
-  types: {
-    activity_reminder: boolean;
-    therapeutic_reminder: boolean;
-    educational_reminder: boolean;
-    achievement: boolean;
-    schedule_update: boolean;
-    message: boolean;
-  };
-  therapeuticSettings?: {
-    avoidEveningNotifications: boolean;
-    weekendReducedFrequency: boolean;
-    maxDailyNotifications: number;
-  };
-};
+type Preferences = FullUserNotificationPreferences;
 
 type FcmStatus = {
   available: boolean;
@@ -50,7 +27,7 @@ type FcmStatus = {
 };
 
 type NotificationTestCase = {
-  key: string;
+  key: keyof Preferences['types'];
   label: string;
   body: string;
   route?: string;
@@ -109,35 +86,6 @@ const NOTIFICATION_TEST_CASES: NotificationTestCase[] = [
   },
 ];
 
-function getDefaultPreferences(): Preferences {
-  return {
-    enabled: true,
-    channels: {
-      push: true,
-      in_app: true,
-      email: false,
-    },
-    allowedHours: {
-      start: '08:00',
-      end: '20:00',
-    },
-    allowedDays: [1, 2, 3, 4, 5],
-    types: {
-      activity_reminder: true,
-      therapeutic_reminder: true,
-      educational_reminder: true,
-      achievement: true,
-      schedule_update: true,
-      message: true,
-    },
-    therapeuticSettings: {
-      avoidEveningNotifications: false,
-      weekendReducedFrequency: false,
-      maxDailyNotifications: 4,
-    },
-  };
-}
-
 function deepClone<T>(value: T): T {
   if (typeof structuredClone === 'function') {
     return structuredClone(value);
@@ -166,38 +114,30 @@ export default function NotificationsSettingsPage() {
       setLoading(false);
       return;
     }
-
+      console.log('PAGE user.id =', user?.id);
+      console.log('AUTH uid =', auth.currentUser?.uid);
     try {
       setLoading(true);
       setFeedback(null);
 
-      const [devicePrefs, status, currentToken] = await Promise.all([
+      const [devicePrefs, status, currentToken, persistedPrefs] = await Promise.all([
         NotificationService.getUserPreferences(user.id),
         NotificationService.checkFCMAvailability(),
         NotificationService.getCurrentFCMToken(),
+        NotificationService.loadPreferences(user.id),
       ]);
 
       setDevicePreferences(devicePrefs);
-      setPreferences((prev) => {
-        const base = prev ?? getDefaultPreferences();
-
-        return {
-          ...base,
-          enabled: devicePrefs.enabled,
-          channels: {
-            ...base.channels,
-            push: devicePrefs.permission === 'granted' && devicePrefs.supported,
-          },
-        };
-      });
+      setPreferences(persistedPrefs);
 
       setFcmStatus({
         available: status.available || devicePrefs.supported,
         tokenExists: !!currentToken || status.tokenExists || devicePrefs.tokenExists,
       });
-    } catch {
+    } catch (error) {
+      console.error('Erro ao carregar page de notificações:', error);
       setDevicePreferences(null);
-      setPreferences(getDefaultPreferences());
+      setPreferences(null);
       setFcmStatus({
         available: false,
         tokenExists: false,
@@ -206,17 +146,28 @@ export default function NotificationsSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id, user]);
+  }, [user?.id]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
+  const persistPreferences = useCallback(
+    async (nextPreferences: Preferences) => {
+      if (!user?.id) return;
+
+      await NotificationService.updatePreferences(user.id, nextPreferences);
+    },
+    [user?.id],
+  );
+
   const updatePreference = async (path: string, value: unknown) => {
-    if (!preferences || saving) return;
+    if (!preferences || saving || !user?.id) return;
 
     setSaving(true);
     setFeedback(null);
+
+    const previous = deepClone(preferences);
 
     try {
       const newPrefs = deepClone(preferences);
@@ -232,11 +183,14 @@ export default function NotificationsSettingsPage() {
       }
 
       current[keys[keys.length - 1]] = value;
-      setPreferences(newPrefs);
 
-      await Promise.resolve();
-    } catch {
-      setFeedback('❌ Erro ao atualizar preferência.');
+      setPreferences(newPrefs);
+      await persistPreferences(newPrefs);
+      setFeedback('✅ Preferências salvas com sucesso.');
+    } catch (error) {
+      console.error('Erro ao atualizar preferência:', error);
+      setPreferences(previous);
+      setFeedback('❌ Erro ao salvar preferência.');
     } finally {
       setSaving(false);
     }
@@ -252,6 +206,20 @@ export default function NotificationsSettingsPage() {
       const result = await NotificationService.enableNotifications();
 
       if (result.success && result.token) {
+        const currentPreferences =
+          preferences ?? (await NotificationService.loadPreferences(user.id));
+
+        const nextPreferences: Preferences = {
+          ...currentPreferences,
+          enabled: true,
+          channels: {
+            ...currentPreferences.channels,
+            push: true,
+          },
+        };
+
+        await NotificationService.updatePreferences(user.id, nextPreferences);
+
         setFeedback('✅ Token FCM registrado com sucesso neste dispositivo.');
         await loadData();
       } else if (result.permission !== 'granted') {
@@ -259,7 +227,8 @@ export default function NotificationsSettingsPage() {
       } else {
         setFeedback('❌ Não foi possível registrar token FCM neste dispositivo.');
       }
-    } catch {
+    } catch (error) {
+      console.error('Erro ao registrar token FCM:', error);
       setFeedback('❌ Erro ao registrar token FCM.');
     } finally {
       setSaving(false);
@@ -277,6 +246,20 @@ export default function NotificationsSettingsPage() {
       const result = await NotificationService.enableNotifications();
 
       if (result.success && result.token) {
+        const currentPreferences =
+          preferences ?? (await NotificationService.loadPreferences(user.id));
+
+        const nextPreferences: Preferences = {
+          ...currentPreferences,
+          enabled: true,
+          channels: {
+            ...currentPreferences.channels,
+            push: true,
+          },
+        };
+
+        await NotificationService.updatePreferences(user.id, nextPreferences);
+
         setFeedback('✅ Token FCM resetado e registrado novamente.');
         await loadData();
       } else if (result.permission !== 'granted') {
@@ -284,7 +267,8 @@ export default function NotificationsSettingsPage() {
       } else {
         setFeedback('❌ Não foi possível resetar o token FCM.');
       }
-    } catch {
+    } catch (error) {
+      console.error('Erro ao resetar token FCM:', error);
       setFeedback('❌ Erro ao resetar token FCM.');
     } finally {
       setSaving(false);
@@ -302,26 +286,49 @@ export default function NotificationsSettingsPage() {
 
       if (result?.success) {
         setFeedback(
-          `✅ Notificação de teste enviada com sucesso. sent=${result.sent}, failed=${result.failed}`
+          `✅ Notificação de teste enviada com sucesso. sent=${result.sent}, failed=${result.failed}`,
         );
       } else {
         setFeedback('❌ Falha ao enviar notificação de teste.');
       }
-    } catch {
+    } catch (error) {
+      console.error('Erro ao enviar teste real:', error);
       setFeedback('❌ Erro ao enviar notificação de teste.');
     } finally {
       setRunningTestKey(null);
     }
   };
 
-  const sendUnavailableTypedTest = async (testCase: NotificationTestCase) => {
+  const sendTypedTestNotification = async (testCase: NotificationTestCase) => {
+    if (!user?.id || runningTestKey) return;
+
     setRunningTestKey(testCase.key);
     setFeedback(null);
 
     try {
-      setFeedback(
-        `ℹ️ O teste "${testCase.label}" ainda não está ligado ao backend atual. Hoje o NotificationService.testNotification só envia o payload padrão.`
+      const result = await NotificationService.sendFCMPushNotification(
+        user.id,
+        testCase.label,
+        testCase.body,
+        {
+          url: testCase.route || '/student/notifications',
+          clickAction: testCase.route || '/student/notifications',
+          route: testCase.route || '/student/notifications',
+          tag: testCase.tag,
+          ...(testCase.data || {}),
+        },
       );
+
+      if (result?.success) {
+        setFeedback(
+          `✅ Teste "${testCase.label}" enviado com sucesso. sent=${result.sent}, failed=${result.failed}`,
+        );
+      } else {
+        setFeedback(`❌ Falha ao enviar o teste "${testCase.label}".`);
+      }
+    } catch (error) {
+      console.error(`Erro ao enviar teste ${testCase.key}:`, error);
+      setFeedback(`❌ Erro ao enviar o teste "${testCase.label}".`);
     } finally {
       setRunningTestKey(null);
     }
@@ -559,23 +566,21 @@ export default function NotificationsSettingsPage() {
                   </div>
 
                   <button
-                    onClick={() => sendUnavailableTypedTest(testCase)}
-                    disabled={!!runningTestKey}
+                    onClick={() => sendTypedTestNotification(testCase)}
+                    disabled={!!runningTestKey || !currentDeviceReady}
                     className="px-4 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
                   >
                     {runningTestKey === testCase.key
                       ? 'Processando...'
-                      : 'Indisponível no backend atual'}
+                      : 'Enviar teste tipado'}
                   </button>
                 </div>
               ))}
             </div>
 
-            <div className="mt-4 p-4 rounded-lg border border-amber-200 bg-amber-50">
-              <p className="text-sm text-amber-900">
-                No estado atual, o backend exposto por <code>NotificationService.testNotification(userId)</code>
-                envia apenas um payload padrão. Para esses botões dispararem tipos específicos,
-                o próximo passo é expandir a assinatura do service e da Cloud Function.
+            <div className="mt-4 p-4 rounded-lg border border-green-200 bg-green-50">
+              <p className="text-sm text-green-900">
+                Os testes tipados agora usam o backend real via payload dinâmico.
               </p>
             </div>
           </div>
@@ -592,7 +597,7 @@ export default function NotificationsSettingsPage() {
               <div>
                 <p className="font-medium text-gray-900">Ativar Notificações</p>
                 <p className="text-sm text-gray-600 mt-1">
-                  Estado atual do dispositivo/navegador
+                  Controle geral persistido no backend
                 </p>
               </div>
               <button
@@ -647,7 +652,7 @@ export default function NotificationsSettingsPage() {
                           `channels.${channel.key}`,
                           !preferences.channels[
                             channel.key as keyof typeof preferences.channels
-                          ]
+                          ],
                         )
                       }
                       className={`relative inline-flex h-6 w-11 items-center rounded-full ${
@@ -673,7 +678,7 @@ export default function NotificationsSettingsPage() {
                 ))}
               </div>
               <p className="text-sm text-gray-500 mt-2">
-                Essas preferências detalhadas ainda estão em modo local na UI.
+                Essas preferências agora são persistidas no backend.
               </p>
             </div>
 
@@ -762,7 +767,7 @@ export default function NotificationsSettingsPage() {
                     >
                       {day}
                     </button>
-                  )
+                  ),
                 )}
               </div>
               <p className="text-sm text-gray-500 mt-2">
@@ -821,7 +826,7 @@ export default function NotificationsSettingsPage() {
                       `types.${type.key}`,
                       !preferences.types[
                         type.key as keyof typeof preferences.types
-                      ]
+                      ],
                     )
                   }
                   className={`relative inline-flex h-6 w-11 items-center rounded-full ${
@@ -867,7 +872,7 @@ export default function NotificationsSettingsPage() {
                   onClick={() =>
                     updatePreference(
                       'therapeuticSettings.avoidEveningNotifications',
-                      !preferences.therapeuticSettings?.avoidEveningNotifications
+                      !preferences.therapeuticSettings?.avoidEveningNotifications,
                     )
                   }
                   className={`relative inline-flex h-6 w-11 items-center rounded-full ${
@@ -899,7 +904,7 @@ export default function NotificationsSettingsPage() {
                   onClick={() =>
                     updatePreference(
                       'therapeuticSettings.weekendReducedFrequency',
-                      !preferences.therapeuticSettings?.weekendReducedFrequency
+                      !preferences.therapeuticSettings?.weekendReducedFrequency,
                     )
                   }
                   className={`relative inline-flex h-6 w-11 items-center rounded-full ${
@@ -932,7 +937,7 @@ export default function NotificationsSettingsPage() {
                   onChange={(e) =>
                     updatePreference(
                       'therapeuticSettings.maxDailyNotifications',
-                      parseInt(e.target.value, 10)
+                      parseInt(e.target.value, 10),
                     )
                   }
                   className="border border-gray-300 rounded-lg px-3 py-1"

@@ -20,7 +20,7 @@ export default function NotificationManager() {
   }, [user?.id]);
 
   const checkNotificationStatus = async () => {
-    const status = await NotificationService.checkNotificationSupport();
+    const status = await NotificationService.getSupportStatus();
     setNotificationStatus(status);
   };
 
@@ -46,9 +46,10 @@ export default function NotificationManager() {
         return;
       }
 
-      const token = await NotificationService.requestFCMToken(user.id);
+      const token = await NotificationService.getFCMToken();
 
       if (token) {
+        await NotificationService.saveFCMToken(token);
         setDebugMessage(`✅ Token ativo/sincronizado: ${token.slice(0, 24)}...`);
       } else {
         setDebugMessage('⚠️ Permissão concedida, mas não foi possível obter/sincronizar o token.');
@@ -77,17 +78,17 @@ export default function NotificationManager() {
 
       console.log('🧪 TESTE REAL →', userId);
 
-      // PRODUÇÃO: não reseta token a cada clique
       const currentToken = await NotificationService.getCurrentFCMToken();
-
       let tokenToUse = currentToken;
 
-      // Só tenta gerar token se realmente não houver um atual
       if (!tokenToUse) {
-        tokenToUse = await NotificationService.requestFCMToken(userId);
+        tokenToUse = await NotificationService.getFCMToken();
+
+        if (tokenToUse) {
+          await NotificationService.saveFCMToken(tokenToUse);
+        }
       } else {
-        // garante sincronização do token atual no backend
-        await NotificationService.requestFCMToken(userId);
+        await NotificationService.saveFCMToken(tokenToUse);
       }
 
       if (!tokenToUse) {
