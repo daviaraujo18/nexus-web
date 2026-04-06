@@ -4,6 +4,7 @@ import React, {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   ReactNode,
 } from 'react';
@@ -175,6 +176,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const router = useRouter();
   const pathname = usePathname();
+  const tokenRegisteredRef = useRef<string | null>(null);
 
   const fetchUserData = async (
     userId: string,
@@ -197,13 +199,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const registerFCMToken = async () => {
+  const registerFCMToken = async (userId: string) => {
     try {
+      if (tokenRegisteredRef.current === userId) {
+        return;
+      }
+
       console.log('🔄 Registrando token FCM para notificações...');
       const token = await NotificationService.getFCMToken();
 
       if (token) {
         await NotificationService.saveFCMToken(token);
+        tokenRegisteredRef.current = userId;
         console.log('✅ Token FCM registrado com sucesso');
       } else {
         console.log('⚠️ Token FCM não obtido');
@@ -224,8 +231,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         buildFallbackUser(result.userId, result.userType, email);
 
       setUser(userData);
-
-      await registerFCMToken();
 
       const targetPath =
         result.userType === 'student'
@@ -264,6 +269,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = async (): Promise<void> => {
     try {
+      tokenRegisteredRef.current = null;
       await AuthService.logout();
       setUser(null);
       router.replace('/login');
@@ -277,6 +283,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (!firebaseUser) {
+          tokenRegisteredRef.current = null;
           setUser(null);
           setLoading(false);
           return;
@@ -292,6 +299,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           buildFallbackUser(firebaseUser.uid, resolvedType, firebaseUser.email);
 
         setUser(userData);
+        await registerFCMToken(firebaseUser.uid);
       } catch (error) {
         console.warn('⚠️ Erro ao hidratar usuário autenticado:', error);
         setUser(null);

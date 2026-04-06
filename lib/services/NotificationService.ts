@@ -26,6 +26,9 @@ export type PushResponse = {
   sent: number;
   failed: number;
   failures?: PushFailure[];
+  skipped?: boolean;
+  skippedCount?: number;
+  reason?: string | null;
 };
 
 export type UserNotificationPreferences = {
@@ -208,6 +211,9 @@ function normalizePreferences(
 }
 
 export class NotificationService {
+  private static serviceWorkerRegistrationPromise: Promise<ServiceWorkerRegistration | null> | null =
+    null;
+
   static async isSupported(): Promise<boolean> {
     if (!isBrowser) return false;
 
@@ -242,14 +248,21 @@ export class NotificationService {
       return null;
     }
 
-    try {
-      const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-      debugLog('Service Worker registrado:', registration.scope);
-      return registration;
-    } catch (error) {
-      errorLog('Erro ao registrar Service Worker:', error);
-      return null;
+    if (!this.serviceWorkerRegistrationPromise) {
+      this.serviceWorkerRegistrationPromise = navigator.serviceWorker
+        .register('/firebase-messaging-sw.js')
+        .then((registration) => {
+          debugLog('Service Worker registrado:', registration.scope);
+          return registration;
+        })
+        .catch((error) => {
+          errorLog('Erro ao registrar Service Worker:', error);
+          this.serviceWorkerRegistrationPromise = null;
+          return null;
+        });
     }
+
+    return this.serviceWorkerRegistrationPromise;
   }
 
   static async requestNotificationPermission(): Promise<NotificationPermission> {
@@ -499,6 +512,14 @@ export class NotificationService {
         'sendPushNotification',
       );
 
+      const mergedData = {
+        url: '/student/notifications',
+        clickAction: '/student/notifications',
+        route: '/student/notifications',
+        type: 'generic_notification',
+        ...data,
+      };
+
       const payload: SendPushPayload = {
         userId,
         notification: {
@@ -506,12 +527,9 @@ export class NotificationService {
           body,
         },
         data: {
-          url: '/student/notifications',
-          clickAction: '/student/notifications',
-          route: '/student/notifications',
-          type: 'generic_notification',
-          tag: 'generic-notification',
-          ...data,
+          title,
+          body,
+          ...mergedData,
         },
       };
 
@@ -523,6 +541,9 @@ export class NotificationService {
         success: false,
         sent: 0,
         failed: 1,
+        skipped: false,
+        skippedCount: 0,
+        reason: 'client-send-failure',
       };
     }
   }
@@ -543,9 +564,8 @@ export class NotificationService {
             url: '/student/notifications',
             clickAction: '/student/notifications',
             route: '/student/notifications',
-            type: 'activity_update',
+            type: 'activity_reminder',
             entityId: '123',
-            tag: 'activity-123',
             ...(data || {}),
           },
         );
@@ -563,9 +583,8 @@ export class NotificationService {
           url: '/student/notifications',
           clickAction: '/student/notifications',
           route: '/student/notifications',
-          type: 'activity_update',
+          type: 'activity_reminder',
           entityId: '123',
-          tag: 'activity-123',
         },
       };
 

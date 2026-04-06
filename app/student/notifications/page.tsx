@@ -17,7 +17,6 @@ import {
   FaInfoCircle,
   FaFlask,
 } from 'react-icons/fa';
-import { auth } from '@/firebase/config';
 
 type Preferences = FullUserNotificationPreferences;
 
@@ -40,7 +39,7 @@ const NOTIFICATION_TEST_CASES: NotificationTestCase[] = [
     key: 'activity_reminder',
     label: 'Lembrete de Atividade',
     body: 'Hora de concluir sua atividade programada.',
-    route: '/student/activities',
+    route: '/student/notifications',
     tag: 'activity-reminder-test',
     data: { type: 'activity_reminder', priority: 'normal' },
   },
@@ -64,7 +63,7 @@ const NOTIFICATION_TEST_CASES: NotificationTestCase[] = [
     key: 'achievement',
     label: 'Conquista',
     body: 'Parabéns! Você desbloqueou uma nova conquista.',
-    route: '/student/notifications',
+    route: '/student/progress',
     tag: 'achievement-test',
     data: { type: 'achievement', priority: 'high' },
   },
@@ -72,7 +71,7 @@ const NOTIFICATION_TEST_CASES: NotificationTestCase[] = [
     key: 'schedule_update',
     label: 'Atualização de Agenda',
     body: 'Sua agenda recebeu uma atualização importante.',
-    route: '/student/schedule',
+    route: '/student/schedules',
     tag: 'schedule-update-test',
     data: { type: 'schedule_update', priority: 'high' },
   },
@@ -80,7 +79,7 @@ const NOTIFICATION_TEST_CASES: NotificationTestCase[] = [
     key: 'message',
     label: 'Mensagem',
     body: 'Você recebeu uma nova mensagem da equipe.',
-    route: '/student/messages',
+    route: '/student/notifications',
     tag: 'message-test',
     data: { type: 'message', priority: 'high' },
   },
@@ -114,16 +113,14 @@ export default function NotificationsSettingsPage() {
       setLoading(false);
       return;
     }
-      console.log('PAGE user.id =', user?.id);
-      console.log('AUTH uid =', auth.currentUser?.uid);
+
     try {
       setLoading(true);
       setFeedback(null);
 
-      const [devicePrefs, status, currentToken, persistedPrefs] = await Promise.all([
+      const [devicePrefs, status, persistedPrefs] = await Promise.all([
         NotificationService.getUserPreferences(user.id),
         NotificationService.checkFCMAvailability(),
-        NotificationService.getCurrentFCMToken(),
         NotificationService.loadPreferences(user.id),
       ]);
 
@@ -132,7 +129,7 @@ export default function NotificationsSettingsPage() {
 
       setFcmStatus({
         available: status.available || devicePrefs.supported,
-        tokenExists: !!currentToken || status.tokenExists || devicePrefs.tokenExists,
+        tokenExists: status.tokenExists || devicePrefs.tokenExists,
       });
     } catch (error) {
       console.error('Erro ao carregar page de notificações:', error);
@@ -288,6 +285,8 @@ export default function NotificationsSettingsPage() {
         setFeedback(
           `✅ Notificação de teste enviada com sucesso. sent=${result.sent}, failed=${result.failed}`,
         );
+      } else if (result?.skipped) {
+        setFeedback(`⚠️ Envio pulado pelo backend. reason=${result.reason ?? 'unknown'}`);
       } else {
         setFeedback('❌ Falha ao enviar notificação de teste.');
       }
@@ -306,22 +305,40 @@ export default function NotificationsSettingsPage() {
     setFeedback(null);
 
     try {
+      const route = testCase.route || '/student/notifications';
+
       const result = await NotificationService.sendFCMPushNotification(
         user.id,
         testCase.label,
         testCase.body,
         {
-          url: testCase.route || '/student/notifications',
-          clickAction: testCase.route || '/student/notifications',
-          route: testCase.route || '/student/notifications',
-          tag: testCase.tag,
-          ...(testCase.data || {}),
+          title: testCase.label,
+          body: testCase.body,
+
+          url: route,
+          clickAction: route,
+          route,
+
+          type: testCase.data?.type || testCase.key,
+
+          // tag totalmente única
+          tag: `typed-${testCase.key}-${Date.now()}-${Math.random()}`,
+
+          // garante wake no minimizado
+          requireInteraction: true,
+          priority: 'high',
+
+          sentAt: new Date().toISOString(),
         },
       );
 
       if (result?.success) {
         setFeedback(
           `✅ Teste "${testCase.label}" enviado com sucesso. sent=${result.sent}, failed=${result.failed}`,
+        );
+      } else if (result?.skipped) {
+        setFeedback(
+          `⚠️ Teste "${testCase.label}" bloqueado. reason=${result.reason ?? 'unknown'}`,
         );
       } else {
         setFeedback(`❌ Falha ao enviar o teste "${testCase.label}".`);
@@ -524,7 +541,7 @@ export default function NotificationsSettingsPage() {
             Painel de Testes de Notificação
           </h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+          <div className="grid grid-cols-1 gap-3 mb-6">
             <button
               onClick={sendRealTestNotification}
               disabled={!!runningTestKey || !currentDeviceReady}
@@ -533,16 +550,6 @@ export default function NotificationsSettingsPage() {
               {runningTestKey === 'real_test'
                 ? 'Enviando teste...'
                 : 'Enviar teste real'}
-            </button>
-
-            <button
-              onClick={sendRealTestNotification}
-              disabled={!!runningTestKey || !currentDeviceReady}
-              className="px-4 py-3 rounded bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50"
-            >
-              {runningTestKey === 'real_test'
-                ? 'Enviando teste...'
-                : 'Repetir teste padrão'}
             </button>
           </div>
 
@@ -751,6 +758,11 @@ export default function NotificationsSettingsPage() {
                         const dayIndex = days.indexOf(index);
 
                         if (dayIndex > -1) {
+                          if (days.length === 1) {
+                            setFeedback('⚠️ Pelo menos um dia da semana deve permanecer selecionado.');
+                            return;
+                          }
+
                           days.splice(dayIndex, 1);
                         } else {
                           days.push(index);

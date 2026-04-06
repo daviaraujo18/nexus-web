@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { NotificationService, type NormalizedNotification } from '@/lib/services/NotificationService';
+import { useRouter } from 'next/navigation';
+import {
+  NotificationService,
+  type NormalizedNotification,
+} from '@/lib/services/NotificationService';
 
 type ToastItem = {
   id: string;
@@ -11,12 +15,12 @@ type ToastItem = {
 };
 
 export default function ForegroundNotificationsBootstrap() {
+  const router = useRouter();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const initializedRef = useRef(false);
 
-  const removeToast = (id: string) => {
-    setToasts((current) => current.filter((toast) => toast.id !== id));
-
+  const clearToastTimer = (id: string) => {
     const timer = timersRef.current.get(id);
     if (timer) {
       clearTimeout(timer);
@@ -24,7 +28,15 @@ export default function ForegroundNotificationsBootstrap() {
     }
   };
 
+  const removeToast = (id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+    clearToastTimer(id);
+  };
+
   useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
     let unsubscribe: (() => void) | null = null;
 
     const setup = async () => {
@@ -38,17 +50,26 @@ export default function ForegroundNotificationsBootstrap() {
             id,
             title: notification.title,
             body: notification.body,
-            route: notification.url,
+            route: notification.url || '/student/notifications',
           };
 
-          setToasts((current) => [toast, ...current].slice(0, 4));
+          setToasts((current) => {
+            const next = [toast, ...current];
+
+            if (next.length > 4) {
+              const removed = next.slice(4);
+              removed.forEach((item) => clearToastTimer(item.id));
+            }
+
+            return next.slice(0, 4);
+          });
 
           const timer = setTimeout(() => {
             removeToast(id);
           }, 10000);
 
           timersRef.current.set(id, timer);
-        }
+        },
       );
     };
 
@@ -61,6 +82,7 @@ export default function ForegroundNotificationsBootstrap() {
 
       timersRef.current.forEach((timer) => clearTimeout(timer));
       timersRef.current.clear();
+      initializedRef.current = false;
     };
   }, []);
 
@@ -114,7 +136,7 @@ export default function ForegroundNotificationsBootstrap() {
                 type="button"
                 onClick={() => {
                   window.focus();
-                  window.location.href = toast.route;
+                  router.push(toast.route || '/student/notifications');
                   removeToast(toast.id);
                 }}
                 style={{

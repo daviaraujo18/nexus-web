@@ -1,10 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
-import { initMessaging } from '@/firebase/config';
 import ForegroundNotificationsBootstrap from '@/components/notifications/ForegroundNotificationsBootstrap';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -14,40 +12,6 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  useEffect(() => {
-    const start = async () => {
-      try {
-        if ('serviceWorker' in navigator) {
-          const existing = await navigator.serviceWorker.getRegistration(
-            '/firebase-messaging-sw.js'
-          );
-
-          if (!existing) {
-            const registration = await navigator.serviceWorker.register(
-              '/firebase-messaging-sw.js',
-              {
-                scope: '/',
-                updateViaCache: 'none',
-              }
-            );
-
-            console.log('✅ Service Worker registrado:', registration.scope);
-          } else {
-            console.log('✅ Service Worker já registrado:', existing.scope);
-          }
-
-          await navigator.serviceWorker.ready;
-        }
-
-        await initMessaging();
-      } catch (error) {
-        console.error('❌ Erro ao inicializar app notifications:', error);
-      }
-    };
-
-    void start();
-  }, []);
-
   return (
     <html lang="pt-BR" className={inter.className}>
       <head>

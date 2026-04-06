@@ -5,6 +5,8 @@ if (!admin.apps.length) {
   admin.initializeApp();
 }
 
+const APP_TIMEZONE = 'America/Sao_Paulo';
+
 const ALLOWED_NOTIFICATION_TYPES = [
   'activity_reminder',
   'therapeutic_reminder',
@@ -220,9 +222,39 @@ function parseHourToMinutes(value?: string): number | null {
   return hour * 60 + minute;
 }
 
+function getCurrentTimeContext() {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: APP_TIMEZONE,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(new Date());
+  const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+
+  const weekday = weekdayMap[partMap.weekday ?? ''] ?? 0;
+  const hour = Number(partMap.hour ?? '0');
+  const minute = Number(partMap.minute ?? '0');
+  const currentMinutes = hour * 60 + minute;
+
+  return { weekday, currentMinutes };
+}
+
 function isWithinAllowedDays(days: number[]): boolean {
-  const today = new Date().getDay();
-  return days.includes(today);
+  const { weekday } = getCurrentTimeContext();
+  return days.includes(weekday);
 }
 
 function isWithinAllowedHours(
@@ -235,14 +267,13 @@ function isWithinAllowedHours(
     return true;
   }
 
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const { currentMinutes } = getCurrentTimeContext();
 
   if (startMinutes <= endMinutes) {
-    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
   }
 
-  return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+  return currentMinutes >= startMinutes || currentMinutes < endMinutes;
 }
 
 function isTypeEnabled(
@@ -276,6 +307,7 @@ function getSkipResponse(reason: string) {
     failed: 0,
     failures: [] as PushFailure[],
     skipped: true,
+    skippedCount: 1,
     reason,
   };
 }
@@ -428,16 +460,21 @@ export const sendPushNotification = functions
         getString(rawExtraData.clickAction) ??
         '/student/notifications';
 
+      const sentAt = getString(rawExtraData.sentAt) ?? new Date().toISOString();
+      const resolvedTag =
+        getString(rawExtraData.tag) ??
+        `${notificationType}-${Date.now()}`;
+
       const normalizedExtraData: Record<string, unknown> = {
         ...rawExtraData,
         route,
         url: getString(rawExtraData.url) ?? route,
         clickAction: getString(rawExtraData.clickAction) ?? route,
         type: notificationType,
-        tag: getString(rawExtraData.tag) ?? 'nexus-notification',
+        tag: resolvedTag,
         icon: getString(rawExtraData.icon) ?? '/icons/icon-192x192.png',
         badge: getString(rawExtraData.badge) ?? '/icons/badge-72x72.png',
-        sentAt: getString(rawExtraData.sentAt) ?? new Date().toISOString(),
+        sentAt,
       };
 
       const stringData = toStringMap(normalizedExtraData);
@@ -450,12 +487,18 @@ export const sendPushNotification = functions
         },
         data: stringData,
         webpush: {
+          headers: {
+            Urgency: 'high',
+            TTL: '60',
+          },
           notification: {
             title,
             body,
             icon: stringData.icon,
             badge: stringData.badge,
             tag: stringData.tag,
+            renotify: true,
+            requireInteraction: true,
             data: {
               url: stringData.url,
               clickAction: stringData.clickAction,
@@ -507,6 +550,7 @@ export const sendPushNotification = functions
         failed: response.failureCount,
         failures,
         skipped: false,
+        skippedCount: 0,
         reason: null,
       };
     } catch (error) {
