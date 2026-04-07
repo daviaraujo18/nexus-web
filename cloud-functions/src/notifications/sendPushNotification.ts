@@ -276,16 +276,16 @@ function isWithinAllowedHours(
   return currentMinutes >= startMinutes || currentMinutes < endMinutes;
 }
 
-function isTypeEnabled(
-  preferences: NormalizedNotificationPreferences,
-  notificationType: NormalizedNotificationType,
-): boolean {
-  if (notificationType === 'generic_notification') {
-    return true;
-  }
-
-  return preferences.types[notificationType];
-}
+//function isTypeEnabled(
+//  preferences: NormalizedNotificationPreferences,
+//  notificationType: NormalizedNotificationType,
+//): boolean {
+//  if (notificationType === 'generic_notification') {
+//    return true;
+//  }
+//
+//  return preferences.types[notificationType];
+//}
 
 async function loadNormalizedPreferences(
   db: admin.firestore.Firestore,
@@ -325,19 +325,22 @@ export const sendPushNotification = functions
 
       const payload = (data ?? {}) as RawPayload;
 
-      const userId = getString(payload.userId);
-      const title =
-        getString(payload.title) ??
-        getString(payload.notification?.title);
-
-      const body =
-        getString(payload.body) ??
-        getString(payload.notification?.body);
-
       const rawExtraData =
         payload.data && typeof payload.data === 'object'
           ? payload.data
           : {};
+
+      const userId = getString(payload.userId);
+
+      const title =
+        getString(payload.title) ??
+        getString(payload.notification?.title) ??
+        getString(rawExtraData.title);
+
+      const body =
+        getString(payload.body) ??
+        getString(payload.notification?.body) ??
+        getString(rawExtraData.body);
 
       if (!userId) {
         throw new functions.https.HttpsError(
@@ -365,9 +368,9 @@ export const sendPushNotification = functions
         return getSkipResponse('push-channel-disabled');
       }
 
-      if (!isTypeEnabled(preferences, notificationType)) {
-        return getSkipResponse('notification-type-disabled');
-      }
+      //if (!isTypeEnabled(preferences, notificationType)) {
+        //return getSkipResponse('notification-type-disabled');
+      //}
 
       if (!isWithinAllowedDays(preferences.allowedDays)) {
         return getSkipResponse('outside-allowed-days');
@@ -481,36 +484,11 @@ export const sendPushNotification = functions
 
       const message: admin.messaging.MulticastMessage = {
         tokens,
-        notification: {
-          title,
-          body,
-        },
         data: stringData,
         webpush: {
           headers: {
             Urgency: 'high',
             TTL: '60',
-          },
-          notification: {
-            title,
-            body,
-            icon: stringData.icon,
-            badge: stringData.badge,
-            tag: stringData.tag,
-            renotify: true,
-            requireInteraction: true,
-            data: {
-              url: stringData.url,
-              clickAction: stringData.clickAction,
-              route: stringData.route,
-              type: stringData.type,
-              entityId: stringData.entityId ?? '',
-              tag: stringData.tag,
-              sentAt: stringData.sentAt,
-            },
-          },
-          fcmOptions: {
-            link: route,
           },
         },
       };

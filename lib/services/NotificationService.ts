@@ -461,6 +461,9 @@ export class NotificationService {
   }
 
   static async loadPreferences(userId: string): Promise<FullUserNotificationPreferences> {
+    if (!userId) {
+      throw new Error('loadPreferences chamado sem userId');
+    }
     try {
       const devicePrefs = await this.getUserPreferences(userId);
 
@@ -516,16 +519,13 @@ export class NotificationService {
         url: '/student/notifications',
         clickAction: '/student/notifications',
         route: '/student/notifications',
-        type: 'generic_notification',
+        type: 'activity_reminder',
         ...data,
       };
 
       const payload: SendPushPayload = {
         userId,
-        notification: {
-          title,
-          body,
-        },
+        notification: undefined as any,
         data: {
           title,
           body,

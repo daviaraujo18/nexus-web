@@ -78,12 +78,19 @@ function normalizePreferences(
 
 export const getUserNotificationPreferences = functions
   .region('southamerica-east1')
-  .https.onCall(async (data) => {
+  .https.onCall(async (data, context) => {
     try {
+      if (!context.auth) {
+        throw new functions.https.HttpsError(
+          'unauthenticated',
+          'Usuário não autenticado.',
+        );
+      }
+
       const userId =
         typeof data?.userId === 'string'
-          ? data.userId
-          : null;
+          ? data.userId.trim()
+          : '';
 
       if (!userId) {
         throw new functions.https.HttpsError(
@@ -99,20 +106,21 @@ export const getUserNotificationPreferences = functions
         .get();
 
       if (!doc.exists) {
-        return {
-          preferences: null,
-        };
+        return null;
       }
 
       const normalized = normalizePreferences(
         doc.data() as StoredNotificationPreferences,
       );
 
-      return {
-        preferences: normalized,
-      };
+      return normalized;
+      
     } catch (error) {
       console.error('❌ ERRO getUserNotificationPreferences:', error);
+
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
 
       throw new functions.https.HttpsError(
         'internal',
