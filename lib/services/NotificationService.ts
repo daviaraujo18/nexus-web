@@ -85,9 +85,21 @@ type SendPushPayload = {
   data?: Record<string, unknown>;
 };
 
-type GetUserNotificationPreferencesResponse = {
-  preferences?: Partial<FullUserNotificationPreferences> | null;
+type TypedNotificationInput = {
+  userId: string;
+  title: string;
+  body: string;
+  type: string;
+  route?: string;
+  url?: string;
+  clickAction?: string;
+  tag?: string;
+  entityId?: string;
 };
+
+type GetUserNotificationPreferencesResponse =
+  | Partial<FullUserNotificationPreferences>
+  | null;
 
 type SaveUserNotificationPreferencesPayload = {
   userId: string;
@@ -464,6 +476,7 @@ export class NotificationService {
     if (!userId) {
       throw new Error('loadPreferences chamado sem userId');
     }
+
     try {
       const devicePrefs = await this.getUserPreferences(userId);
 
@@ -473,7 +486,7 @@ export class NotificationService {
       >(functions, 'getUserNotificationPreferences');
 
       const response = await getUserNotificationPreferences({ userId });
-      const persisted = response.data?.preferences ?? null;
+      const persisted = response.data ?? null;
 
       return normalizePreferences(persisted, devicePrefs);
     } catch (error) {
@@ -503,96 +516,43 @@ export class NotificationService {
     debugLog('Preferências persistidas com sucesso.');
   }
 
-  static async sendFCMPushNotification(
-    userId: string,
-    title: string,
-    body: string,
-    data: Record<string, unknown> = {},
-  ): Promise<PushResponse> {
+  static async sendTypedNotification(input: TypedNotificationInput): Promise<PushResponse> {
     try {
       const sendPushNotification = httpsCallable<SendPushPayload, PushResponse>(
         functions,
         'sendPushNotification',
       );
 
-      const mergedData = {
-        url: '/student/notifications',
-        clickAction: '/student/notifications',
-        route: '/student/notifications',
-        type: 'activity_reminder',
-        ...data,
-      };
-
       const payload: SendPushPayload = {
-        userId,
-        notification: undefined as any,
+        userId: input.userId,
+        notification: {
+          title: input.title,
+          body: input.body,
+        },
         data: {
-          title,
-          body,
-          ...mergedData,
+          type: input.type,
+          route: input.route ?? '/student/notifications',
+          url: input.url ?? input.route ?? '/student/notifications',
+          clickAction: input.clickAction ?? input.route ?? '/student/notifications',
+          tag: input.tag ?? `${input.type}-${Date.now()}`,
+          entityId: input.entityId ?? '',
+          sentAt: new Date().toISOString(),
         },
       };
 
       const response = await sendPushNotification(payload);
       return response.data;
     } catch (error) {
-      errorLog('Erro ao enviar push customizado:', error);
+      errorLog('Erro ao enviar notificação tipada:', error);
+
       return {
         success: false,
         sent: 0,
         failed: 1,
         skipped: false,
         skippedCount: 0,
-        reason: 'client-send-failure',
+        reason: 'typed-send-failure',
       };
-    }
-  }
-
-  static async testNotification(
-    userId: string,
-    title?: string,
-    body?: string,
-    data?: Record<string, unknown>,
-  ): Promise<PushResponse | null> {
-    try {
-      if (title || body || data) {
-        return await this.sendFCMPushNotification(
-          userId,
-          title || 'Nova atividade',
-          body || 'Você recebeu uma atualização importante',
-          {
-            url: '/student/notifications',
-            clickAction: '/student/notifications',
-            route: '/student/notifications',
-            type: 'activity_reminder',
-            entityId: '123',
-            ...(data || {}),
-          },
-        );
-      }
-
-      const sendPushNotification = httpsCallable(functions, 'sendPushNotification');
-
-      const payload = {
-        userId,
-        notification: {
-          title: 'Nova atividade',
-          body: 'Você recebeu uma atualização importante',
-        },
-        data: {
-          url: '/student/notifications',
-          clickAction: '/student/notifications',
-          route: '/student/notifications',
-          type: 'activity_reminder',
-          entityId: '123',
-        },
-      };
-
-      const response = await sendPushNotification(payload);
-      return response.data as PushResponse;
-    } catch (error) {
-      errorLog('Erro ao enviar notificação de teste:', error);
-      return null;
     }
   }
 }

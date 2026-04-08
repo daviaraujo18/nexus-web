@@ -109,45 +109,22 @@ messaging.onBackgroundMessage((payload) => {
   self.registration.showNotification(title, options);
 });
 
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
 
-  const data = event.notification?.data || {};
-  const targetUrl =
-    data.clickAction ||
-    data.url ||
-    data.route ||
-    '/student/notifications';
+  let payload;
 
-  const absoluteUrl = normalizeUrl(targetUrl);
-  const targetOrigin = new URL(absoluteUrl).origin;
+  try {
+    payload = event.data.json();
+  } catch (e) {
+    console.error('Push parse error', e);
+    return;
+  }
+
+  const { title, options } = normalizeNotificationPayload(payload);
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if (client.url === absoluteUrl && 'focus' in client) {
-          return client.focus();
-        }
-      }
-
-      for (const client of clientList) {
-        try {
-          const clientOrigin = new URL(client.url).origin;
-
-          if (clientOrigin === targetOrigin && 'navigate' in client && 'focus' in client) {
-            return client.navigate(absoluteUrl).then(() => client.focus());
-          }
-        } catch (_) {
-          // ignora URL inválida do client
-        }
-      }
-
-      if (clients.openWindow) {
-        return clients.openWindow(absoluteUrl);
-      }
-
-      return Promise.resolve();
-    }),
+    self.registration.showNotification(title, options)
   );
 });
 
