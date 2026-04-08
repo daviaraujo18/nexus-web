@@ -484,8 +484,24 @@ export const sendPushNotification = functions
 
       const message: admin.messaging.MulticastMessage = {
         tokens,
+
+        notification: {
+          title,
+          body,
+        },
+
         data: stringData,
+
         webpush: {
+          notification: {
+            title,
+            body,
+            icon: stringData.icon || '/icons/icon-192x192.png',
+            badge: stringData.badge || '/icons/badge-72x72.png',
+            tag: stringData.tag,
+            requireInteraction: true,
+          },
+
           headers: {
             Urgency: 'high',
             TTL: '60',
