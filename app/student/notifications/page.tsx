@@ -143,35 +143,39 @@ export default function NotificationsSettingsPage() {
     setFeedback(null);
 
     try {
-      const route = testCase.route || '/student/notifications';
-
-      const result = await NotificationService.sendTypedNotification({
-        userId: user.id,
-        title: testCase.label,
-        body: testCase.body,
-        type: testCase.key,
-        route,
-        url: route,
-        clickAction: route,
-        tag: `typed-${testCase.key}-${Date.now()}`,
-        entityId: user.id,
+      const response = await fetch('/api/onesignal/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          title: testCase.label,
+          body: testCase.body,
+          type: testCase.key,
+          route: testCase.route,
+        }),
       });
+
+      const result = await response.json();
 
       if (result.success) {
         setFeedback(
-          `✅ Teste "${testCase.label}" enviado. sent=${result.sent} failed=${result.failed}`,
+          `✅ Teste "${testCase.label}" enviado via OneSignal`
         );
       } else {
-        setFeedback(`❌ Falha no teste "${testCase.label}"`);
+        setFeedback(
+          `❌ Falha no teste "${testCase.label}"`
+        );
       }
     } catch (error) {
       console.error(error);
-      setFeedback(`❌ Erro ao enviar "${testCase.label}"`);
+      setFeedback(
+        `❌ Erro ao enviar "${testCase.label}"`
+      );
     } finally {
       setRunningTestKey(null);
     }
   };
-
+  
   const currentDeviceReady = !!fcmStatus?.available && !!fcmStatus?.tokenExists;
 
   if (loading) {
