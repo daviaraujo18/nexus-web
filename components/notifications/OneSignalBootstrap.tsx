@@ -8,29 +8,26 @@ export default function OneSignalBootstrap() {
 
   useEffect(() => {
     if (initializedRef.current) return;
-
-    const appId = process.env.NEXT_SIGNAL_ONESIGNAL_APP_ID;
+    
+    const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 
     if (!appId) {
-      console.warn('[OneSignal] NEXT_PUBLIC_ONESIGNAL_APP_ID não configurado');
+      console.warn('[OneSignal] APP ID não configurado');
       return;
     }
 
     initializedRef.current = true;
 
-    void OneSignal.init({
+    OneSignal.init({
       appId,
       allowLocalhostAsSecureOrigin: true,
-      serviceWorkerPath: '/OneSignalSDKWorker.js',
-      notifyButton: {
-        enable: false,
-      },
+      notifyButton: { enable: false },
     })
       .then(() => {
-        console.log('[OneSignal] inicializado com sucesso');
+        console.log('[OneSignal] inicializado');
       })
       .catch((error) => {
-        console.error('[OneSignal] erro ao inicializar:', error);
+        console.error('[OneSignal] erro:', error);
       });
   }, []);
 
