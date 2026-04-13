@@ -1,5 +1,8 @@
+import { defineSecret } from 'firebase-functions/params';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
-import * as functions from 'firebase-functions';
+
+const ONESIGNAL_REST_API_KEY = defineSecret('ONESIGNAL_REST_API_KEY');
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -312,18 +315,21 @@ function getSkipResponse(reason: string) {
   };
 }
 
-export const sendPushNotification = functions
-  .region('southamerica-east1')
-  .https.onCall(async (data, context) => {
+export const sendPushNotification = onCall(
+  {
+    region: 'southamerica-east1',
+    secrets: [ONESIGNAL_REST_API_KEY],
+  },
+  async (request) => {
     try {
-      if (!context.auth) {
-        throw new functions.https.HttpsError(
+      if (!request.auth) {
+        throw new HttpsError(
           'unauthenticated',
-          'Usuário não autenticado.',
+          'Usuário não autenticado.'
         );
       }
 
-      const payload = (data ?? {}) as RawPayload;
+      const payload = (request.data ?? {}) as RawPayload;
 
       const rawExtraData =
         payload.data && typeof payload.data === 'object'
@@ -343,220 +349,64 @@ export const sendPushNotification = functions
         getString(rawExtraData.body);
 
       if (!userId) {
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          'userId é obrigatório.',
-        );
+        throw new HttpsError('invalid-argument', 'userId é obrigatório.');
       }
 
       if (!title || !body) {
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          'title e body são obrigatórios.',
-        );
+        throw new HttpsError('invalid-argument', 'title e body são obrigatórios.');
       }
 
-      const db = admin.firestore();
-      const notificationType = getNotificationType(rawExtraData.type);
-      const preferences = await loadNormalizedPreferences(db, userId);
+      const stringData = toStringMap(rawExtraData);
 
-      if (!preferences.enabled) {
-        return getSkipResponse('notifications-disabled');
-      }
-
-      if (!preferences.channels.push) {
-        return getSkipResponse('push-channel-disabled');
-      }
-
-      //if (!isTypeEnabled(preferences, notificationType)) {
-        //return getSkipResponse('notification-type-disabled');
-      //}
-
-      if (!isWithinAllowedDays(preferences.allowedDays)) {
-        return getSkipResponse('outside-allowed-days');
-      }
-
-      if (!isWithinAllowedHours(preferences.allowedHours)) {
-        return getSkipResponse('outside-allowed-hours');
-      }
-
-      const tokensSnap = await db
-        .collection('userFCMTokens')
-        .where('userId', '==', userId)
-        .where('active', '==', true)
-        .get();
-
-      if (tokensSnap.empty) {
-        throw new functions.https.HttpsError(
-          'not-found',
-          'Nenhum token FCM ativo encontrado para o usuário.',
-        );
-      }
-
-      const rawTokenDocs: TokenDoc[] = tokensSnap.docs
-        .map((docSnap) => {
-          const docData = docSnap.data();
-          const token = docData?.token;
-          const updatedAt = docData?.updatedAt;
-          const createdAt = docData?.createdAt;
-
-          const updatedAtMillis =
-            updatedAt && typeof updatedAt.toMillis === 'function'
-              ? updatedAt.toMillis()
-              : createdAt && typeof createdAt.toMillis === 'function'
-                ? createdAt.toMillis()
-                : 0;
-
-          return {
-            docId: docSnap.id,
-            token,
-            updatedAtMillis,
-          };
-        })
-        .filter(
-          (item): item is TokenDoc =>
-            typeof item.token === 'string' && item.token.length > 0,
-        );
-
-      if (rawTokenDocs.length === 0) {
-        throw new functions.https.HttpsError(
-          'not-found',
-          'Nenhum token FCM válido encontrado.',
-        );
-      }
-
-      rawTokenDocs.sort((a, b) => b.updatedAtMillis - a.updatedAtMillis);
-
-      const uniqueTokenDocs: TokenDoc[] = [];
-      const duplicateDocIdsToDisable: string[] = [];
-      const seenTokens = new Set<string>();
-
-      for (const item of rawTokenDocs) {
-        if (seenTokens.has(item.token)) {
-          duplicateDocIdsToDisable.push(item.docId);
-          continue;
-        }
-
-        seenTokens.add(item.token);
-        uniqueTokenDocs.push(item);
-      }
-
-      if (duplicateDocIdsToDisable.length > 0) {
-        await Promise.all(
-          duplicateDocIdsToDisable.map((docId) =>
-            db.collection('userFCMTokens').doc(docId).update({
-              active: false,
-              invalidatedAt: admin.firestore.Timestamp.now(),
-              lastErrorCode: 'duplicate-token-doc',
-              lastErrorMessage:
-                'Documento duplicado do mesmo token foi desativado.',
-            }),
-          ),
-        );
-      }
-
-      const tokens = uniqueTokenDocs.map((item) => item.token);
-
-      const route =
-        getString(rawExtraData.route) ??
-        getString(rawExtraData.url) ??
-        getString(rawExtraData.clickAction) ??
-        '/student/notifications';
-
-      const sentAt = getString(rawExtraData.sentAt) ?? new Date().toISOString();
-      const resolvedTag =
-        getString(rawExtraData.tag) ??
-        `${notificationType}-${Date.now()}`;
-
-      const normalizedExtraData: Record<string, unknown> = {
-        ...rawExtraData,
-        route,
-        url: getString(rawExtraData.url) ?? route,
-        clickAction: getString(rawExtraData.clickAction) ?? route,
-        type: notificationType,
-        tag: resolvedTag,
-        icon: getString(rawExtraData.icon) ?? '/icons/icon-192x192.png',
-        badge: getString(rawExtraData.badge) ?? '/icons/badge-72x72.png',
-        sentAt,
-      };
-
-      const stringData = toStringMap(normalizedExtraData);
-
-      const message: admin.messaging.MulticastMessage = {
-        tokens,
-
-        notification: {
-          title,
-          body,
+      const response = await fetch('https://api.onesignal.com/notifications', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${ONESIGNAL_REST_API_KEY.value()}`,
         },
-
-        data: stringData,
-
-        webpush: {
-          notification: {
-            title,
-            body,
-            icon: stringData.icon || '/icons/icon-192x192.png',
-            badge: stringData.badge || '/icons/badge-72x72.png',
-            tag: stringData.tag,
-            requireInteraction: true,
+        body: JSON.stringify({
+          app_id: '7e1def32-df38-4f70-868f-1a46f4f6ba94',
+          include_aliases: {
+            external_id: [userId],
           },
-
-          headers: {
-            Urgency: 'high',
-            TTL: '60',
+          target_channel: 'push',
+          headings: {
+            pt: title,
+            en: title,
           },
-        },
-      };
+          contents: {
+            pt: body,
+            en: body,
+          },
+          data: stringData,
+        }),
+      });
 
-      const response = await admin.messaging().sendEachForMulticast(message);
+      const json = await response.json();
 
-      const failures: PushFailure[] = response.responses
-        .map((result, index) => ({
-          success: result.success,
-          errorCode: result.error?.code ?? null,
-          errorMessage: result.error?.message ?? null,
-          token: tokens[index] ?? null,
-          docId: uniqueTokenDocs[index]?.docId ?? null,
-        }))
-        .filter((item) => !item.success);
-
-      for (const failure of failures) {
-        if (
-          failure.docId &&
-          (
-            failure.errorCode === 'messaging/registration-token-not-registered' ||
-            failure.errorCode === 'messaging/invalid-registration-token'
-          )
-        ) {
-          await db.collection('userFCMTokens').doc(failure.docId).update({
-            active: false,
-            invalidatedAt: admin.firestore.Timestamp.now(),
-            lastErrorCode: failure.errorCode,
-            lastErrorMessage: failure.errorMessage,
-          });
-        }
+      if (!response.ok) {
+        console.error('OneSignal error:', json);
+        throw new HttpsError('internal', 'Falha ao enviar push.');
       }
 
       return {
-        success: response.failureCount === 0,
-        sent: response.successCount,
-        failed: response.failureCount,
-        failures,
+        success: true,
+        sent: 1,
+        failed: 0,
+        failures: [],
         skipped: false,
         skippedCount: 0,
         reason: null,
+        provider: 'onesignal',
       };
     } catch (error) {
       console.error('❌ ERRO FINAL sendPushNotification:', error);
 
-      if (error instanceof functions.https.HttpsError) {
+      if (error instanceof HttpsError) {
         throw error;
       }
 
-      throw new functions.https.HttpsError(
-        'internal',
-        'Falha ao enviar push.',
-      );
+      throw new HttpsError('internal', 'Falha ao enviar push.');
     }
-  });
+  }
+);
