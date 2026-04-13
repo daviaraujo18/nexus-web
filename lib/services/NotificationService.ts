@@ -1,6 +1,7 @@
 import { getToken, deleteToken, onMessage, type MessagePayload } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import { functions, getMessagingInstance } from '@/firebase/config';
+import { ProviderManager } from '@/lib/services/providers/ProviderManager';
 
 type FCMStatus = {
   available: boolean;
@@ -223,9 +224,26 @@ function normalizePreferences(
 }
 
 export class NotificationService {
+  private static provider = ProviderManager.fromConfig();
   private static serviceWorkerRegistrationPromise: Promise<ServiceWorkerRegistration | null> | null =
     null;
+  static async initializeProvider(): Promise<void> {
+    try {
+      await this.provider.initialize();
+    } catch (error) {
+      errorLog('Provider initialization failed:', error);
+    }
+  }
 
+  static async registerUser(userId: string): Promise<boolean> {
+    try {
+      await this.initializeProvider();
+      return await this.provider.registerUser(userId);
+    } catch (error) {
+      errorLog('Provider registerUser failed:', error);
+      return false;
+    }
+  }
   static async isSupported(): Promise<boolean> {
     if (!isBrowser) return false;
 
@@ -284,6 +302,20 @@ export class NotificationService {
       return 'denied';
     }
 
+    try {
+      await this.initializeProvider();
+
+      // try provider first
+      const permission = await this.provider.requestPermission();
+
+      if (permission) {
+        return permission;
+      }
+    } catch (error) {
+      errorLog('Provider permission failed, fallback to browser:', error);
+    }
+
+    // fallback browser
     try {
       const permission = await Notification.requestPermission();
       debugLog('Permissão de notificação:', permission);
@@ -425,6 +457,24 @@ export class NotificationService {
     if (!isBrowser) return null;
 
     try {
+      // initialize provider
+      await this.initializeProvider();
+
+      // try provider first
+      const unsubscribe = await this.provider.setupForegroundMessage(
+        (notification) => {
+          debugLog('Mensagem recebida via provider:', notification);
+          onNotification(notification, null as unknown as MessagePayload);
+        },
+      );
+
+      return unsubscribe;
+    } catch (error) {
+      errorLog('Provider foreground failed, fallback to FCM:', error);
+    }
+
+    // fallback FCM
+    try {
       const messaging = await getMessagingInstance();
 
       if (!messaging) {
@@ -433,7 +483,7 @@ export class NotificationService {
       }
 
       const unsubscribe = onMessage(messaging, (payload) => {
-        debugLog('Mensagem recebida em foreground:', payload);
+        debugLog('Mensagem recebida em foreground (fallback FCM):', payload);
 
         const normalized = normalizeForegroundPayload(payload);
         onNotification(normalized, payload);

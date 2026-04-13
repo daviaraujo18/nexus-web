@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --experimental-https",
+    "build": "NEXT_DISABLE_TURBOPACK=1 next build",
     "start": "next start",
     "lint": "eslint"
   },
@@ -15,7 +15,7 @@
     "firebase-admin": "^13.6.0",
     "firebase-functions": "^7.0.3",
     "framer-motion": "^12.29.2",
-    "next": "16.1.1",
+    "next": "^15.2.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-hook-form": "^7.70.0",
@@ -29,7 +29,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.1.1",
+    "eslint-config-next": "^15.2.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

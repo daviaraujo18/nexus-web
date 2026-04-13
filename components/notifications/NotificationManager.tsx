@@ -1,37 +1,32 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import OneSignal from 'react-onesignal';
+import { useState } from 'react';
+import { NotificationService } from '@/lib/services/NotificationService';
 
 export default function NotificationManager() {
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [debug, setDebug] = useState('');
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    OneSignal.login(String(user.id));
-  }, [user?.id]);
 
   const requestPermission = async () => {
     setLoading(true);
 
     try {
-      await OneSignal.Notifications.requestPermission();
-      setDebug('✅ Permissão concedida');
-    } catch (e) {
+      const permission = await NotificationService.requestNotificationPermission();
+      setDebug(
+        permission === 'granted'
+          ? '✅ Permissão concedida'
+          : '⚠️ Permissão não concedida'
+      );
+    } catch (error) {
+      console.error('[NotificationManager] requestPermission failed:', error);
       setDebug('❌ Erro ao pedir permissão');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const testNotification = async () => {
-    setDebug(
-      '⚠️ Teste deve ser disparado via dashboard OneSignal ou backend'
-    );
+    setDebug('⚠️ Teste deve ser disparado via dashboard OneSignal ou backend');
   };
 
   return (
@@ -39,24 +34,22 @@ export default function NotificationManager() {
       <div className="flex gap-2">
         <button
           onClick={requestPermission}
-          className="px-3 py-1 bg-blue-600 text-white rounded"
+          disabled={loading}
+          className="px-3 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
         >
-          Ativar
+          {loading ? 'Carregando...' : 'Ativar'}
         </button>
 
-        <button 
+        <button
           onClick={testNotification}
-          className="px-3 py-1 bg-green-600 text-white rounded"
+          disabled={loading}
+          className="px-3 py-1 bg-green-600 text-white rounded disabled:opacity-50"
         >
           Testar
         </button>
       </div>
 
-      {debug && (
-        <div className="mt-3 text-sm">
-          {debug}
-        </div>
-      )}
+      {debug && <div className="mt-3 text-sm">{debug}</div>}
     </div>
   );
 }

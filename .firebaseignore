@@ -1,0 +1,9 @@
+node_modules
+cloud-functions/node_modules
+**/node_modules
+.next
+.git
+.firebase
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

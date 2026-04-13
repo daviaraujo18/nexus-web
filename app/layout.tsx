@@ -3,8 +3,6 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
-import OneSignalBootstrap from '@/components/notifications/OneSignalBootstrap';
-import OneSignalUserSync from '@/components/notifications/OneSignalUserSync';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -22,8 +20,6 @@ export default function RootLayout({
       </head>
       <body>
         <AuthProvider>
-          <OneSignalBootstrap />
-          <OneSignalUserSync />
           {children}
         </AuthProvider>
       </body>

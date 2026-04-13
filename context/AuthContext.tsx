@@ -299,7 +299,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           buildFallbackUser(firebaseUser.uid, resolvedType, firebaseUser.email);
 
         setUser(userData);
-        await registerFCMToken(firebaseUser.uid);
+        await NotificationService.registerUser(firebaseUser.uid);
       } catch (error) {
         console.warn('⚠️ Erro ao hidratar usuário autenticado:', error);
         setUser(null);
