@@ -1,21 +1,16 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from 'eslint-config-next/core-web-vitals.js'
+import nextVitals from "eslint-config-next/core-web-vitals.js";
 import nextTs from "eslint-config-next/typescript.js";
 
-const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
-  // Override default ignores of eslint-config-next.
+export default defineConfig([
+  nextVitals,
+  nextTs,
   globalIgnores([
-    // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
-    'cloud-functions/**',
-    '.next/**',
-    'node_modules/**'
+    "cloud-functions/**",
+    "node_modules/**",
   ]),
 ]);
-
-export default eslintConfig;
