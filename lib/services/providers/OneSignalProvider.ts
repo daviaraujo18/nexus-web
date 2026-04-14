@@ -62,6 +62,8 @@ export class OneSignalProvider implements PushProvider {
         await OneSignal.init({
           appId,
           allowLocalhostAsSecureOrigin: true,
+          serviceWorkerPath: '/OneSignalSDKWorker.js',
+          serviceWorkerUpdaterPath: '/OneSignalSDKUpdaterWorker.js',
         });
 
         this.initialized = true;
