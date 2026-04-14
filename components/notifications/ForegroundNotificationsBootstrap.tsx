@@ -42,8 +42,6 @@ export default function ForegroundNotificationsBootstrap() {
     const setup = async () => {
       unsubscribe = await NotificationService.setupForegroundNotifications(
         (notification: NormalizedNotification) => {
-          console.log('📩 Foreground notification recebida no bootstrap:', notification);
-
           const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
           const toast: ToastItem = {
