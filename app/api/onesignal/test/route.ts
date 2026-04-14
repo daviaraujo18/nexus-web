@@ -3,7 +3,11 @@ import { NextResponse } from 'next/server';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
+    console.log('ONESIGNAL KEY EXISTS:', !!process.env.ONESIGNAL_REST_API_KEY);
+    console.log(
+      'ONESIGNAL KEY PREFIX:',
+      process.env.ONESIGNAL_REST_API_KEY?.slice(0, 6)
+    );
     const response = await fetch('https://api.onesignal.com/notifications', {
       method: 'POST',
       headers: {
