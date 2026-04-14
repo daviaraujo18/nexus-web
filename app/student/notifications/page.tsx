@@ -20,9 +20,9 @@ import {
 
 type Preferences = FullUserNotificationPreferences;
 
-type FcmStatus = {
+type PushStatus = {
   available: boolean;
-  tokenExists: boolean;
+  subscriptionExists: boolean;
 };
 
 type NotificationTestCase = {
@@ -92,7 +92,7 @@ export default function NotificationsSettingsPage() {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [devicePreferences, setDevicePreferences] =
     useState<UserNotificationPreferences | null>(null);
-  const [fcmStatus, setFcmStatus] = useState<FcmStatus | null>(null);
+  const [pushStatus, setPushStatus] = useState<PushStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -102,7 +102,7 @@ export default function NotificationsSettingsPage() {
     if (!user?.id) {
       setPreferences(null);
       setDevicePreferences(null);
-      setFcmStatus(null);
+      setPushStatus(null);
       setLoading(false);
       return;
     }
@@ -113,16 +113,16 @@ export default function NotificationsSettingsPage() {
 
       const [devicePrefs, status, persistedPrefs] = await Promise.all([
         NotificationService.getUserPreferences(user.id),
-        NotificationService.checkFCMAvailability(),
+        NotificationService.getPushStatus(),
         NotificationService.loadPreferences(user.id),
       ]);
 
       setDevicePreferences(devicePrefs);
       setPreferences(persistedPrefs);
 
-      setFcmStatus({
+      setPushStatus({
         available: status.available || devicePrefs.supported,
-        tokenExists: status.tokenExists || devicePrefs.tokenExists,
+        subscriptionExists: status.subscriptionExists || devicePrefs.tokenExists,
       });
     } catch (error) {
       console.error('Erro ao carregar page de notificações:', error);
@@ -176,7 +176,7 @@ export default function NotificationsSettingsPage() {
     }
   };
   
-  const currentDeviceReady = !!fcmStatus?.available && !!fcmStatus?.tokenExists;
+  const currentDeviceReady = !!pushStatus?.available && !!pushStatus?.subscriptionExists;
 
   if (loading) {
     return <div>Carregando...</div>;

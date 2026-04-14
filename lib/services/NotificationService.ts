@@ -4,9 +4,9 @@ import { ProviderManager } from '@/lib/services/providers/ProviderManager';
 
 type MessagePayload = any;
 
-type FCMStatus = {
+type PushStatus = {
   available: boolean;
-  tokenExists: boolean;
+  subscriptionExists: boolean;
 };
 
 type NotificationSupportStatus = {
@@ -294,16 +294,6 @@ export class NotificationService {
     }
   }
 
-  static async getFCMToken(): Promise<string | null> {
-    debugLog('getFCMToken is deprecated after removing FCM.');
-    return null;
-  }
-
-  static async saveFCMToken(token: string): Promise<boolean> {
-    debugLog('saveFCMToken is deprecated after removing FCM.');
-    return false;
-  }
-
   static async enableNotifications(): Promise<{
     success: boolean;
     permission: NotificationPermission;
@@ -323,27 +313,6 @@ export class NotificationService {
       success: permission === 'granted',
       permission,
       token: null,
-    };
-  }
-
-  static async removeFCMToken(): Promise<boolean> {
-    debugLog('removeFCMToken is deprecated after removing FCM.');
-    return false;
-  }
-
-  static async resetFCMToken(_userId?: string): Promise<string | null> {
-    await this.removeFCMToken();
-
-    const result = await this.enableNotifications();
-    return result.token;
-  }
-
-  static async getFCMStatus(): Promise<FCMStatus> {
-    const supportStatus = await this.getSupportStatus();
-
-    return {
-      available: supportStatus.supported,
-      tokenExists: false,
     };
   }
 
@@ -373,12 +342,15 @@ export class NotificationService {
     return this.setupForegroundMessageListener(onNotification);
   }
 
-  static async checkFCMAvailability(): Promise<FCMStatus> {
-    return this.getFCMStatus();
-  }
+  static async getPushStatus(): Promise<PushStatus> {
+    const supportStatus = await this.getSupportStatus();
+    await this.initializeProvider();
+    const providerStatus = await this.provider.getStatus();
 
-  static async getCurrentFCMToken(): Promise<string | null> {
-    return this.getFCMToken();
+    return {
+      available: supportStatus.supported,
+      subscriptionExists: providerStatus.subscriptionExists,
+    };
   }
 
   static async getUserPreferences(_userId: string): Promise<UserNotificationPreferences> {
