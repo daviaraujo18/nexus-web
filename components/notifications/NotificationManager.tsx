@@ -2,10 +2,12 @@
 
 import { useState } from 'react';
 import { NotificationService } from '@/lib/services/NotificationService';
+import { useAuth } from '@/context/AuthContext';
 
 export default function NotificationManager() {
   const [loading, setLoading] = useState(false);
   const [debug, setDebug] = useState('');
+  const { user } = useAuth();
 
   const requestPermission = async () => {
     setLoading(true);
@@ -26,7 +28,34 @@ export default function NotificationManager() {
   };
 
   const testNotification = async () => {
-    setDebug('⚠️ Teste deve ser disparado via dashboard OneSignal ou backend');
+    if (!user?.id) {
+      setDebug('❌ Usuário não logado');
+      return;
+    }
+
+    setLoading(true);
+    setDebug('Enviando notificação real...');
+
+    try {
+      const result = await NotificationService.sendTypedNotification({
+        userId: user.id,
+        title: 'Teste Real OneSignal',
+        body: `Notificação de teste enviada em ${new Date().toLocaleTimeString()}`,
+        type: 'message',
+        route: '/student/notifications',
+      });
+
+      setDebug(
+        result.success
+          ? `✅ Enviado! (sent: ${result.sent}, failed: ${result.failed})`
+          : `❌ Falha: ${result.reason || 'desconhecida'}`
+      );
+    } catch (error) {
+      console.error('[NotificationManager] teste falhou:', error);
+      setDebug('❌ Erro ao enviar notificação');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
