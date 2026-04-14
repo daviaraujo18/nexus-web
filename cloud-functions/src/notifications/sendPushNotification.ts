@@ -365,7 +365,7 @@ export const sendPushNotification = onCall(
           Authorization: `Basic ${ONESIGNAL_REST_API_KEY.value()}`,
         },
         body: JSON.stringify({
-          app_id: '7e1def32-df38-4f70-868f-1a46f4f6ba94',
+          app_id: '3306949a-e7f5-4273-9c5b-9d0d8bbc3705',
           include_aliases: {
             external_id: [userId],
           },
