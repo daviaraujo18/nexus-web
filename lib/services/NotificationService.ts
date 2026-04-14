@@ -1,7 +1,8 @@
-import { getToken, deleteToken, onMessage, type MessagePayload } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
-import { functions, getMessagingInstance } from '@/firebase/config';
+import { functions } from '@/firebase/config';
 import { ProviderManager } from '@/lib/services/providers/ProviderManager';
+
+type MessagePayload = any;
 
 type FCMStatus = {
   available: boolean;
@@ -225,8 +226,7 @@ function normalizePreferences(
 
 export class NotificationService {
   private static provider = ProviderManager.fromConfig();
-  private static serviceWorkerRegistrationPromise: Promise<ServiceWorkerRegistration | null> | null =
-    null;
+
   static async initializeProvider(): Promise<void> {
     try {
       await this.provider.initialize();
@@ -250,17 +250,7 @@ export class NotificationService {
     const hasNotification = 'Notification' in window;
     const hasServiceWorker = 'serviceWorker' in navigator;
 
-    if (!hasNotification || !hasServiceWorker) {
-      return false;
-    }
-
-    try {
-      const messaging = await getMessagingInstance();
-      return Boolean(messaging);
-    } catch (error) {
-      errorLog('Erro ao verificar suporte do Messaging:', error);
-      return false;
-    }
+    return hasNotification && hasServiceWorker;
   }
 
   static async getSupportStatus(): Promise<NotificationSupportStatus> {
@@ -271,28 +261,6 @@ export class NotificationService {
       permission: supported ? Notification.permission : 'denied',
       serviceWorker: isBrowser && 'serviceWorker' in navigator,
     };
-  }
-
-  static async registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
-    if (!isBrowser || !('serviceWorker' in navigator)) {
-      return null;
-    }
-
-    if (!this.serviceWorkerRegistrationPromise) {
-      this.serviceWorkerRegistrationPromise = navigator.serviceWorker
-        .register('/firebase-messaging-sw.js')
-        .then((registration) => {
-          debugLog('Service Worker registrado:', registration.scope);
-          return registration;
-        })
-        .catch((error) => {
-          errorLog('Erro ao registrar Service Worker:', error);
-          this.serviceWorkerRegistrationPromise = null;
-          return null;
-        });
-    }
-
-    return this.serviceWorkerRegistrationPromise;
   }
 
   static async requestNotificationPermission(): Promise<NotificationPermission> {
@@ -327,61 +295,13 @@ export class NotificationService {
   }
 
   static async getFCMToken(): Promise<string | null> {
-    const supported = await this.isSupported();
-    if (!supported) return null;
-
-    if (Notification.permission !== 'granted') {
-      debugLog('Permissão não concedida para obter token.');
-      return null;
-    }
-
-    try {
-      const registration = await this.registerServiceWorker();
-      if (!registration) {
-        errorLog('Service Worker não disponível para obter token.');
-        return null;
-      }
-
-      const messaging = await getMessagingInstance();
-      if (!messaging) {
-        errorLog('Firebase Messaging não disponível.');
-        return null;
-      }
-
-      const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY;
-      if (!vapidKey) {
-        errorLog('NEXT_PUBLIC_FIREBASE_VAPID_KEY não configurada.');
-        return null;
-      }
-
-      const token = await getToken(messaging, {
-        vapidKey,
-        serviceWorkerRegistration: registration,
-      });
-
-      if (!token) {
-        debugLog('Nenhum token FCM retornado.');
-        return null;
-      }
-
-      debugLog('Token FCM obtido com sucesso.');
-      return token;
-    } catch (error) {
-      errorLog('Erro ao obter token FCM:', error);
-      return null;
-    }
+    debugLog('getFCMToken is deprecated after removing FCM.');
+    return null;
   }
 
   static async saveFCMToken(token: string): Promise<boolean> {
-    try {
-      const saveUserFCMToken = httpsCallable(functions, 'saveUserFCMToken');
-      await saveUserFCMToken({ token });
-      debugLog('Token FCM salvo com sucesso.');
-      return true;
-    } catch (error) {
-      errorLog('Erro ao salvar token FCM:', error);
-      return false;
-    }
+    debugLog('saveFCMToken is deprecated after removing FCM.');
+    return false;
   }
 
   static async enableNotifications(): Promise<{
@@ -399,55 +319,31 @@ export class NotificationService {
       };
     }
 
-    const token = await this.getFCMToken();
-
-    if (!token) {
-      return {
-        success: false,
-        permission,
-        token: null,
-      };
-    }
-
-    const saved = await this.saveFCMToken(token);
-
     return {
-      success: saved,
+      success: permission === 'granted',
       permission,
-      token: saved ? token : null,
+      token: null,
     };
   }
 
   static async removeFCMToken(): Promise<boolean> {
-    try {
-      const messaging = await getMessagingInstance();
-      if (!messaging) {
-        return false;
-      }
-
-      const deleted = await deleteToken(messaging);
-      debugLog('Token removido do cliente:', deleted);
-      return deleted;
-    } catch (error) {
-      errorLog('Erro ao remover token:', error);
-      return false;
-    }
+    debugLog('removeFCMToken is deprecated after removing FCM.');
+    return false;
   }
 
   static async resetFCMToken(_userId?: string): Promise<string | null> {
     await this.removeFCMToken();
 
     const result = await this.enableNotifications();
-    return result.success ? result.token : null;
+    return result.token;
   }
 
   static async getFCMStatus(): Promise<FCMStatus> {
     const supportStatus = await this.getSupportStatus();
-    const token = await this.getFCMToken();
 
     return {
       available: supportStatus.supported,
-      tokenExists: !!token,
+      tokenExists: false,
     };
   }
 
@@ -457,41 +353,16 @@ export class NotificationService {
     if (!isBrowser) return null;
 
     try {
-      // initialize provider
       await this.initializeProvider();
 
-      // try provider first
-      const unsubscribe = await this.provider.setupForegroundMessage(
-        (notification) => {
-          debugLog('Mensagem recebida via provider:', notification);
-          onNotification(notification, null as unknown as MessagePayload);
-        },
-      );
-
-      return unsubscribe;
-    } catch (error) {
-      errorLog('Provider foreground failed, fallback to FCM:', error);
-    }
-
-    // fallback FCM
-    try {
-      const messaging = await getMessagingInstance();
-
-      if (!messaging) {
-        errorLog('Messaging indisponível no foreground listener.');
-        return null;
-      }
-
-      const unsubscribe = onMessage(messaging, (payload) => {
-        debugLog('Mensagem recebida em foreground (fallback FCM):', payload);
-
-        const normalized = normalizeForegroundPayload(payload);
-        onNotification(normalized, payload);
+      const unsubscribe = await this.provider.setupForegroundMessage((notification) => {
+        debugLog('Mensagem recebida via provider:', notification);
+        onNotification(notification, null as MessagePayload);
       });
 
       return unsubscribe;
     } catch (error) {
-      errorLog('Erro ao configurar foreground listener:', error);
+      errorLog('Provider foreground failed:', error);
       return null;
     }
   }
@@ -512,13 +383,14 @@ export class NotificationService {
 
   static async getUserPreferences(_userId: string): Promise<UserNotificationPreferences> {
     const supportStatus = await this.getSupportStatus();
-    const fcmStatus = await this.getFCMStatus();
+    await this.initializeProvider();
+    const providerStatus = await this.provider.getStatus();
 
     return {
-      enabled: supportStatus.permission === 'granted' && fcmStatus.tokenExists,
+      enabled: supportStatus.permission === 'granted' && providerStatus.subscriptionExists,
       permission: supportStatus.permission,
       supported: supportStatus.supported,
-      tokenExists: fcmStatus.tokenExists,
+      tokenExists: providerStatus.subscriptionExists,
     };
   }
 

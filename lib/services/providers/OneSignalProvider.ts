@@ -5,7 +5,6 @@
  */
 
 import OneSignal from 'react-onesignal';
-import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase/config';
 import type {
   PushProvider,

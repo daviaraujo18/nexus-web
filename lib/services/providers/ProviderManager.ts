@@ -4,7 +4,6 @@
  * Implements failover and dual-mode operation
  */
 
-import { FCMProvider } from './FCMProvider';
 import { OneSignalProvider } from './OneSignalProvider';
 import type {
   PushProvider,
@@ -13,16 +12,11 @@ import type {
   NotificationPermission,
 } from './types';
 
-type ProviderMode = 'fcm' | 'onesignal' | 'dual';
-
-interface ProviderConfig {
-  mode: ProviderMode;
-  // Note: In dual mode, OneSignal is always preferred (no config option needed)
-}
+interface ProviderConfig {}
 
 /**
  * ProviderManager: Manages provider selection and initialization
- * Supports feature flags for safe A/B testing and gradual rollout
+ * Uses OneSignal as the only supported push provider.
  *
  * USAGE PATTERN (Do NOT access ProviderManager directly from components/context):
  *   AuthContext/Components
@@ -31,33 +25,26 @@ interface ProviderConfig {
  *       ↓
  *   ProviderManager (internal routing)
  *       ↓
- *   FCMProvider or OneSignalProvider (active provider)
+ *   OneSignalProvider (active provider)
  *
  * NotificationService should expose public methods like:
  *   - NotificationService.registerUser(userId)
  *   - NotificationService.requestPermission()
  *   - NotificationService.getSubscriptionId()
  *   etc.
- *
- * These internally delegate to this ProviderManager.
  */
 export class ProviderManager {
-  private mode: ProviderMode;
-  private fcm: FCMProvider;
   private oneSignal: OneSignalProvider;
   private activeProvider: PushProvider | null = null;
   private initPromise: Promise<void> | null = null;
 
-  constructor(config: ProviderConfig = { mode: 'fcm' }) {
-    this.mode = config.mode;
-    this.fcm = new FCMProvider();
+  constructor(config: ProviderConfig = {}) {
     this.oneSignal = new OneSignalProvider();
 
-    this.log(`Initialized with mode: ${this.mode}`);
+    this.log('Initialized in OneSignal-only mode');
   }
 
   async initialize(): Promise<void> {
-    // Prevent multiple initialization attempts
     if (this.initPromise) {
       return this.initPromise;
     }
@@ -72,34 +59,15 @@ export class ProviderManager {
   }
 
   private async doInitialize(): Promise<void> {
-    this.log(`Starting initialization in mode: ${this.mode}`);
+    this.log('Starting OneSignal initialization');
 
-    if (this.mode === 'fcm') {
-      await this.initFCM();
-    } else if (this.mode === 'onesignal') {
-      await this.initOneSignal();
-    } else if (this.mode === 'dual') {
-      await this.initDual();
-    }
+    await this.initOneSignal();
 
     if (!this.activeProvider) {
-      throw new Error(
-        `[ProviderManager] No notification provider initialized (mode: ${this.mode})`
-      );
+      throw new Error('[ProviderManager] No notification provider initialized (onesignal)');
     }
 
     this.log(`Initialization complete, active provider: ${this.activeProvider.name}`);
-  }
-
-  private async initFCM(): Promise<void> {
-    try {
-      await this.fcm.initialize();
-      this.activeProvider = this.fcm;
-      this.log('FCM initialized successfully');
-    } catch (error) {
-      this.errorLog('FCM initialization failed:', error);
-      throw error;
-    }
   }
 
   private async initOneSignal(): Promise<void> {
@@ -110,50 +78,6 @@ export class ProviderManager {
     } catch (error) {
       this.errorLog('OneSignal initialization failed:', error);
       throw error;
-    }
-  }
-
-  private async initDual(): Promise<void> {
-    // In dual mode: Initialize both providers
-    // OneSignal is preferred for all operations (fallback to FCM if OneSignal fails)
-    // This provides graceful degradation: if OneSignal is unavailable, FCM ensures notifications work
-
-    const fcmPromise = this.fcm
-      .initialize()
-      .then(() => {
-        this.log('FCM initialized in dual mode (fallback)');
-        return true;
-      })
-      .catch((error) => {
-        this.log('FCM initialization failed in dual mode (non-critical):', error);
-        return false;
-      });
-
-    const oneSignalPromise = this.oneSignal
-      .initialize()
-      .then(() => {
-        this.log('OneSignal initialized in dual mode (primary)');
-        return true;
-      })
-      .catch((error) => {
-        this.errorLog('OneSignal initialization failed in dual mode:', error);
-        return false;
-      });
-
-    const [fcmSuccess, oneSignalSuccess] = await Promise.all([fcmPromise, oneSignalPromise]);
-
-    if (!fcmSuccess && !oneSignalSuccess) {
-      throw new Error('[ProviderManager] Both FCM and OneSignal initialization failed in dual mode');
-    }
-
-    // In dual mode, OneSignal is primary. FCM is fallback.
-    // Always use OneSignal for operations if available.
-    if (oneSignalSuccess) {
-      this.activeProvider = this.oneSignal;
-      this.log('Dual mode: OneSignal set as primary provider (FCM fallback available)');
-    } else if (fcmSuccess) {
-      this.activeProvider = this.fcm;
-      this.log('Dual mode: FCM set as provider (OneSignal unavailable)');
     }
   }
 
@@ -225,17 +149,13 @@ export class ProviderManager {
    * Create ProviderManager from environment configuration
    */
   static fromConfig(): ProviderManager {
-    const modeEnv = process.env.NEXT_PUBLIC_NOTIFICATION_PROVIDER ?? 'fcm';
-    const mode = (modeEnv as ProviderMode) || 'fcm';
-
-    if (!['fcm', 'onesignal', 'dual'].includes(mode)) {
+    const modeEnv = process.env.NEXT_PUBLIC_NOTIFICATION_PROVIDER ?? 'onesignal';
+    if (modeEnv !== 'onesignal') {
       console.warn(
-        `[ProviderManager] Invalid NEXT_PUBLIC_NOTIFICATION_PROVIDER: ${mode}, defaulting to 'fcm'`
+        `[ProviderManager] Invalid or unsupported NEXT_PUBLIC_NOTIFICATION_PROVIDER: ${modeEnv}, defaulting to 'onesignal'`
       );
-      return new ProviderManager({ mode: 'fcm' });
     }
-
-    return new ProviderManager({ mode });
+    return new ProviderManager();
   }
 
   private async ensureInitialized(): Promise<void> {

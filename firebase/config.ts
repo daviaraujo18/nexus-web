@@ -3,11 +3,6 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import {
-  getMessaging,
-  isSupported,
-  type Messaging,
-} from 'firebase/messaging';
-import {
   getFunctions,
   connectFunctionsEmulator,
 } from 'firebase/functions';
@@ -43,33 +38,4 @@ if (USE_FUNCTIONS_EMULATOR) {
   console.log('🚀 Firebase Functions real');
 }
 
-let messagingInstance: Messaging | null = null;
-
-export const initMessaging = async (): Promise<Messaging | null> => {
-  if (typeof window === 'undefined') return null;
-  if (messagingInstance) return messagingInstance;
-
-  try {
-    const supported = await isSupported();
-
-    if (!supported) {
-      console.warn('⚠️ Firebase Messaging não suportado neste navegador');
-      return null;
-    }
-
-    messagingInstance = getMessaging(app);
-    console.log('✅ Firebase Messaging inicializado');
-    return messagingInstance;
-  } catch (error) {
-    console.error('❌ Erro ao inicializar Firebase Messaging:', error);
-    return null;
-  }
-};
-
-export const getMessagingInstance = async (): Promise<Messaging | null> => {
-  if (messagingInstance) return messagingInstance;
-  return initMessaging();
-};
-
-export { messagingInstance as messaging };
 export default app;

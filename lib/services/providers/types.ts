@@ -28,7 +28,7 @@ export interface ProviderStatus {
  * All push notification providers must implement this contract
  */
 export interface PushProvider {
-  name: 'fcm' | 'onesignal';
+  name: 'onesignal';
 
   /**
    * Initialize provider with configuration
