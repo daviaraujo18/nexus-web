@@ -97,7 +97,6 @@ export default function NotificationsSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [runningTestKey, setRunningTestKey] = useState<string | null>(null);
-  const [testingReal, setTestingReal] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user?.id) {
@@ -177,29 +176,6 @@ export default function NotificationsSettingsPage() {
     }
   };
 
-  const sendRealTestNotification = async () => {
-    if (!user?.id || testingReal) return;
-
-    setTestingReal(true);
-    setFeedback('⏳ Enviando notificação real...');
-
-    try {
-      const result = await NotificationService.sendTypedNotification({
-        userId: user.id,
-        title: 'Teste Real OneSignal',
-        body: `Notificação de teste enviada em ${new Date().toLocaleTimeString()}`,
-        type: 'message',
-        route: '/student/notifications',
-      });
-
-      setFeedback(result.success ? '✅ Notificação enviada!' : `❌ Falha: ${result.reason || 'desconhecida'}`);
-    } catch (error) {
-      setFeedback('❌ Erro ao enviar notificação');
-    } finally {
-      setTestingReal(false);
-    }
-  };
-
   const currentDeviceReady = !!pushStatus?.available && !!pushStatus?.subscriptionExists;
 
   if (loading) {
@@ -217,18 +193,6 @@ export default function NotificationsSettingsPage() {
           {feedback}
         </div>
       )}
-
-      {/* Teste Real via Cloud Function */}
-      <div className="mb-4 p-4 border-2 border-purple-200 rounded-lg bg-purple-50">
-        <h2 className="font-semibold text-purple-800 mb-2">Teste Real - Cloud Function</h2>
-        <button
-          onClick={sendRealTestNotification}
-          disabled={testingReal || !user?.id}
-          className="px-4 py-2 bg-purple-600 text-white rounded disabled:opacity-50"
-        >
-          {testingReal ? 'Enviando...' : 'Enviar Notificação Real'}
-        </button>
-      </div>
 
       <div className="space-y-3">
         {NOTIFICATION_TEST_CASES.map((testCase) => (
