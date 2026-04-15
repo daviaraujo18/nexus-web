@@ -28,6 +28,8 @@ export default function NotificationManager() {
   };
 
   const testNotification = async () => {
+    console.log('[TEST CLICK] Botão Testar clicado');
+    setDebug('clicou no botão testar');
     if (!user?.id) {
       setDebug('❌ Usuário não logado');
       return;
