@@ -1,5 +1,5 @@
 // lib/notifications/services/NotificationEventService.ts
-import { OneSignalGateway } from '../gateways/OneSignalGateway';
+import { NotificationService } from '@/lib/services/NotificationService';
 import { NotificationPreferenceService, type NotificationKind } from './NotificationPreferenceService';
 
 type DispatchInput = {
@@ -22,13 +22,12 @@ export class NotificationEventService {
       return { sent: false, reason: 'preferences_blocked' as const };
     }
 
-    await OneSignalGateway.send({
+    await NotificationService.sendTypedNotification({
       userId: input.userId,
       title: input.title,
       body: input.body,
       type: input.type,
       route: input.route,
-      data: input.data,
     });
 
     return { sent: true as const };
