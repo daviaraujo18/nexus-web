@@ -29,6 +29,7 @@ import { DateUtils } from '@/lib/utils/dateUtils';
 import { AuditService } from '@/lib/auth/AuditService';
 import { UserService } from '@/lib/auth/UserService';
 import { ProgressService } from './ProgressService';
+import { NotificationEvents } from '@/lib/notifications/events/NotificationEvents';
 
 export class ScheduleInstanceService {
   private static readonly COLLECTIONS = {
@@ -91,6 +92,13 @@ export class ScheduleInstanceService {
           await this.generateWeekActivities(instanceId, 1);
 
           successful.push({ studentId, instanceId });
+
+          // Notificar aluno sobre nova agenda (não bloqueia em caso de erro)
+          try {
+            await NotificationEvents.onScheduleUpdated({ userId: studentId });
+          } catch (notifyError) {
+            console.error(`Falha ao notificar aluno ${studentId} sobre nova agenda:`, notifyError);
+          }
 
           // Log de auditoria
           // COMENTADO
