@@ -1,6 +1,7 @@
 import { defineSecret } from 'firebase-functions/params';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
+import { sendOneSignalPush } from './helpers/sendOneSignalPush';
 
 const ONESIGNAL_REST_API_KEY = defineSecret('ONESIGNAL_REST_API_KEY');
 
@@ -358,36 +359,7 @@ export const sendPushNotification = onCall(
 
       const stringData = toStringMap(rawExtraData);
 
-      const response = await fetch('https://api.onesignal.com/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Basic ${ONESIGNAL_REST_API_KEY.value()}`,
-        },
-        body: JSON.stringify({
-          app_id: '3306949a-e7f5-4273-9c5b-9d0d8bbc3705',
-          include_aliases: {
-            external_id: [userId],
-          },
-          target_channel: 'push',
-          headings: {
-            pt: title,
-            en: title,
-          },
-          contents: {
-            pt: body,
-            en: body,
-          },
-          data: stringData,
-        }),
-      });
-
-      const json = await response.json();
-
-      if (!response.ok) {
-        console.error('OneSignal error:', json);
-        throw new HttpsError('internal', 'Falha ao enviar push.');
-      }
+      await sendOneSignalPush({ userId, title, body, data: stringData, apiKey: ONESIGNAL_REST_API_KEY.value() });
 
       return {
         success: true,

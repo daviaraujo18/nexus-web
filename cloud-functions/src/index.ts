@@ -1,5 +1,6 @@
+export { dailyReminderScheduler } from './notifications/dailyReminderScheduler';
 import * as admin from 'firebase-admin';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 
 if (!admin.apps.length) {
   admin.initializeApp();

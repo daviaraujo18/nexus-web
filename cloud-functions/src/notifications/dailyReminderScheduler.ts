@@ -1,6 +1,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { sendOneSignalPush } from './helpers/sendOneSignalPush';
 
 // Inicializar Firebase Admin se não estiver inicializado
 if (!admin.apps.length) {
@@ -8,7 +9,6 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
-const messaging = admin.messaging();
 
 /**
  * Cloud Function agendada para enviar lembretes diários às 8h00
@@ -26,6 +26,13 @@ export const dailyReminderScheduler = functions
   .timeZone('America/Sao_Paulo')
   .onRun(async () => {
     try {
+      // Validar configuração da API key do OneSignal
+      // @ts-ignore - functions.config() typing issue
+      const ONESIGNAL_REST_API_KEY = functions.config().onesignal?.rest_api_key;
+      if (!ONESIGNAL_REST_API_KEY) {
+        throw new Error('OneSignal REST API key not configured. Run: firebase functions:config:set onesignal.rest_api_key="YOUR_KEY"');
+      }
+
       console.log('🚀 Iniciando envio de lembretes diários...');
       const today = new Date();
       const todayStr = today.toISOString().split('T')[0];
@@ -68,84 +75,62 @@ export const dailyReminderScheduler = functions
             continue;
           }
 
-          // Buscar tokens FCM do aluno
-          const tokens = await getUserFCMTokens(studentId);
-
-          if (tokens.length === 0) {
-            console.log(`⏭️  Nenhum token FCM para ${student.name}`);
-            continue;
-          }
-
-          // Preparar mensagem personalizada
-          const message = {
-            notification: {
-              title: '📚 Nexus - Atividades do Dia',
-              body: buildNotificationBody(student.name, activities),
-            },
-            data: {
-              type: 'daily_reminder',
-              date: todayStr,
-              activityCount: activities.length.toString(),
-              studentId,
-              route: '/student/dashboard',
-              click_action: 'FLUTTER_NOTIFICATION_CLICK'
-            },
-            tokens: tokens,
-            android: {
-              priority: 'high' as const,
-              notification: {
-                channelId: 'daily_reminders',
-                sound: 'default',
-                icon: 'notification_icon',
-                color: '#6366f1'
-              }
-            },
-            apns: {
-              payload: {
-                aps: {
-                  sound: 'default',
-                  badge: activities.length,
-                  category: 'DAILY_REMINDER'
-                }
-              }
-            },
-            webpush: {
-              headers: {
-                Urgency: 'high'
-              },
-              notification: {
-                icon: '/icons/icon-192x192.png',
-                badge: '/icons/badge-72x72.png',
-                vibrate: [200, 100, 200]
-              }
-            }
+          // Preparar dados da notificação
+          const title = '📚 Nexus - Atividades do Dia';
+          const body = buildNotificationBody(student.name, activities);
+          const data = {
+            type: 'activity_reminder',
+            date: todayStr,
+            activityCount: activities.length.toString(),
+            studentId,
+            route: '/student/dashboard',
+            click_action: 'FLUTTER_NOTIFICATION_CLICK'
           };
 
-          // Enviar notificação
-          const response = await messaging.sendEachForMulticast(message);
+          // Enviar notificação via OneSignal
+          try {
+            await sendOneSignalPush({
+              userId: studentId,
+              title,
+              body,
+              data,
+              apiKey: ONESIGNAL_REST_API_KEY
+            });
 
-          // Registrar no histórico
-          await saveNotificationToHistory({
-            userId: studentId,
-            title: message.notification.title,
-            body: message.notification.body,
-            type: 'activity_reminder',
-            channels: ['push'],
-            data: message.data,
-            successCount: response.successCount,
-            failureCount: response.failureCount,
-            sentAt: Timestamp.now()
-          });
+            // Registrar no histórico
+            await saveNotificationToHistory({
+              userId: studentId,
+              title,
+              body,
+              type: 'activity_reminder',
+              channels: ['push'],
+              data,
+              successCount: 1,
+              failureCount: 0,
+              sentAt: Timestamp.now()
+            });
 
-          console.log(`✅ Notificação enviada para ${student.name}: ${response.successCount} sucesso(s), ${response.failureCount} falha(s)`);
+            console.log(`✅ Notificação enviada para ${student.name}`);
+            successCount += 1;
 
-          // Remover tokens inválidos
-          if (response.failureCount > 0) {
-            await cleanupInvalidTokens(studentId, tokens, response.responses);
+          } catch (sendError) {
+            console.error(`❌ Erro ao enviar para ${student.name}:`, sendError);
+
+            // Registrar falha no histórico
+            await saveNotificationToHistory({
+              userId: studentId,
+              title,
+              body,
+              type: 'activity_reminder',
+              channels: ['push'],
+              data,
+              successCount: 0,
+              failureCount: 1,
+              sentAt: Timestamp.now()
+            });
+
+            errorCount += 1;
           }
-
-          successCount += response.successCount;
-          errorCount += response.failureCount;
 
         } catch (studentError) {
           console.error(`❌ Erro no aluno ${studentDoc.id}:`, studentError);
@@ -158,7 +143,7 @@ export const dailyReminderScheduler = functions
       // Registrar métricas
       await db.collection('notificationMetrics').add({
         date: todayStr,
-        type: 'daily_reminder',
+        type: 'activity_reminder',
         totalStudents: studentsSnapshot.size,
         notificationsSent: successCount,
         errors: errorCount,
@@ -224,15 +209,6 @@ async function getTodayActivities(studentId: string, date: Date): Promise<any[]>
   return activities;
 }
 
-async function getUserFCMTokens(userId: string): Promise<string[]> {
-  const tokensSnapshot = await db.collection('userFCMTokens')
-    .where('userId', '==', userId)
-    .where('isActive', '==', true)
-    .get();
-
-  return tokensSnapshot.docs.map(doc => doc.data().token);
-}
-
 function buildNotificationBody(studentName: string, activities: any[]): string {
   const activityCount = activities.length;
 
@@ -260,45 +236,6 @@ function isWithinAllowedHours(date: Date, prefs: any): boolean {
   const endMinutes = endHour * 60 + endMinute;
 
   return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
-}
-
-async function cleanupInvalidTokens(
-  userId: string,
-  tokens: string[],
-  responses: admin.messaging.SendResponse[]
-): Promise<void> {
-  const batch = db.batch();
-  let hasUpdates = false;
-
-  const snapshotPromises = responses.map(async (response, index) => {
-    if (
-      !response.success &&
-      response.error?.code === 'messaging/registration-token-not-registered'
-    ) {
-      const token = tokens[index];
-
-      const snapshot = await db.collection('userFCMTokens')
-        .where('userId', '==', userId)
-        .where('token', '==', token)
-        .get();
-
-      snapshot.forEach(doc => {
-        batch.update(doc.ref, {
-          isActive: false,
-          deactivatedAt: Timestamp.now(),
-          deactivationReason: 'token_invalid'
-        });
-        hasUpdates = true;
-      });
-    }
-  });
-
-  await Promise.all(snapshotPromises);
-
-  if (hasUpdates) {
-    await batch.commit();
-    console.log(`🧹 Tokens inválidos removidos para usuário ${userId}`);
-  }
 }
 
 

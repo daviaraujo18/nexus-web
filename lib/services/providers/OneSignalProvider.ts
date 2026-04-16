@@ -1,7 +1,6 @@
 /**
  * OneSignal Provider Adapter
  * Wraps OneSignal SDK behind PushProvider interface
- * Ready for parallel operation with FCM
  */
 
 import OneSignal from 'react-onesignal';

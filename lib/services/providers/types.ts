@@ -1,6 +1,6 @@
 /**
  * Provider-agnostic interfaces for push notification delivery
- * Abstracts FCM and OneSignal behind a common contract
+ * Abstracts push providers behind a common contract
  */
 
 export type NotificationPermission = 'granted' | 'denied' | 'default';
@@ -47,7 +47,7 @@ export interface PushProvider {
   requestPermission(): Promise<NotificationPermission>;
 
   /**
-   * Get current subscription ID (FCM token, OneSignal subscription ID, etc.)
+   * Get current subscription ID (OneSignal subscription ID, etc.)
    * Returns null if no subscription exists
    */
   getSubscriptionId(): Promise<string | null>;

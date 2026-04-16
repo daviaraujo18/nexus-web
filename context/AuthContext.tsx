@@ -4,7 +4,6 @@ import React, {
   createContext,
   useContext,
   useEffect,
-  useRef,
   useState,
   ReactNode,
 } from 'react';
@@ -14,7 +13,6 @@ import { AuthContextType, User, LoginResult, RegisterResult, Student, Profession
 import { usePathname, useRouter } from 'next/navigation';
 import { AuthService } from '@/lib/auth/AuthService';
 import { UserService } from '@/lib/auth/UserService';
-import { NotificationService } from '@/lib/services/NotificationService';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -176,7 +174,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const router = useRouter();
   const pathname = usePathname();
-  const tokenRegisteredRef = useRef<string | null>(null);
 
   const fetchUserData = async (
     userId: string,
@@ -196,27 +193,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return buildFallbackUser(userId, userType, email);
       }
       return null;
-    }
-  };
-
-  const registerFCMToken = async (userId: string) => {
-    try {
-      if (tokenRegisteredRef.current === userId) {
-        return;
-      }
-
-      console.log('🔄 Registrando token FCM para notificações...');
-      const token = await NotificationService.getFCMToken();
-
-      if (token) {
-        await NotificationService.saveFCMToken(token);
-        tokenRegisteredRef.current = userId;
-        console.log('✅ Token FCM registrado com sucesso');
-      } else {
-        console.log('⚠️ Token FCM não obtido');
-      }
-    } catch (error) {
-      console.warn('⚠️ Erro ao registrar token FCM:', error);
     }
   };
 
@@ -269,7 +245,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = async (): Promise<void> => {
     try {
-      tokenRegisteredRef.current = null;
       await AuthService.logout();
       setUser(null);
       router.replace('/login');
@@ -283,8 +258,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (!firebaseUser) {
-          tokenRegisteredRef.current = null;
-          setUser(null);
+
           setLoading(false);
           return;
         }
