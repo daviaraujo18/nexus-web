@@ -1,5 +1,7 @@
 'use client';
 
+import { NotificationService } from '@/lib/services/NotificationService';
+
 import React, {
   createContext,
   useContext,
@@ -258,7 +260,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (!firebaseUser) {
-
+          setUser(null);
           setLoading(false);
           return;
         }
@@ -273,7 +275,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           buildFallbackUser(firebaseUser.uid, resolvedType, firebaseUser.email);
 
         setUser(userData);
-        await NotificationService.registerUser(firebaseUser.uid);
+        NotificationService.registerUser(firebaseUser.uid).catch(error => {
+          console.warn('⚠️ Erro ao registrar usuário em notificações:', error);
+        });
       } catch (error) {
         console.warn('⚠️ Erro ao hidratar usuário autenticado:', error);
         setUser(null);
