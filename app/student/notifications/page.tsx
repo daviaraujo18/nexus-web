@@ -143,27 +143,23 @@ export default function NotificationsSettingsPage() {
     setFeedback(null);
 
     try {
-      const response = await fetch('/api/onesignal/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          title: testCase.label,
-          body: testCase.body,
-          type: testCase.key,
-          route: testCase.route,
-        }),
+      // Usa NotificationService que chama Firebase Function (backend)
+      const result = await NotificationService.sendTypedNotification({
+        userId: user.id,
+        title: testCase.label,
+        body: testCase.body,
+        type: testCase.key,
+        route: testCase.route ?? '/student/notifications',
+        tag: testCase.tag,
       });
-
-      const result = await response.json();
 
       if (result.success) {
         setFeedback(
-          `✅ Teste "${testCase.label}" enviado via OneSignal`
+          `✅ Teste "${testCase.label}" enviado via OneSignal (backend)`
         );
       } else {
         setFeedback(
-          `❌ Falha no teste "${testCase.label}"`
+          `❌ Falha no teste "${testCase.label}": ${result.reason || 'unknown'}`
         );
       }
     } catch (error) {

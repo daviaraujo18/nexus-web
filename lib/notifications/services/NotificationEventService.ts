@@ -1,5 +1,6 @@
 // lib/notifications/services/NotificationEventService.ts
-import { NotificationService } from '@/lib/services/NotificationService';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '@/firebase/config';
 import { NotificationPreferenceService, type NotificationKind } from './NotificationPreferenceService';
 
 type DispatchInput = {
@@ -9,6 +10,33 @@ type DispatchInput = {
   body: string;
   route: string;
   data?: Record<string, string>;
+};
+
+type SendPushPayload = {
+  userId: string;
+  notification: {
+    title: string;
+    body: string;
+  };
+  data?: {
+    type?: string;
+    route?: string;
+    url?: string;
+    clickAction?: string;
+    tag?: string;
+    entityId?: string;
+    sentAt?: string;
+    [key: string]: string | undefined;
+  };
+};
+
+type PushResponse = {
+  success: boolean;
+  sent: number;
+  failed: number;
+  skipped?: boolean;
+  skippedCount?: number;
+  reason?: string | null;
 };
 
 export class NotificationEventService {
@@ -22,12 +50,27 @@ export class NotificationEventService {
       return { sent: false, reason: 'preferences_blocked' as const };
     }
 
-    await NotificationService.sendTypedNotification({
+    // Envia via Firebase Function (backend) - nunca diretamente
+    const sendPushNotification = httpsCallable<SendPushPayload, PushResponse>(
+      functions,
+      'sendPushNotification'
+    );
+
+    await sendPushNotification({
       userId: input.userId,
-      title: input.title,
-      body: input.body,
-      type: input.type,
-      route: input.route,
+      notification: {
+        title: input.title,
+        body: input.body,
+      },
+      data: {
+        type: input.type,
+        route: input.route,
+        url: input.route,
+        clickAction: input.route,
+        tag: input.type,
+        sentAt: new Date().toISOString(),
+        ...input.data,
+      },
     });
 
     return { sent: true as const };

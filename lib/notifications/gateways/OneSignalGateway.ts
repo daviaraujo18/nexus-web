@@ -1,3 +1,17 @@
+/**
+ * ⚠️ DEPRECATED - NÃO USAR NO FRONTEND
+ *
+ * Este gateway faz chamada DIRETA à API OneSignal usando ONESIGNAL_REST_API_KEY.
+ * Isso expõe a chave de API no cliente, o que é uma vulnerabilidade de segurança.
+ *
+ * ✅ Use em vez disso:
+ * - NotificationService.sendTypedNotification() - para envio manual tipado
+ * - NotificationEventService.dispatch() - para eventos de domínio
+ *
+ * Ambos usam a Firebase Function `sendPushNotification` no backend.
+ *
+ * TODO: Mover este arquivo para pasta de backend-only ou remover completamente.
+ */
 type SendPushInput = {
   userId: string;
   title: string;
