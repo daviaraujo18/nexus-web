@@ -49,16 +49,16 @@ const functions = getFunctions(app, 'southamerica-east1');
 
 // Em desenvolvimento, conectar ao emulador
 // MODIFICAR a configuração do emulador
-if (process.env.NODE_ENV === 'development') {
-  try {
+//if (process.env.NODE_ENV === 'development') {
+  //try {
     // MANTER assim - está correto
-    connectFunctionsEmulator(functions, 'localhost', 5001);
-    console.log('🔧 Firebase Functions conectado ao emulador');
+    //connectFunctionsEmulator(functions, 'localhost', 5001);
+    //console.log('🔧 Firebase Functions conectado ao emulador');
     
-  } catch (error) {
-    console.warn('⚠️ Não foi possível conectar ao emulador de Functions:', error);
-  }
-}
+  //} catch (error) {
+    //console.warn('⚠️ Não foi possível conectar ao emulador de Functions:', error);
+  //}
+//}
 
 export { messaging, functions };
 export default app;

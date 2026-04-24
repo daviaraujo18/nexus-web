@@ -1,4 +1,3 @@
-// hooks/useStudentSchedule.ts
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -6,211 +5,117 @@ import { ScheduleInstanceService } from '@/lib/services/ScheduleInstanceService'
 import { ProgressService } from '@/lib/services/ProgressService';
 import { ScheduleInstance, ActivityProgress } from '@/types/schedule';
 import { useAuth } from '@/context/AuthContext';
-import { DateUtils } from '@/lib/utils/dateUtils';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 
 export function useStudentSchedule() {
   const { user } = useAuth();
-  const [instances, setInstances] = useState<(ScheduleInstance & { progress?: ActivityProgress[] })[]>([]);
+  const [instances, setInstances] = useState<ScheduleInstance[]>([]);
   const [todayActivities, setTodayActivities] = useState<ActivityProgress[]>([]);
-  const [weekActivities, setWeekActivities] = useState<ActivityProgress[]>([]); // NOVO
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
+  // 1. CARREGAR INSTÂNCIAS ATIVAS
+  useEffect(() => {
+    if (!user || user.role !== 'student') return;
+
+    const fetchInstances = async () => {
+      try {
+        const active = await ScheduleInstanceService.getStudentActiveInstances(user.id);
+        setInstances(active);
+      } catch (err) {
+        console.error("❌ Erro ao buscar instâncias:", err);
+      }
+    };
+
+    fetchInstances();
+  }, [user]);
+
+  // 2. LISTENER EM TEMPO REAL (SEM DEPENDÊNCIA DE ÍNDICE COMPOSTO)
+  useEffect(() => {
     if (!user || user.role !== 'student') {
-      console.log('🚫 Usuário não é aluno ou não logado');
-      setInstances([]);
-      setTodayActivities([]);
-      setWeekActivities([]); // NOVO
       setLoading(false);
       return;
     }
 
-    try {
-      setLoading(true);
-      console.log('🔄 Carregando dados do aluno:', user.id);
+    setLoading(true);
+    console.log('📡 [FIREBASE] Conectando ao banco de PRODUÇÃO...');
 
-      // Carregar instâncias ativas
-      const activeInstances = await ScheduleInstanceService.getStudentActiveInstances(
-        user.id,
-        { includeProgress: true, limit: 5 }
-      );
-      console.log('📋 Instâncias carregadas:', activeInstances.length);
-      setInstances(activeInstances);
+    // Query simplificada para evitar erro de "Failed Precondition" (falta de índice)
+    const q = query(
+      collection(firestore, 'activityProgress'),
+      where('studentId', '==', user.id),
+      where('isActive', '==', true)
+    );
 
-      // Carregar atividades de hoje
-      console.log('📅 Buscando atividades de hoje...');
-      const today = await ScheduleInstanceService.getTodayActivities(user.id);
-      console.log('✅ Atividades de hoje encontradas:', today.length);
-      setTodayActivities(today);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log('📊 [DEBUG] Documentos brutos no Firestore:', snapshot.size);
+      
+      const allProgress: ActivityProgress[] = [];
+      const now = new Date();
+      
+      // Ajuste técnico: Se for antes das 4h da manhã, ainda consideramos "hoje" como o dia anterior
+      // Isso evita que o fuso horário UTC do Firebase pule o dia prematuramente
+      const offset = now.getHours() < 4 ? 1 : 0;
+      const adjustDate = new Date(now.getTime() - (offset * 24 * 60 * 60 * 1000));
+      const todayStr = adjustDate.toISOString().split('T')[0]; 
 
-      // NOVO: Carregar atividades da semana atual
-      console.log('📅 Buscando atividades da semana...');
-      const week = await ScheduleInstanceService.getWeekActivities(user.id);
-      console.log('✅ Atividades da semana encontradas:', week.length);
-      setWeekActivities(week);
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const scheduledDate = data.scheduledDate?.toDate();
+        const scheduledDateStr = scheduledDate?.toISOString().split('T')[0];
 
-      setError(null);
-
-    } catch (err: any) {
-      console.error('❌ Erro ao carregar cronogramas do aluno:', err);
-      setError(err.message || 'Erro ao carregar dados');
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  const startActivity = useCallback(async (progressId: string) => {
-    if (!user) return;
-
-    try {
-      await ProgressService.startActivity(progressId, user.id);
-      await loadData(); // Recarregar dados
-      return true;
-    } catch (err: any) {
-      console.error('Erro ao iniciar atividade:', err);
-      throw err;
-    }
-  }, [user, loadData]);
-
-  const completeActivity = useCallback(async (progressId: string, completionData?: any) => {
-    if (!user) return;
-
-    try {
-      const result = await ProgressService.completeActivity(
-        progressId,
-        user.id,
-        completionData
-      );
-      await loadData(); // Recarregar dados
-      return result;
-    } catch (err: any) {
-      console.error('Erro ao completar atividade:', err);
-      throw err;
-    }
-  }, [user, loadData]);
-
-  const skipActivity = useCallback(async (progressId: string, reason?: string) => {
-    if (!user) return;
-
-    try {
-      await ProgressService.skipActivity(progressId, user.id, reason);
-      await loadData();
-      return true;
-    } catch (err: any) {
-      console.error('Erro ao pular atividade:', err);
-      throw err;
-    }
-  }, [user, loadData]);
-
-  useEffect(() => {
-    loadData();
-
-    // Recarregar a cada 5 minutos para manter dados atualizados
-    const interval = setInterval(loadData, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [loadData]);
-
-  // Adicione listener em tempo real para atividades
-  useEffect(() => {
-    if (!user || user.role !== 'student') return;
-
-    // Listener para atividades de hoje em tempo real
-    const setupTodayActivitiesListener = async () => {
-      try {
-        // Buscar instâncias primeiro
-        const activeInstances = await ScheduleInstanceService.getStudentActiveInstances(
-          user.id,
-          { includeProgress: false, limit: 5 }
-        );
-        setInstances(activeInstances);
-
-        // Para cada instância, adicionar listener de progresso
-        const today = new Date();
-        const todayDayOfWeek = DateUtils.getDayOfWeek(today);
-
-        const unsubscribers: (() => void)[] = [];
-
-        for (const instance of activeInstances) {
-          const q = query(
-            collection(firestore, 'activityProgress'),
-            where('scheduleInstanceId', '==', instance.id),
-            where('weekNumber', '==', instance.currentWeekNumber),
-            where('dayOfWeek', '==', todayDayOfWeek),
-            where('isActive', '==', true)
-          );
-
-          const unsubscribe = onSnapshot(q, (snapshot) => {
-            const todayActivities: ActivityProgress[] = [];
-
-            snapshot.forEach(doc => {
-              const data = doc.data();
-              const progress: any = {  //COMENTADO IMPORTANTE
-                id: doc.id,
-                ...data,
-                scheduledDate: data.scheduledDate?.toDate(),
-                startedAt: data.startedAt?.toDate(),
-                completedAt: data.completedAt?.toDate(),
-                createdAt: data.createdAt?.toDate(),
-                updatedAt: data.updatedAt?.toDate(),
-                studentId: user.id, // ← Garantir que studentId seja o atual
-                activitySnapshot: {
-                  ...data.activitySnapshot,
-                  createdAt: data.activitySnapshot?.createdAt?.toDate(),
-                  updatedAt: data.activitySnapshot?.updatedAt?.toDate()
-                }
-              };
-              todayActivities.push(progress);
-            });
-
-            setTodayActivities(prev => {
-              // Atualizar mantendo ordenação
-              const updated = [...prev];
-              todayActivities.forEach(newActivity => {
-                const index = updated.findIndex(a => a.id === newActivity.id);
-                if (index > -1) {
-                  updated[index] = newActivity;
-                } else {
-                  updated.push(newActivity);
-                }
-              });
-              return updated.sort((a, b) => a.dayOfWeek - b.dayOfWeek);
-            });
-          });
-
-          unsubscribers.push(unsubscribe);
+        // Filtro de data no lado do cliente (mais seguro e rápido)
+        if (scheduledDateStr === todayStr) {
+          allProgress.push({
+            id: doc.id,
+            ...data,
+            scheduledDate,
+            startedAt: data.startedAt?.toDate(),
+            completedAt: data.completedAt?.toDate(),
+          } as ActivityProgress);
         }
+      });
 
-        return () => {
-          unsubscribers.forEach(unsubscribe => unsubscribe());
-        };
+      // Ordenação manual por data de criação/atualização
+      allProgress.sort((a, b) => {
+        const dateA = a.updatedAt?.seconds || 0;
+        const dateB = b.updatedAt?.seconds || 0;
+        return dateB - dateA;
+      });
 
-      } catch (err: any) {
-        console.error('Erro ao configurar listener:', err);
-        setError(err.message);
-      }
-    };
+      setTodayActivities(allProgress);
+      setLoading(false);
+      setError(null);
+    }, (err) => {
+      console.error("❌ [FIREBASE ERROR]:", err.message);
+      setError("Erro ao sincronizar dados em tempo real.");
+      setLoading(false);
+    });
 
-    const cleanup = setupTodayActivitiesListener();
-
-    return () => {
-      if (cleanup) cleanup.then(fn => fn?.());
-    };
+    return () => unsubscribe();
   }, [user]);
+
+  // 3. AÇÕES (START / COMPLETE)
+  const startActivity = useCallback(async (id: string) => {
+    if (!user?.id) return;
+    await ProgressService.startActivity(id, user.id);
+    // O onSnapshot cuidará do refresh da UI automaticamente
+  }, [user?.id]);
+
+  const completeActivity = useCallback(async (id: string, data?: any) => {
+    if (!user?.id) return;
+    await ProgressService.completeActivity(id, user.id, data);
+  }, [user?.id]);
 
   return {
     instances,
     todayActivities,
-    weekActivities,
     loading,
     error,
-    refresh: loadData,
+    refresh: () => {}, // Agora é real-time, não precisa de refresh manual
     startActivity,
     completeActivity,
-    skipActivity,
-    hasActiveSchedules: instances.length > 0,
     totalTodayActivities: todayActivities.length
   };
 }
