@@ -79,6 +79,19 @@ export function useSchedules(options: {
     }
   }, [user, loadSchedules]);
 
+  const deleteSchedule = useCallback(async (scheduleId: string) => {
+    if (!user) throw new Error('Usuário não autenticado');
+    
+    try {
+      // Chama o método no Service (que vamos criar a seguir)
+      await ScheduleService.deleteSchedule(scheduleId, user.id);
+      await loadSchedules(); // Recarrega a lista para remover o item da tela
+      return true;
+    } catch (err: any) {
+      throw err;
+    }
+  }, [user, loadSchedules]);
+
   useEffect(() => {
     loadSchedules();
   }, [loadSchedules]);
@@ -91,6 +104,7 @@ export function useSchedules(options: {
     createSchedule,
     updateSchedule,
     archiveSchedule,
+    deleteSchedule, // <-- ADICIONADO AQUI
     hasSchedules: schedules.length > 0
   };
 }

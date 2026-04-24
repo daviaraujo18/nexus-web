@@ -36,12 +36,14 @@ import {
 import { FiActivity, FiTarget, FiZap, FiTrendingUp } from 'react-icons/fi';
 
 export default function SchedulesPage() {
+  // 1. Estados declarados primeiro
   const [filter, setFilter] = useState<'all' | 'active' | 'archived'>('all');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'activities'>('date');
 
-  const { schedules, loading, error, archiveSchedule, refresh } = useSchedules({
+  // 2. Hook chamado DEPOIS dos estados existirem
+  const { schedules, loading, error, archiveSchedule, refresh, deleteSchedule } = useSchedules({
     activeOnly: filter === 'active',
     limit: 50
   });
@@ -85,6 +87,34 @@ export default function SchedulesPage() {
       } catch (err: any) {
         alert(`Erro ao arquivar: ${err.message}`);
       }
+    }
+  };
+
+  // NOVA FUNÇÃO: Tratamento rigoroso para exclusão
+  const handleDelete = async (schedule: any) => {
+    // Verificação de Vínculos (ajuste a propriedade conforme necessário)
+    const hasLinkedStudents = schedule.assignedStudentsCount > 0 || (schedule.studentIds && schedule.studentIds.length > 0);
+
+    if (hasLinkedStudents) {
+      const confirmed = window.confirm(
+        `ATENÇÃO: O cronograma "${schedule.name}" possui alunos vinculados.\n\n` +
+        `Ao excluir, os alunos perderão o acesso a este cronograma, mas os dados de atividades e submissões NÃO serão perdidos.\n\n` +
+        `Tem certeza absoluta que deseja excluir este cronograma?`
+      );
+      if (!confirmed) return;
+    } else {
+      const confirmed = window.confirm(`Tem certeza que deseja excluir o cronograma "${schedule.name}"?`);
+      if (!confirmed) return;
+    }
+
+    try {
+      if (deleteSchedule) {
+        await deleteSchedule(schedule.id);
+        alert('Cronograma excluído com sucesso.');
+        refresh(); // Atualiza a lista após exclusão
+      }
+    } catch (err: any) {
+      alert(`Erro ao excluir: ${err.message}`);
     }
   };
 
@@ -462,7 +492,7 @@ export default function SchedulesPage() {
 
                         <div className="flex items-center gap-2">
                           {/* Tags do cronograma */}
-                          {schedule.metadata.tags && schedule.metadata.tags.slice(0, 2).map((tag, index) => (
+                          {schedule.metadata.tags && schedule.metadata.tags.slice(0, 2).map((tag: string, index: number) => (
                             <span key={index} className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-full">
                               {tag}
                             </span>
@@ -503,7 +533,7 @@ export default function SchedulesPage() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <button disabled // COMENTADO
+                          <button
                             onClick={() => handleArchive(schedule.id, schedule.name)}
                             className="p-2 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors"
                             title={schedule.isActive ? 'Arquivar' : 'Restaurar'}
@@ -511,14 +541,22 @@ export default function SchedulesPage() {
                             <FaArchive className="w-4 h-4" />
                           </button>
 
-                          <button disabled // COMENTADO
+                          <button
+                            onClick={() => handleDelete(schedule)}
+                            className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Excluir Cronograma"
+                          >
+                            <FaTrash className="w-4 h-4" />
+                          </button>
+
+                          <button disabled
                             className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
                             title="Duplicar"
                           >
                             <FaCopy className="w-4 h-4" />
                           </button>
 
-                          <button disabled // COMENTADO
+                          <button disabled
                             className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
                             title="Compartilhar"
                           >

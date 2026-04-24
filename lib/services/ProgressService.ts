@@ -6,7 +6,8 @@ import {
   Timestamp,
   increment,
   arrayUnion,
-  getDoc
+  getDoc,
+  setDoc
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import {
@@ -163,6 +164,13 @@ export class ProgressService {
       await updateDoc(progressRef, updateData);
 
       console.log(`✅ Atividade ${progressId} completada com sucesso`);
+
+      // 🔥 FIX: ATUALIZAR WEEKLY SNAPSHOT
+      try {
+        await this.updateWeeklySnapshot(studentId, progress.weekNumber || 1, scoring.totalPoints, timeSpentValue);
+      } catch (snapError) {
+        console.error('⚠️ Erro ao atualizar snapshot semanal:', snapError);
+      }
 
       // 7. Atualizar cache da instância
       try {
@@ -405,6 +413,78 @@ export class ProgressService {
     } catch (error) {
       console.error('Erro ao atualizar estatísticas do aluno:', error);
       // Não falhar a operação principal
+    }
+  }
+
+  /**
+   * Atualiza ou cria o WeeklySnapshot do aluno
+   */
+  private static async updateWeeklySnapshot(
+    studentId: string,
+    weekNumber: number,
+    pointsEarned: number,
+    timeSpent: number
+  ): Promise<void> {
+    try {
+      // 1. Cria um ID previsível para o snapshot daquela semana
+      const snapshotId = `${studentId}_week_${weekNumber}`;
+      const snapshotRef = doc(firestore, 'weeklySnapshots', snapshotId);
+      
+      const snapDoc = await getDoc(snapshotRef);
+
+      if (snapDoc.exists()) {
+        // Se já existe, apenas incrementa os valores
+        await updateDoc(snapshotRef, {
+          'metrics.completedActivities': increment(1),
+          'metrics.totalPointsEarned': increment(pointsEarned),
+          'metrics.totalTimeSpent': increment(timeSpent),
+          // A taxa de conclusão precisa ser recalculada se totalActivities existir
+          'updatedAt': serverTimestamp()
+        });
+
+        // Recalcular a taxa de conclusão (Completion Rate)
+        const data = snapDoc.data();
+        if (data.metrics && data.metrics.totalActivities > 0) {
+          const newCompleted = (data.metrics.completedActivities || 0) + 1;
+          const newRate = Math.round((newCompleted / data.metrics.totalActivities) * 100);
+          
+          await updateDoc(snapshotRef, {
+             'metrics.completionRate': newRate
+          });
+        }
+      } else {
+        // Se for a primeira atividade da semana, cria o documento inteiro
+        // Pega as datas da semana atual
+        const now = new Date();
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay()); // Domingo
+        
+        const endOfWeek = new Date(now);
+        endOfWeek.setDate(startOfWeek.getDate() + 6); // Sábado
+
+        await setDoc(snapshotRef, {
+          studentId,
+          weekNumber,
+          weekStartDate: Timestamp.fromDate(startOfWeek),
+          weekEndDate: Timestamp.fromDate(endOfWeek),
+          metrics: {
+            completedActivities: 1,
+            totalPointsEarned: pointsEarned,
+            totalTimeSpent: timeSpent,
+            totalActivities: 5, // Um valor padrão se não soubermos o total
+            completionRate: 20, // 1/5
+            streakAtEndOfWeek: 1,
+            adherenceScore: 100,
+            consistencyScore: 100
+          },
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
+      console.log(`✅ WeeklySnapshot atualizado para a semana ${weekNumber}`);
+    } catch (error) {
+      console.error('Erro detalhado no updateWeeklySnapshot:', error);
+      throw error;
     }
   }
 

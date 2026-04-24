@@ -1,16 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ScheduleInstanceService } from '@/lib/services/ScheduleInstanceService';
-import { ProgressService } from '@/lib/services/ProgressService';
-import { ScheduleInstance, ActivityProgress } from '@/types/schedule';
+import { ActivityProgress, ScheduleInstance } from '@/types/schedule';
 import { useAuth } from '@/context/AuthContext';
+<<<<<<< HEAD
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
+=======
+>>>>>>> fcbeaae (lógica calendário civil estabelecida)
 
 export function useStudentSchedule() {
   const { user } = useAuth();
   const [instances, setInstances] = useState<ScheduleInstance[]>([]);
+<<<<<<< HEAD
   const [todayActivities, setTodayActivities] = useState<ActivityProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -117,5 +120,69 @@ export function useStudentSchedule() {
     startActivity,
     completeActivity,
     totalTodayActivities: todayActivities.length
+=======
+  const [weekActivities, setWeekActivities] = useState<ActivityProgress[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    if (!user?.id) {
+      console.log('⚠️ [HOOK] Abortando loadData: Usuário não autenticado.');
+      return;
+    }
+    
+    console.log(`🚀 [HOOK] Iniciando carregamento para: ${user.id} às ${new Date().toLocaleTimeString()}`);
+    
+    try {
+      setLoading(true);
+      
+      // Busca instâncias com auditoria interna
+      const activeInstances = await ScheduleInstanceService.getStudentActiveInstances(user.id);
+      
+      // Busca atividades agregadas da semana
+      const activities = await ScheduleInstanceService.getWeekActivities(user.id);
+
+      console.log('✨ [HOOK] Carga finalizada com sucesso:', {
+        instanciasAtivas: activeInstances.length,
+        totalAtividadesSemana: activities.length
+      });
+
+      setInstances(activeInstances);
+      setWeekActivities(activities);
+      setError(null);
+    } catch (err: any) {
+      console.error('❌ [HOOK] Erro fatal na carga de dados:', err);
+      setError(err.message || 'Erro ao carregar cronograma');
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Filtro para Hoje (usado no Sidebar e Dashboard)
+  const todayActivities = useMemo(() => {
+    const todayStr = new Date().toLocaleDateString('pt-BR');
+    const filtered = weekActivities.filter(a => 
+      a.scheduledDate?.toLocaleDateString('pt-BR') === todayStr
+    );
+    console.log(`📅 [MEMO] Calculando todayActivities para ${todayStr}: ${filtered.length} encontradas.`);
+    return filtered;
+  }, [weekActivities]);
+
+  // 🔥 FIX: Adicionando campo totalTodayActivities exigido pelo StudentSidebar
+  const totalTodayActivities = useMemo(() => todayActivities.length, [todayActivities]);
+
+  return { 
+    instances, 
+    todayActivities, 
+    weekActivities, 
+    totalTodayActivities, // Retorno garantido para o Sidebar
+    loading, 
+    error,
+    refresh: loadData 
+>>>>>>> fcbeaae (lógica calendário civil estabelecida)
   };
 }

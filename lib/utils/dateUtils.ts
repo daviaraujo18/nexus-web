@@ -2,6 +2,7 @@
 
 export class DateUtils {
   /**
+<<<<<<< HEAD
    * Retorna a segunda-feira da semana civil da data fornecida (00:00:00)
    */
   static getWeekStartDate(date: Date = new Date()): Date {
@@ -9,6 +10,16 @@ export class DateUtils {
     const day = d.getDay(); // 0 (Dom) a 6 (Sáb)
     // Ajuste para garantir que a semana comece na Segunda-feira
     const diff = d.getDate() - day + (day === 0 ? -6 : 1); 
+=======
+   * Retorna o início da semana (Segunda-feira) com hora zerada
+   */
+  static getWeekStartDate(date: Date = new Date()): Date {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay(); // 0 (Dom) a 6 (Sab)
+    // Ajuste para Segunda-feira ser o início (1). Se for Domingo (0), volta 6 dias.
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+>>>>>>> fcbeaae (lógica calendário civil estabelecida)
     const start = new Date(d.setDate(diff));
     start.setHours(0, 0, 0, 0);
     return start;
@@ -25,9 +36,31 @@ export class DateUtils {
     return end;
   }
 
+<<<<<<< HEAD
   /**
    * Retorna o número da semana no ano (ISO-8601)
    */
+=======
+  static getDayOfWeek(date: Date = new Date()): number {
+    return date.getDay(); // 0 (Domingo) a 6 (Sábado)
+  }
+
+  /**
+   * 🔥 NOVO: Calcula a data exata da atividade baseada na Segunda-feira de início
+   * Se o cronograma começa dia 27 (Segunda), e a atividade é dia 1 (Segunda), retorna 27.
+   * Se a atividade é dia 5 (Sexta), retorna dia 31.
+   */
+  static calculateActivityDate(weekStartDate: Date, activityDayOfWeek: number): Date {
+    const result = new Date(weekStartDate);
+    // Como weekStartDate já é Segunda, se activityDayOfWeek for 1 (Segunda), soma 0.
+    // Se activityDayOfWeek for 0 (Domingo), soma 6.
+    const daysToAdd = activityDayOfWeek === 0 ? 6 : activityDayOfWeek - 1;
+    result.setDate(result.getDate() + daysToAdd);
+    result.setHours(0, 0, 0, 0);
+    return result;
+  }
+
+>>>>>>> fcbeaae (lógica calendário civil estabelecida)
   static getWeekNumber(date: Date = new Date()): number {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
@@ -37,6 +70,7 @@ export class DateUtils {
     return weekNo;
   }
 
+<<<<<<< HEAD
   /**
    * Retorna o índice do dia da semana (0-6)
    */
@@ -52,6 +86,12 @@ export class DateUtils {
     const startStr = startDate.toLocaleDateString('pt-BR', options);
     const endStr = endDate.toLocaleDateString('pt-BR', options);
     return `${startStr} - ${endStr}`;
+=======
+  static addWeeks(date: Date, weeks: number): Date {
+    const result = new Date(date);
+    result.setDate(result.getDate() + weeks * 7);
+    return result;
+>>>>>>> fcbeaae (lógica calendário civil estabelecida)
   }
 
   /**
@@ -65,6 +105,7 @@ export class DateUtils {
     );
   }
 
+<<<<<<< HEAD
   /**
    * Retorna o período do dia
    */
@@ -91,5 +132,19 @@ export class DateUtils {
 
   static formatDateForStorage(date: Date): string {
     return date.toISOString();
+=======
+  static formatDateForDisplay(date: Date): string {
+    return date.toLocaleDateString('pt-BR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+  }
+
+  static getDayName(dayIndex: number): string {
+    const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    return days[dayIndex] || 'Dia inválido';
+>>>>>>> fcbeaae (lógica calendário civil estabelecida)
   }
 }

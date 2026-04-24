@@ -1,3 +1,4 @@
+// components/schedule/ScheduleHeaderPanel.tsx
 'use client';
 
 import React from 'react';
@@ -6,7 +7,8 @@ import {
   FaCalendarAlt,
   FaClock,
   FaTag,
-  FaInfoCircle
+  FaInfoCircle,
+  FaCalendarCheck
 } from 'react-icons/fa';
 
 interface ScheduleHeaderPanelProps {
@@ -29,72 +31,47 @@ export default function ScheduleHeaderPanel({
   activeDaysCount
 }: ScheduleHeaderPanelProps) {
   const categories: { value: ScheduleCategory; label: string; color: string }[] = [
-    {
-      value: 'therapeutic',
-      label: 'Terapêutico',
-      color: 'from-blue-500 to-cyan-500'
-    },
-    {
-      value: 'educational',
-      label: 'Educacional',
-      color: 'from-purple-500 to-pink-500'
-    },
-    {
-      value: 'mixed',
-      label: 'Misto',
-      color: 'from-green-500 to-emerald-500'
-    }
+    { value: 'therapeutic', label: 'Terapêutico', color: 'from-blue-500 to-cyan-500' },
+    { value: 'educational', label: 'Educacional', color: 'from-purple-500 to-pink-500' },
+    { value: 'mixed', label: 'Misto', color: 'from-green-500 to-emerald-500' }
   ];
 
-  const daysOfWeek = [
-    { id: 0, label: 'Dom' },
-    { id: 1, label: 'Seg' },
-    { id: 2, label: 'Ter' },
-    { id: 3, label: 'Qua' },
-    { id: 4, label: 'Qui' },
-    { id: 5, label: 'Sex' },
-    { id: 6, label: 'Sáb' }
-  ];
-
-  const toggleActiveDay = (dayId: number) => {
-    const newDays = formData.activeDays.includes(dayId)
-      ? formData.activeDays.filter(d => d !== dayId)
-      : [...formData.activeDays, dayId];
-    updateField('activeDays', newDays.sort());
+  // Helper para converter string de input para Date sem erro de timezone
+  const stringToDate = (dateStr: string) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0); // T12 para evitar bug de fuso
   };
 
-  // Função para calcular o domingo subsequente a uma data
   const getNextSunday = (date: Date): Date => {
     const result = new Date(date);
-    const dayOfWeek = result.getDay(); // 0 = Domingo, 1 = Segunda, ..., 6 = Sábado
-    
-    if (dayOfWeek === 0) {
-      // Se já é domingo, retorna a própria data
-      return result;
-    } else {
-      // Calcula quantos dias faltam para o próximo domingo
-      const daysUntilSunday = 7 - dayOfWeek;
-      result.setDate(result.getDate() + daysUntilSunday);
-      return result;
-    }
+    const dayOfWeek = result.getDay();
+    if (dayOfWeek === 0) return result;
+    const daysUntilSunday = 7 - dayOfWeek;
+    result.setDate(result.getDate() + daysUntilSunday);
+    return result;
   };
 
-  // Handler para mudança da data de início
   const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const [year, month, day] = e.target.value.split('-').map(Number);
-    const localDate = new Date(year, month - 1, day);
+    const localDate = stringToDate(e.target.value);
+    console.log('📅 [HEADER] Alterando Início para:', localDate.toLocaleDateString('pt-BR'));
     
-    // Atualiza a data de início
     updateField('startDate', localDate);
     
-    // Calcula e atualiza automaticamente a data de término para o domingo subsequente
+    // Sugestão inteligente: define o fim para o domingo subsequente, mas o usuário pode mudar
     const nextSunday = getNextSunday(localDate);
+    console.log('💡 [HEADER] Sugerindo Término (Próximo Domingo):', nextSunday.toLocaleDateString('pt-BR'));
     updateField('endDate', nextSunday);
+  };
+
+  // 🔥 NOVA FUNÇÃO: Handler para mudança manual da data de término
+  const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const localDate = stringToDate(e.target.value);
+    console.log('🎯 [HEADER] Alterando Término MANUALMENTE para:', localDate.toLocaleDateString('pt-BR'));
+    updateField('endDate', localDate);
   };
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-      {/* Cabeçalho com Estatísticas */}
       <div className="bg-gradient-to-r from-gray-50 to-white p-6 border-b border-gray-200">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -102,147 +79,86 @@ export default function ScheduleHeaderPanel({
               <FaCalendarAlt className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-800">
-                Configurações do Cronograma
-              </h2>
-              <p className="text-gray-600 text-sm">
-                Defina as características básicas do seu cronograma
-              </p>
+              <h2 className="text-xl font-bold text-gray-800">Configurações do Cronograma</h2>
+              <p className="text-gray-600 text-sm">Controle as janelas de vigência e categorias</p>
             </div>
           </div>
 
-          {/* Estatísticas Rápidas */}
-          <div className="flex items-center gap-4">
-            <div className="text-center">
-              <div className="text-lg font-bold text-indigo-600">
-                {totalActivities}
-              </div>
-              <div className="text-xs text-gray-500">Atividades</div>
-            </div>
-            <div className="text-center">
-              <div className="text-lg font-bold text-green-600">
-                {(totalDuration / 60).toFixed(1)}h
-              </div>
-              <div className="text-xs text-gray-500">Tempo</div>
-            </div>
-            <div className="text-center">
-              <div className="text-lg font-bold text-amber-600">
-                {totalPoints}
-              </div>
-              <div className="text-xs text-gray-500">Pontos</div>
-            </div>
+          <div className="flex items-center gap-4 text-center">
+            <div><div className="text-lg font-bold text-indigo-600">{totalActivities}</div><div className="text-xs text-gray-500">Items</div></div>
+            <div><div className="text-lg font-bold text-green-600">{(totalDuration / 60).toFixed(1)}h</div><div className="text-xs text-gray-500">Semana</div></div>
+            <div><div className="text-lg font-bold text-amber-600">{totalPoints}</div><div className="text-xs text-gray-500">Pontos</div></div>
           </div>
         </div>
       </div>
 
-      {/* Conteúdo das Configurações */}
-      <div className="p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Coluna 1: Informações Básicas */}
-          <div className="space-y-6">
-            {/* Nome do Cronograma */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Nome do Cronograma *
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => updateField('name', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all placeholder:text-gray-400 text-gray-900"
-                placeholder="Ex: Programa de Recuperação Matemática"
-              />
-              {errors.name && (
-                <p className="mt-1 text-sm text-red-600">{errors.name}</p>
-              )}
-            </div>
-
-            {/* Descrição */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Descrição (opcional)
-              </label>
-              <textarea
-                value={formData.description || ''}
-                onChange={(e) => updateField('description', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none placeholder:text-gray-400 text-gray-900"
-                placeholder="Descreva o propósito deste cronograma..."
-                rows={2}
-              />
-            </div>
-
-            {/* Categoria */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Categoria *
-              </label>
-              <div className="grid grid-cols-3 gap-3">
-                {categories.map((category) => (
-                  <button
-                    key={category.value}
-                    type="button"
-                    onClick={() => updateField('category', category.value)}
-                    className={`p-3 border rounded-lg transition-all ${formData.category === category.value
-                      ? `border-indigo-500 bg-gradient-to-r ${category.color} bg-opacity-10`
-                      : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                  >
-                    <div className="text-center">
-                      <div className={`font-medium text-sm ${formData.category === category.value
-                        ? 'text-white-600'
-                        : 'text-gray-700'
-                        }`}>
-                        {category.label}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+      <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Lado Esquerdo */}
+        <div className="space-y-5">
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-2">Nome do Cronograma *</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => updateField('name', e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all outline-none"
+              placeholder="Ex: Treino de Elite"
+            />
           </div>
 
-          {/* Coluna 2: Configurações de Tempo */}
-          <div className="space-y-6">
-            {/* Data de Início */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <div className="flex items-center gap-2">
-                  <FaCalendarAlt className="w-4 h-4 text-gray-400" />
-                  Data de Início *
-                </div>
-              </label>
-              <input
-                type="date"
-                value={formData.startDate.toISOString().split('T')[0]}
-                onChange={handleStartDateChange}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 placeholder:text-gray-400 text-gray-900"
-                min={new Date().toLocaleDateString('en-CA')}
-              />
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-3">Categoria</label>
+            <div className="grid grid-cols-3 gap-2">
+              {categories.map((cat) => (
+                <button
+                  key={cat.value}
+                  type="button"
+                  onClick={() => updateField('category', cat.value)}
+                  className={`py-2 px-1 border-2 rounded-xl text-xs font-black transition-all ${
+                    formData.category === cat.value ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-100 text-gray-400'
+                  }`}
+                >
+                  {cat.label.toUpperCase()}
+                </button>
+              ))}
             </div>
+          </div>
+        </div>
 
-            {/* Data de Término (OBRIGATÓRIA) */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <div className="flex items-center gap-2">
-                  <FaCalendarAlt className="w-4 h-4 text-gray-400" />
-                  Data de Término *
-                </div>
-              </label>
-              <input
-                type="date"
-                value={formData.endDate ? formData.endDate.toISOString().split('T')[0] : ''}
-                readOnly
-                className={`w-full px-4 py-3 border rounded-xl bg-gray-50 cursor-not-allowed text-gray-600
-      ${errors.endDate ? 'border-red-500' : 'border-gray-300'}`}
-              />
-              {errors.endDate && (
-                <p className="mt-1 text-sm text-red-600">{errors.endDate}</p>
-              )}
-              <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-                <FaInfoCircle className="w-3 h-3" />
-                Data definida automaticamente para o domingo subsequente à data de início
-              </div>
-            </div>
+        {/* Lado Direito: Datas (LIBERADO) */}
+        <div className="space-y-5">
+          <div>
+            <label className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-2">
+              <FaCalendarAlt className="text-indigo-500" /> Início da Vigência *
+            </label>
+            <input
+              type="date"
+              value={formData.startDate ? new Date(formData.startDate).toISOString().split('T')[0] : ''}
+              onChange={handleStartDateChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-4 focus:ring-indigo-500/10 font-bold text-gray-800"
+            />
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-2">
+              <FaCalendarCheck className="text-emerald-500" /> Término da Vigência *
+            </label>
+            <input
+              type="date"
+              // 🔥 CORREÇÃO: Removido o 'readOnly' e adicionado 'onChange'
+              value={formData.endDate ? new Date(formData.endDate).toISOString().split('T')[0] : ''}
+              onChange={handleEndDateChange}
+              className={`w-full px-4 py-3 border rounded-xl focus:ring-4 transition-all font-bold ${
+                errors.endDate 
+                ? 'border-red-400 focus:ring-red-500/10 text-red-700' 
+                : 'border-gray-300 focus:ring-emerald-500/10 text-gray-800'
+              }`}
+            />
+            {errors.endDate && <p className="mt-1 text-xs text-red-600 font-bold">{errors.endDate}</p>}
+            <p className="mt-2 text-[10px] text-gray-400 flex items-center gap-1 leading-tight">
+              <FaInfoCircle />
+              O cronograma encerra no fim deste dia. O sistema sugere o domingo subsequente, mas você pode alterar.
+            </p>
           </div>
         </div>
       </div>
