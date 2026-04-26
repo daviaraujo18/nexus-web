@@ -1,4 +1,4 @@
-// hooks/useScheduleForm.ts - VERSÃO CORRIGIDA COM INICIALIZAÇÃO SÍNCRONA
+// hooks/useScheduleForm.ts
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -14,24 +14,20 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
     activeDays: initialData?.activeDays
   });
 
-  // Usar useRef para rastrear se já inicializamos
   const hasInitialized = useRef(false);
 
-  // Calcula data de início (hoje, zerada)
   const getTodayDate = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return today;
   };
 
-  // 4 semanas = 28 dias
   const getDefaultEndDate = () => {
     const fourWeeksLater = new Date(getTodayDate().getTime() + (28 * 24 * 60 * 60 * 1000));
     fourWeeksLater.setHours(0, 0, 0, 0);
     return fourWeeksLater;
   };
 
-  // ✅ CORREÇÃO: Função separada para criar estado inicial
   const getInitialState = (data?: Partial<CreateScheduleDTO>): CreateScheduleDTO => {
     console.log('🔄 getInitialState chamado com data:', data);
 
@@ -71,19 +67,15 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
     };
   };
 
-  // ✅ CORREÇÃO: Inicialização SEMPRE com undefined primeiro
   const [formData, setFormData] = useState<CreateScheduleDTO>(() => getInitialState());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  // ✅✅✅ ESSENCIAL: useEffect para REIDRATAR quando initialData chegar
   useEffect(() => {
-    // Se não tem initialData ou já inicializamos, ignora
     if (!initialData || hasInitialized.current) {
       return;
     }
 
-    // Se initialData está vazio ou incompleto, ignora
     if (Object.keys(initialData).length === 0 || !initialData.name) {
       console.log('⚠️ initialData vazio ou incompleto, ignorando...');
       return;
@@ -95,7 +87,6 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
       activeDays: initialData.activeDays
     });
 
-    // Criar novo estado com os dados carregados
     const newState = getInitialState(initialData);
 
     console.log('📋 Novo estado definido:', {
@@ -107,9 +98,8 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
     setFormData(newState);
     hasInitialized.current = true;
 
-  }, [initialData]); // ⚠️ IMPORTANTE: Dependência em initialData
+  }, [initialData]);
 
-  // Log para debug do formData atual
   useEffect(() => {
     console.log('📊 formData atualizado:', {
       name: formData.name,
@@ -150,7 +140,6 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
         return prev;
       }
 
-      // Verificar e ajustar orderIndex para evitar conflitos
       const activitiesForDay = prev.activities.filter(a => a.dayOfWeek === activity.dayOfWeek);
       const existingIndices = activitiesForDay.map(a => a.orderIndex);
 
@@ -194,7 +183,6 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
       const newActivities = [...prev.activities];
       const originalActivity = newActivities[index];
 
-      // Preserva orderIndex original se não foi especificado
       const updatedActivity = {
         ...originalActivity,
         ...activity,
@@ -203,7 +191,6 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
 
       newActivities[index] = updatedActivity;
 
-      // Valida se o dia atualizado está ativo
       if (activity.dayOfWeek !== undefined && !prev.activeDays.includes(activity.dayOfWeek)) {
         const errorMsg = `Dia ${activity.dayOfWeek} não está ativo no cronograma`;
         setErrors(prevErrors => ({ ...prevErrors, activities: errorMsg }));
@@ -225,10 +212,8 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
 
       const activityToRemove = prev.activities[index];
 
-      // Remove a atividade
       const filteredActivities = prev.activities.filter((_, i) => i !== index);
 
-      // Reordena atividades do mesmo dia
       const reorderedActivities = filteredActivities.map(activity => {
         if (activity.dayOfWeek === activityToRemove.dayOfWeek && activity.orderIndex > activityToRemove.orderIndex) {
           return {
@@ -300,7 +285,6 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
 
     setSubmitting(true);
     try {
-      // Sanitiza os dados antes de enviar
       const sanitizedData = ValidationUtils.sanitizeScheduleData(formData);
       console.log('📤 Dados sanitizados para envio:', sanitizedData);
 
@@ -311,7 +295,6 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
 
       console.log('✅ Cronograma criado com sucesso:', result.scheduleId);
 
-      // Resetar formulário após sucesso (apenas se não for edição)
       if (!initialData) {
         const today = new Date();
         const fourWeeksLater = new Date(today.getTime() + (28 * 24 * 60 * 60 * 1000));
@@ -343,7 +326,6 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
     }
   }, [formData, validateForm, initialData]);
 
-  // ✅ NOVO: Função para atualizar cronograma existente
   const updateExistingSchedule = useCallback(async (scheduleId: string, professionalId: string) => {
     console.log('🔄 Atualizando cronograma existente:', { scheduleId, professionalId });
 
@@ -356,15 +338,15 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
       const sanitizedData = ValidationUtils.sanitizeScheduleData(formData);
       console.log('📤 Dados para atualização:', sanitizedData);
 
-      const newScheduleId = await ScheduleService.updateScheduleTemplate(
+      // 🔥 CORREÇÃO: Removido o argumento extra (professionalId) da chamada
+      await ScheduleService.updateScheduleTemplate(
         scheduleId,
-        professionalId,
         sanitizedData
       );
 
-      console.log('✅ Cronograma atualizado com sucesso. Nova versão:', newScheduleId);
+      console.log('✅ Cronograma atualizado com sucesso. ID:', scheduleId);
 
-      return newScheduleId;
+      return scheduleId;
     } catch (error: any) {
       console.error('❌ Erro ao atualizar cronograma:', error);
       const errorMessage = error.message || 'Erro ao atualizar cronograma';

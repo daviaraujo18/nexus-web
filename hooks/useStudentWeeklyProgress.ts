@@ -1,173 +1,156 @@
-// hooks/useStudentWeeklyProgress.ts
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { ScheduleInstanceService } from '@/lib/services/ScheduleInstanceService';
+import { ActivityProgress, WeeklySnapshot } from '@/types/schedule';
 import { useAuth } from '@/context/AuthContext';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
-import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
-import { ActivityProgress } from '@/types/schedule';
-import { DateUtils } from '@/lib/utils/dateUtils'; // <--- Importação Nomeada
+
+export interface ProgressData {
+  performanceTrend: 'improving' | 'declining' | 'stable';
+  currentMetrics: {
+    streak: number;
+    totalPoints: number;
+    level: number;
+    completedActivities: number;
+    totalActivities: number;
+    completionRate: number;
+    timeSpent: number;
+  };
+  weeklySnapshots: WeeklySnapshot[];
+}
 
 export function useStudentWeeklyProgress() {
   const { user } = useAuth();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ProgressData | null>(null);
+  const [weeklyActivities, setWeeklyActivities] = useState<ActivityProgress[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user?.id || user.role !== 'student') {
-      setLoading(false);
-      return;
-    }
-
-    const start = DateUtils.getWeekStartDate();
-    const end = DateUtils.getWeekEndDate();
-
-    setLoading(true);
-
-    const q = query(
-      collection(firestore, 'activityProgress'),
-      where('studentId', '==', user.id),
-      where('isActive', '==', true),
-      where('scheduledDate', '>=', Timestamp.fromDate(start)),
-      where('scheduledDate', '<=', Timestamp.fromDate(end))
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const weekActs = snapshot.docs.map(doc => doc.data() as ActivityProgress);
-      const done = weekActs.filter(a => a.status === 'completed');
-
-      setData({
-        currentMetrics: {
-          streak: user.profile?.streak || 0,
-          totalPoints: user.profile?.totalPoints || 0,
-          level: user.profile?.level || 1,
-          completionRate: weekActs.length > 0 ? (done.length / weekActs.length) * 100 : 0,
-          totalActivities: weekActs.length,
-          completedActivities: done.length,
-          timeSpent: done.reduce((acc, curr) => acc + (curr.activitySnapshot?.metadata?.estimatedDuration || 0), 0)
-        },
-        weeklySnapshots: [], 
-        performanceTrend: 'stable',
-        weekRange: DateUtils.formatWeekRange(start, end)
-      });
-      setLoading(false);
-    }, (err) => {
-      console.error("Erro no filtro semanal:", err);
-      setLoading(false);
+  // 🔥 1. CÁLCULO REATIVO DE TEMPO (COM LOGS DE PENTE FINO)
+  const timeInvestedCalculated = useMemo(() => {
+    console.group('⏱️ [CÁLCULO-TEMPO] Iniciando triagem de atividades');
+    
+    const completed = weeklyActivities.filter(a => {
+      const isDone = a.status === 'completed';
+      if (!isDone) console.log(`⏭️ [IGNORADO] Atividade "${a.activitySnapshot?.title}" está como: ${a.status}`);
+      return isDone;
     });
 
-    return () => unsubscribe();
-  }, [user?.id, user?.role]);
+    console.log(`✅ [FILTRO] ${completed.length} atividades concluídas encontradas para soma.`);
 
-<<<<<<< HEAD
-  return { data, loading, error: null, refresh: () => {} };
-=======
-    // Último snapshot
-    const latest = snapshots[0];
+    const total = completed.reduce((acc, curr) => {
+      // 1. Tenta o tempo real investido
+      const realTime = Number(curr.executionData?.timeSpent);
+      // 2. Fallback para duração estimada se o real for inválido
+      const estimatedTime = Number(curr.activitySnapshot?.metadata?.estimatedDuration);
+      
+      let timeToAdd = 0;
+      let fonte = 'NENHUMA';
 
-    // 🔥 FIX: Proteção contra estrutura de dados inesperada do banco
-    const latestMetrics = latest.metrics || {};
-    
-    // Calcular totais de todos os snapshots
-    const totalPoints = snapshots.reduce((sum, s) => sum + s.metrics.totalPointsEarned, 0);
-    const totalTimeSpent = snapshots.reduce((sum, s) => sum + s.metrics.totalTimeSpent, 0);
-    const totalCompleted = snapshots.reduce((sum, s) => sum + s.metrics.completedActivities, 0);
-    const totalActivities = snapshots.reduce((sum, s) => sum + s.metrics.totalActivities, 0);
+      if (!isNaN(realTime) && realTime > 0) {
+        timeToAdd = realTime;
+        fonte = 'executionData.timeSpent';
+      } else if (!isNaN(estimatedTime) && estimatedTime > 0) {
+        timeToAdd = estimatedTime;
+        fonte = 'metadata.estimatedDuration (Fallback)';
+      }
 
-    // Calcular nível baseado em pontos (exemplo: cada 100 pontos = 1 nível)
-    const level = Math.max(1, Math.floor(totalPoints / 100) + 1);
+      console.log(`📌 [SOMA] +${timeToAdd}min | Fonte: ${fonte} | Atividade: ${curr.activitySnapshot?.title}`);
+      return acc + timeToAdd;
+    }, 0);
 
-    return {
-      streak: latest.metrics.streakAtEndOfWeek,
-      totalPoints,
-      level,
-      completionRate: latest.metrics.completionRate,
-      totalActivities,
-      completedActivities: totalCompleted,
-      timeSpent: totalTimeSpent
-    };
-  };
+    console.log(`🏁 [RESULTADO FINAL] Soma total acumulada: ${total} minutos.`);
+    console.groupEnd();
+    return total;
+  }, [weeklyActivities]);
 
-  // Determinar tendência
-  const determineTrend = (snapshots: WeeklySnapshot[]): 'improving' | 'stable' | 'declining' => {
-    if (snapshots.length < 2) return 'stable';
-    
-    const first = snapshots[snapshots.length - 1];
-    const last = snapshots[0];
-    
-    const change = last.metrics.completionRate - first.metrics.completionRate;
-    
-    if (change > 5) return 'improving';
-    if (change < -5) return 'declining';
-    return 'stable';
-  };
+  const loadProgressData = useCallback(async () => {
+    if (!user?.id || user.role !== 'student') return;
 
-  // Extrair insights dos snapshots
-  const extractInsights = (snapshots: WeeklySnapshot[]) => {
-    const defaultInsights = {
-      strengths: [],
-      challenges: [],
-      recommendations: []
-    };
+    console.group(`📊 [PROGRESS-HOOK] Sincronizando Métricas Reais`);
+    try {
+      setLoading(true);
 
-    if (snapshots.length === 0) return defaultInsights;
+      // 1. BUSCAR PERFIL (RPG)
+      console.log('🔍 [PASSO 1] Lendo perfil do aluno para XP e Streak...');
+      const studentRef = doc(firestore, 'students', user.id);
+      const studentSnap = await getDoc(studentRef);
+      const studentProfile = studentSnap.data()?.profile || {};
+      const totalPoints = studentProfile.totalPoints || 0;
+      const streak = studentProfile.streak || 0;
+      const level = Math.floor(totalPoints / 200) + 1;
 
-    const latest = snapshots[0];
-    
-    // Gerar insights baseados nos dados
-    const strengths: string[] = [];
-    const challenges: string[] = [];
-    const recommendations: string[] = [];
+      // 2. BUSCAR HISTÓRICO
+      console.log('🔍 [PASSO 2] Buscando WeeklySnapshots...');
+      const snapshotsQuery = query(collection(firestore, 'weeklySnapshots'), where('studentId', '==', user.id));
+      const snapshotsSnap = await getDocs(snapshotsQuery);
+      let snapshots = snapshotsSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        weekStartDate: doc.data().weekStartDate?.toDate(),
+        weekEndDate: doc.data().weekEndDate?.toDate(),
+      } as WeeklySnapshot)).sort((a, b) => b.weekNumber - a.weekNumber);
 
-    // Força: alta taxa de conclusão
-    if (latest.metrics.completionRate > 80) {
-      strengths.push('Alta taxa de conclusão de atividades');
-    } else if (latest.metrics.completionRate > 60) {
-      strengths.push('Boa consistência nas atividades');
+      // 3. BUSCAR ATIVIDADES ATUAIS
+      console.log('🔍 [PASSO 3] Chamando Service para buscar atividades da semana...');
+      const currentActivities = await ScheduleInstanceService.getWeekActivities(user.id);
+      console.log(`📦 [DADOS] Recebidas ${currentActivities.length} atividades brutas do Service.`);
+      setWeeklyActivities(currentActivities);
+
+      // 4. CALCULAR TENDÊNCIA
+      let trend: 'improving' | 'declining' | 'stable' = 'stable';
+      if (snapshots.length >= 2) {
+        const latestRate = snapshots[0].metrics.completionRate || 0;
+        const previousRate = snapshots[1].metrics.completionRate || 0;
+        if (latestRate > previousRate + 5) trend = 'improving';
+        else if (latestRate < previousRate - 5) trend = 'declining';
+      }
+
+      // 5. ATUALIZAR INTERFACE
+      const completedCount = currentActivities.filter(a => a.status === 'completed').length;
+      const totalCount = currentActivities.length;
+
+      console.log('✨ [HOOK] Preparando objeto final de DATA para a UI...');
+      setData({
+        performanceTrend: trend,
+        currentMetrics: {
+          streak,
+          totalPoints,
+          level,
+          completedActivities: completedCount,
+          totalActivities: totalCount,
+          completionRate: totalCount > 0 ? (completedCount / totalCount) * 100 : 0,
+          timeSpent: timeInvestedCalculated // 👈 Plugado no cálculo reativo com logs
+        },
+        weeklySnapshots: snapshots
+      });
+
+      setError(null);
+    } catch (err: any) {
+      console.error('❌ [PROGRESS-HOOK] Erro Fatal:', err);
+      setError('Erro ao sincronizar progresso.');
+    } finally {
+      setLoading(false);
+      console.groupEnd();
     }
-
-    // Força: streak longo
-    if (latest.metrics.streakAtEndOfWeek > 7) {
-      strengths.push(`Sequência de ${latest.metrics.streakAtEndOfWeek} dias de atividades`);
-    }
-
-    // Desafio: baixa consistência
-    if (latest.metrics.consistencyScore < 50) {
-      challenges.push('Baixa consistência na realização das atividades');
-      recommendations.push('Tente manter uma rotina diária de atividades');
-    }
-
-    // Desafio: baixa adesão
-    if (latest.metrics.adherenceScore < 60) {
-      challenges.push('Dificuldade em seguir o cronograma proposto');
-      recommendations.push('Revise seu cronograma e ajuste os horários das atividades');
-    }
-
-    // Recomendações baseadas em padrões
-    if (latest.metrics.completionRate < 40) {
-      recommendations.push('Comece com atividades mais curtas para ganhar momentum');
-    }
-
-    if (latest.metrics.streakAtEndOfWeek === 0 && snapshots.length > 1) {
-      recommendations.push('Que tal começar uma nova sequência hoje?');
-    }
-
-    return {
-      strengths: strengths.slice(0, 3),
-      challenges: challenges.slice(0, 2),
-      recommendations: recommendations.slice(0, 3)
-    };
-  };
+  }, [user?.id, timeInvestedCalculated]);
 
   useEffect(() => {
     loadProgressData();
   }, [loadProgressData]);
 
-  return {
-    data,
-    loading,
-    error,
-    refresh: loadProgressData
-  };
->>>>>>> fcbeaae (lógica calendário civil estabelecida)
+  const stats = useMemo(() => {
+    const total = weeklyActivities.length;
+    const completed = weeklyActivities.filter(a => a.status === 'completed').length;
+    return {
+      total,
+      completed,
+      percent: total > 0 ? Math.round((completed / total) * 100) : 0,
+      pending: total - completed
+    };
+  }, [weeklyActivities]);
+
+  return { data, weeklyActivities, stats, loading, error, refresh: loadProgressData };
 }

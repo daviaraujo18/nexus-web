@@ -39,18 +39,20 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     customizations: {}
   });
 
-  // Sincroniza as datas silenciosamente quando o cronograma carrega
+  // 🤖 AUTO-SYNC: Sincroniza as datas silenciosamente quando o cronograma carrega
   useEffect(() => {
     if (schedule) {
-      console.log('🤖 [AUTO-SYNC] Aplicando datas do cronograma pai à atribuição:', {
-        inicio: schedule.startDate?.toLocaleDateString(),
-        fim: schedule.endDate?.toLocaleDateString()
-      });
+      console.group('📅 [AUTO-SYNC ATRIBUIÇÃO]');
+      console.log('📄 Cronograma:', schedule.name);
+      console.log('🕒 Aplicando Início:', schedule.startDate ? new Date(schedule.startDate).toLocaleDateString() : 'N/A');
+      console.log('🕒 Aplicando Fim:', schedule.endDate ? new Date(schedule.endDate).toLocaleDateString() : 'N/A');
+      
       setAssignmentData(prev => ({
         ...prev,
         startDate: schedule.startDate ? new Date(schedule.startDate) : new Date(),
         endDate: schedule.endDate ? new Date(schedule.endDate) : new Date()
       }));
+      console.groupEnd();
     }
   }, [schedule]);
 
@@ -58,7 +60,11 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     const init = async () => {
       try {
         setLoading(true);
+        console.log('🚀 [LOAD] Carregando dados para atribuição:', scheduleId);
         await Promise.all([loadScheduleData(scheduleId), loadStudents()]);
+      } catch (err: any) {
+        console.error('❌ Erro ao inicializar Assignment:', err);
+        setError('Falha ao carregar dados do cronograma.');
       } finally {
         setLoading(false);
       }
@@ -72,104 +78,133 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
       return;
     }
 
-    console.group('🚀 [SUBMIT AUTOMÁTICO]');
-    console.log('📅 Usando vigência do cronograma:', assignmentData.startDate.toLocaleDateString(), 'até', assignmentData.endDate?.toLocaleDateString());
+    console.group('🚀 [SUBMIT ATRIBUIÇÃO]');
+    console.log('📊 Alunos:', selectedStudents.length);
+    console.log('📅 Início:', assignmentData.startDate.toLocaleDateString());
+    console.log('📅 Fim:', assignmentData.endDate?.toLocaleDateString());
     
     try {
       setError(null);
-      await assignSchedule(scheduleId, {
+      // 🔥 Forçamos os IDs selecionados para dentro do payload final
+      const finalPayload: AssignScheduleDTO = {
         ...assignmentData,
         studentIds: selectedStudents
-      });
-      console.log('✅ Atribuição concluída');
+      };
+
+      await assignSchedule(scheduleId, finalPayload);
+      console.log('✅ Sucesso!');
       if (onSuccess) onSuccess();
     } catch (err: any) {
-      console.error('❌ Erro:', err);
-      setError(err.message || 'Erro ao atribuir');
+      console.error('❌ Erro no Submit:', err);
+      setError(err.message || 'Erro ao atribuir cronograma');
     } finally {
       console.groupEnd();
     }
   };
 
-  if (loading) return <div className="p-10 text-center">Carregando...</div>;
+  if (loading) return <div className="p-10 text-center text-gray-500 font-medium">Carregando alunos e vigências...</div>;
 
   return (
     <div className="space-y-6">
-      {/* Resumo do Cronograma (Estilo Simples) */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6">
+      {/* Cabeçalho de Info - Estilo original e limpo */}
+      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">{schedule?.name}</h2>
-            <div className="flex gap-4 mt-1 text-sm text-gray-500 font-medium">
-              <span className="flex items-center gap-1">
-                <FaCalendarAlt className="text-indigo-500" />
-                Vigência: {assignmentData.startDate.toLocaleDateString()} — {assignmentData.endDate?.toLocaleDateString()}
-              </span>
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-indigo-50 rounded-lg">
+              <FaCalendarAlt className="text-indigo-600 w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">{schedule?.name}</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Vigência automática: <span className="font-bold text-gray-700">{assignmentData.startDate.toLocaleDateString()}</span> até <span className="font-bold text-gray-700">{assignmentData.endDate?.toLocaleDateString()}</span>
+              </p>
             </div>
           </div>
-          <div className="text-right">
-             <span className="text-xs font-bold bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase">Datas Automáticas</span>
+          <div className="hidden md:block">
+             <span className="text-[10px] font-black bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full uppercase tracking-tighter">Sincronizado</span>
           </div>
         </div>
       </div>
 
-      {/* Grid de Alunos (Visual original limpo) */}
+      {/* Grid de Alunos */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {students.map(student => (
-          <div 
-            key={student.id}
-            onClick={() => {
-                const newSelection = selectedStudents.includes(student.id)
-                    ? selectedStudents.filter(id => id !== student.id)
-                    : [...selectedStudents, student.id];
-                setSelectedStudents(newSelection);
-            }}
-            className={`p-4 border-2 rounded-xl cursor-pointer transition-all ${
-              selectedStudents.includes(student.id) 
-                ? 'border-indigo-600 bg-indigo-50/50' 
-                : 'bg-white border-gray-100 hover:border-gray-200'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-               <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
-                    <FaUser className="text-gray-400" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-gray-900">{student.name}</div>
-                    <div className="text-xs text-gray-500">{student.profile.grade}</div>
-                  </div>
-               </div>
-               <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-                 selectedStudents.includes(student.id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-200'
-               }`}>
-                 {selectedStudents.includes(student.id) && <FaCheck className="text-white text-[10px]" />}
-               </div>
+        {students.map(student => {
+          const isSelected = selectedStudents.includes(student.id);
+          return (
+            <div 
+              key={student.id}
+              onClick={() => {
+                  const newSelection = isSelected
+                      ? selectedStudents.filter(id => id !== student.id)
+                      : [...selectedStudents, student.id];
+                  setSelectedStudents(newSelection);
+              }}
+              className={`p-4 border-2 rounded-xl cursor-pointer transition-all duration-200 ${
+                isSelected 
+                  ? 'border-indigo-600 bg-indigo-50/50 shadow-sm' 
+                  : 'bg-white border-gray-100 hover:border-gray-200'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                 <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isSelected ? 'bg-indigo-100' : 'bg-gray-100'}`}>
+                      <FaUser className={isSelected ? 'text-indigo-600' : 'text-gray-400'} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-gray-900 truncate">{student.name}</div>
+                      <div className="text-xs text-gray-500">{student.profile.grade || 'Série não inf.'}</div>
+                    </div>
+                 </div>
+                 <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                   isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-200'
+                 }`}>
+                   {isSelected && <FaCheck className="text-white text-[10px]" />}
+                 </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Footer Original */}
-      <div className="flex items-center justify-between bg-white border border-gray-200 p-6 rounded-xl shadow-lg">
-        <div className="text-gray-600">
+      {/* Footer Ações */}
+      <div className="flex flex-col sm:flex-row items-center justify-between bg-white border border-gray-200 p-6 rounded-2xl shadow-xl gap-4">
+        <div className="flex items-center gap-2 text-gray-600">
+           <FaUsers className="text-gray-400" />
            <span className="font-bold text-gray-900">{selectedStudents.length}</span> alunos selecionados
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 w-full sm:w-auto">
           {onCancel && (
-            <button onClick={onCancel} className="px-6 py-2 text-gray-600 font-medium">Cancelar</button>
+            <button 
+              onClick={onCancel} 
+              disabled={assigning}
+              className="flex-1 sm:flex-none px-6 py-3 text-gray-600 font-bold hover:bg-gray-50 rounded-xl transition-colors"
+            >
+              Cancelar
+            </button>
           )}
           <button
             onClick={handleSubmit}
             disabled={assigning || selectedStudents.length === 0}
-            className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50 transition-all flex items-center gap-2"
+            className="flex-1 sm:flex-none bg-indigo-600 text-white px-10 py-3 rounded-xl font-bold hover:bg-indigo-700 disabled:opacity-50 transition-all flex items-center justify-center gap-3 shadow-lg shadow-indigo-100"
           >
-            {assigning ? 'Atribuindo...' : 'Confirmar Atribuição'}
+            {assigning ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Atribuindo...</span>
+              </>
+            ) : (
+              'Confirmar Atribuição'
+            )}
           </button>
         </div>
       </div>
 
-      {error && <div className="text-red-600 font-bold text-sm bg-red-50 p-3 rounded-lg border border-red-100">{error}</div>}
+      {error && (
+        <div className="flex items-center gap-3 text-red-600 font-bold text-sm bg-red-50 p-4 rounded-xl border border-red-100 animate-in fade-in slide-in-from-top-2">
+          <FaExclamationTriangle className="flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
     </div>
   );
 }

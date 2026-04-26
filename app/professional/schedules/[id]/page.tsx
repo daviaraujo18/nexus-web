@@ -35,7 +35,9 @@ import {
   FaExternalLinkAlt,
   FaQuestionCircle,
   FaPlus,
-  FaSync
+  FaSync,
+  FaUpload,
+  FaPaperclip
 } from 'react-icons/fa';
 import { 
   FiActivity, 
@@ -57,6 +59,9 @@ export default function ScheduleDetailPage() {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'activities' | 'progress' | 'analytics' | 'settings'>('overview');
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
+
+  // 🔥 Estado para armazenar o feedback visual dos arquivos anexados
+  const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({});
 
   const {
     schedule,
@@ -139,6 +144,17 @@ export default function ScheduleDetailPage() {
       activitiesByDay,
       activityTypes
     };
+  };
+
+  // 🔥 Handler de upload local para feedback na interface
+  const handleFileUpload = (activityId: string, event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setUploadedFiles(prev => ({
+        ...prev,
+        [activityId]: file.name
+      }));
+    }
   };
 
   const stats = getStats();
@@ -568,7 +584,7 @@ export default function ScheduleDetailPage() {
                   <p className="text-gray-500 max-w-md mx-auto mb-6">
                     Este cronograma não possui atividades cadastradas.
                   </p>
-                  <button className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium flex items-center gap-2 mx-auto">
+                  <button onClick={() => router.push(`/professional/schedules/${schedule.id}/edit`)} className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium flex items-center gap-2 mx-auto">
                     <FaPlus className="w-4 h-4" />
                     <span>Adicionar Primeira Atividade</span>
                   </button>
@@ -623,13 +639,14 @@ export default function ScheduleDetailPage() {
                             
                             <div className="flex items-center gap-2">
                               <button
-                                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                                onClick={() => router.push(`/professional/schedules/${schedule.id}/edit`)}
+                                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                                 title="Editar atividade"
                               >
                                 <FaEdit className="w-4 h-4" />
                               </button>
                               <button
-                                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                                 title="Visualizar atividade"
                               >
                                 <FaEye className="w-4 h-4" />
@@ -660,6 +677,39 @@ export default function ScheduleDetailPage() {
                               Ordem: {activity.orderIndex + 1}
                             </div>
                           </div>
+
+                          {/* 🔥 NOVA SEÇÃO: ENVIO DE ARQUIVOS (Renderiza se o tipo for upload ou se exigir arquivo na config) */}
+                          {(activity.type?.toLowerCase().includes('upload') || activity.config?.requiresFileUpload || activity.metadata?.requiresFileUpload) && (
+                            <div className="mt-4 pt-4 border-t border-gray-100">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-blue-50/50 p-4 rounded-xl border border-blue-100 gap-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
+                                    <FaUpload className="w-4 h-4" />
+                                  </div>
+                                  <div>
+                                    <h4 className="text-sm font-medium text-gray-900">Material da Atividade</h4>
+                                    {uploadedFiles[activity.id] ? (
+                                      <p className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                                        <FaCheckCircle className="w-3 h-3" /> {uploadedFiles[activity.id]}
+                                      </p>
+                                    ) : (
+                                      <p className="text-xs text-gray-500">Anexe o arquivo necessário para esta atividade.</p>
+                                    )}
+                                  </div>
+                                </div>
+                                <label className="cursor-pointer shrink-0 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2 shadow-sm w-full sm:w-auto justify-center">
+                                  <FaPaperclip className="w-4 h-4" />
+                                  <span>{uploadedFiles[activity.id] ? 'Trocar Arquivo' : 'Anexar Arquivo'}</span>
+                                  <input 
+                                    type="file" 
+                                    className="hidden" 
+                                    onChange={(e) => handleFileUpload(activity.id, e)} 
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          )}
+
                         </div>
                       </div>
                     ))}
@@ -701,7 +751,7 @@ export default function ScheduleDetailPage() {
                 Visualize análises detalhadas sobre o desempenho deste cronograma.
               </p>
               <button
-                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium inline-flex items-center gap-2"
+                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium inline-flex items-center gap-2 cursor-pointer"
                 onClick={() => router.push(`/professional/analytics?schedule=${schedule.id}`)}
               >
                 <FaChartBar className="w-4 h-4" />
@@ -727,7 +777,8 @@ export default function ScheduleDetailPage() {
                       <input
                         type="text"
                         defaultValue={schedule.name}
-                        className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled
+                        className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none"
                       />
                     </div>
                     
@@ -738,7 +789,8 @@ export default function ScheduleDetailPage() {
                       <textarea
                         defaultValue={schedule.description || ''}
                         rows={4}
-                        className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled
+                        className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none"
                       />
                     </div>
                     
@@ -748,7 +800,8 @@ export default function ScheduleDetailPage() {
                       </label>
                       <select
                         defaultValue={schedule.category}
-                        className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled
+                        className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none"
                       >
                         <option value="therapeutic">Terapêutico</option>
                         <option value="educational">Educacional</option>
@@ -773,7 +826,8 @@ export default function ScheduleDetailPage() {
                       
                       <div className="space-y-3">
                         <button
-                          className="w-full px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium text-left"
+                          onClick={() => router.push(`/professional/schedules/new?copy=${schedule.id}`)}
+                          className="w-full px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium text-left cursor-pointer"
                         >
                           <div className="flex items-center justify-between">
                             <span>Duplicar Cronograma</span>
@@ -830,7 +884,7 @@ export default function ScheduleDetailPage() {
           <div className="flex items-center gap-3">
             <button
               onClick={refresh}
-              className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium flex items-center gap-2"
+              className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium flex items-center gap-2 cursor-pointer"
             >
               <FaSync className="w-4 h-4" />
               <span>Atualizar</span>

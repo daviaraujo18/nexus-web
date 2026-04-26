@@ -1,7 +1,6 @@
-// app/professional/analytics/student/[id]/page.tsx
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -32,11 +31,16 @@ import {
   FaFrown,
   FaMeh,
   FaAngry,
-  FaSyncAlt
+  FaSyncAlt,
+  FaTasks
 } from 'react-icons/fa';
 import { useStudentAnalytics } from '@/hooks/useStudentAnalytics';
 import { useAuth } from '@/context/AuthContext';
 import { getGradeLabel, getSchoolLabel } from '@/lib/utils/constants';
+
+// 🔥 IMPORTS PARA O FIREBASE PLUGAR OS DADOS REAIS
+import { collectionGroup, query, where, getDocs } from 'firebase/firestore';
+import { firestore } from '@/firebase/config';
 
 export default function StudentAnalyticsPage() {
   const params = useParams();
@@ -46,6 +50,11 @@ export default function StudentAnalyticsPage() {
 
   const [expandedWeeks, setExpandedWeeks] = useState<number[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'gad7' | 'insights'>('overview');
+
+  // 🔥 ESTADOS PARA CARREGAR AS ATIVIDADES DA PLANILHA (MAPEADO PELO SEU TXT)
+  const [completedActivities, setCompletedActivities] = useState<any[]>([]);
+  const [dbAdherence, setDbAdherence] = useState<number>(0);
+  const [isFetching, setIsFetching] = useState(false);
 
   const {
     data: student,
@@ -58,11 +67,79 @@ export default function StudentAnalyticsPage() {
     isAtRisk
   } = useStudentAnalytics(studentId);
 
+  // ============================================
+  // 🔥 BUSCA REAL: MAPEANDO O DOCUMENTO activityProgress
+  // ============================================
+  useEffect(() => {
+    const fetchNexusData = async () => {
+      if (!studentId) return;
+      setIsFetching(true);
+      try {
+        // 1. Busca Adesão real no scheduleInstances conforme o seu txt
+        const qInstances = query(
+          collectionGroup(firestore, 'scheduleInstances'),
+          where('studentId', '==', studentId)
+        );
+        const snapInstances = await getDocs(qInstances);
+        if (!snapInstances.empty) {
+          const percentages = snapInstances.docs.map(d => d.data().progressCache?.completionPercentage || 0);
+          setDbAdherence(Math.max(...percentages)); 
+        }
+
+        // 2. Busca atividades concluídas em múltiplas coleções de progresso para calcular Tempo Total 
+        const activityCollections = ['scheduleActivities', 'activityProgress'];
+        let allDocs: any[] = [];
+
+        for (const col of activityCollections) {
+          const q = query(
+            collectionGroup(firestore, col),
+            where('studentId', '==', studentId),
+            where('status', '==', 'completed')
+          );
+          const snap = await getDocs(q);
+          snap.forEach(doc => {
+            const d = doc.data();
+            const snapshot = d.activitySnapshot || {}; // Extraído do seu .txt
+            const meta = snapshot.metadata || d.metadata || {}; // Local da duração estimada
+
+            allDocs.push({
+              id: doc.id,
+              name: snapshot.title || d.title || 'Atividade',
+              subject: snapshot.type || d.type || 'Geral',
+              description: snapshot.description || d.description || '',
+              completedAt: d.updatedAt || d.createdAt || null, // Firebase Timestamp
+              duration: Number(meta.estimatedDuration || 15) // Puxa os 60min conforme seu doc
+            });
+          });
+        }
+
+        // Ordenar pela data de conclusão mais recente
+        allDocs.sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
+        setCompletedActivities(allDocs);
+      } catch (err) {
+        console.error("Erro ao plugar dados do banco nam5:", err);
+      } finally {
+        setIsFetching(false);
+      }
+    };
+
+    fetchNexusData();
+  }, [studentId]);
+
   useEffect(() => {
     if (studentId) {
       loadStudentData(12); // Carregar 12 semanas de histórico
     }
-  }, [studentId]);
+  }, [studentId, loadStudentData]);
+
+  // 🔥 CÁLCULO DE TEMPO REAL (Soma dos minutos das atividades da planilha)
+  const totalRealTime = useMemo(() => {
+    return completedActivities.reduce((acc, act) => acc + (act.duration || 0), 0);
+  }, [completedActivities]);
+
+  const avgTimePerActivity = useMemo(() => {
+    return completedActivities.length > 0 ? Math.round(totalRealTime / completedActivities.length) : 0;
+  }, [completedActivities, totalRealTime]);
 
   const toggleWeek = (weekNumber: number) => {
     setExpandedWeeks(prev =>
@@ -72,10 +149,16 @@ export default function StudentAnalyticsPage() {
     );
   };
 
-  // Formatação
-  const formatDate = (date?: Date) => {
+  // 🔥 FORMATAÇÃO DE DATA BLINDADA (PREVINE ERRO .toLocaleDateString)
+  const formatDate = (date: any) => {
     if (!date) return '—';
-    return date.toLocaleDateString('pt-BR', {
+    let d: Date;
+    if (typeof date.toDate === 'function') d = date.toDate();
+    else if (date instanceof Date) d = date;
+    else d = new Date(date);
+
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('pt-BR', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric'
@@ -83,7 +166,7 @@ export default function StudentAnalyticsPage() {
   };
 
   const formatPercentage = (value: number) => `${Math.round(value)}%`;
-  const formatNumber = (value: number) => value.toLocaleString('pt-BR');
+  const formatNumber = (value: number) => (value || 0).toLocaleString('pt-BR');
   const formatTime = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
@@ -100,7 +183,7 @@ export default function StudentAnalyticsPage() {
   };
 
   const getGAD7Color = (score?: number) => {
-    if (!score) return 'text-slate-400 bg-slate-50';
+    if (!score && score !== 0) return 'text-slate-400 bg-slate-50';
     if (score <= 4) return 'text-emerald-600 bg-emerald-50';
     if (score <= 9) return 'text-amber-600 bg-amber-50';
     if (score <= 14) return 'text-orange-600 bg-orange-50';
@@ -108,7 +191,7 @@ export default function StudentAnalyticsPage() {
   };
 
   const getGAD7Icon = (score?: number) => {
-    if (!score) return <FaMeh />;
+    if (!score && score !== 0) return <FaMeh />;
     if (score <= 4) return <FaSmile className="text-emerald-600" />;
     if (score <= 9) return <FaMeh className="text-amber-600" />;
     if (score <= 14) return <FaFrown className="text-orange-600" />;
@@ -176,9 +259,10 @@ export default function StudentAnalyticsPage() {
     );
   }
 
-  const priorityInsights = getPriorityInsights();
-  const weeklyTrend = getWeeklyTrend();
-  const gad7History = getGAD7History();
+  // 🔥 DEFINIÇÃO DAS VARIÁVEIS SEGURAS
+  const priorityInsights = student ? getPriorityInsights() : [];
+  const weeklyTrend = student ? getWeeklyTrend() : null;
+  const gad7History = student ? getGAD7History() : [];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white">
@@ -221,7 +305,7 @@ export default function StudentAnalyticsPage() {
                 <div className="flex-shrink-0">
                   <div className="w-24 h-24 md:w-28 md:h-28 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center border-2 border-white/30 shadow-xl">
                     <span className="text-4xl md:text-5xl font-bold">
-                      {student.studentName.charAt(0)}
+                      {student?.studentName?.charAt(0) || 'A'}
                     </span>
                   </div>
                 </div>
@@ -229,7 +313,7 @@ export default function StudentAnalyticsPage() {
                 {/* Informações Principais */}
                 <div className="flex-1">
                   <h1 className="text-2xl md:text-3xl font-bold mb-3 flex items-center gap-3">
-                    {student.studentName}
+                    {student?.studentName}
                     {isAtRisk && (
                       <span className="px-3 py-1 bg-red-500/20 backdrop-blur-sm rounded-full text-sm font-normal flex items-center gap-2">
                         <FaExclamationTriangle className="w-4 h-4" />
@@ -241,24 +325,24 @@ export default function StudentAnalyticsPage() {
                   <div className="flex flex-wrap gap-4 text-indigo-100">
                     <span className="flex items-center gap-2">
                       <FaGraduationCap className="w-4 h-4" />
-                      {getGradeLabel(student.studentGrade)}
+                      {getGradeLabel(student?.studentGrade)}
                     </span>
 
                     <span className="flex items-center gap-2">
                       <FaSchool className="w-4 h-4" />
-                      {getSchoolLabel(student.studentSchool)}
+                      {getSchoolLabel(student?.studentSchool)}
                     </span>
 
                     <span className="flex items-center gap-2">
                       <FaCalendarAlt className="w-4 h-4" />
-                      Última atividade: {formatDate(student.currentMetrics.lastActivityDate)}
+                      Última atividade: {formatDate(student?.currentMetrics?.lastActivityDate)}
                     </span>
                   </div>
                 </div>
 
                 {/* Status Rápido */}
-                <div className="flex-shrink-0 bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
-                  <div className="text-3xl font-bold mb-1">{student.currentMetrics.level}</div>
+                <div className="flex-shrink-0 bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20 text-center">
+                  <div className="text-3xl font-bold mb-1">{student?.currentMetrics?.level || 1}</div>
                   <div className="text-sm text-indigo-100">Nível Atual</div>
                 </div>
               </div>
@@ -337,18 +421,18 @@ export default function StudentAnalyticsPage() {
                   <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
                     <FaChartLine className="w-5 h-5 text-indigo-600" />
                   </div>
-                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${getCompletionColor(student.currentMetrics.completionRate)}`}>
+                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${getCompletionColor(student?.currentMetrics?.completionRate || 0)}`}>
                     {weeklyTrend?.isImproving ? 'Melhorando' : 'Estável'}
                   </span>
                 </div>
                 <div className="text-2xl font-bold text-slate-800 mb-1">
-                  {student.currentMetrics.completionRate.toFixed(1)}%
+                  {(student?.currentMetrics?.completionRate || 0).toFixed(1)}%
                 </div>
                 <div className="text-sm text-slate-500">Taxa de Conclusão</div>
                 <div className="mt-3 w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-indigo-600 rounded-full"
-                    style={{ width: `${student.currentMetrics.completionRate}%` }}
+                    style={{ width: `${student?.currentMetrics?.completionRate || 0}%` }}
                   />
                 </div>
               </div>
@@ -363,10 +447,10 @@ export default function StudentAnalyticsPage() {
                   </span>
                 </div>
                 <div className="text-2xl font-bold text-slate-800 mb-1">
-                  {student.currentMetrics.streak} <span className="text-sm font-normal text-slate-400">dias</span>
+                  {student?.currentMetrics?.streak || 0} <span className="text-sm font-normal text-slate-400">dias</span>
                 </div>
                 <div className="text-sm text-slate-500">Streak Atual</div>
-                {student.currentMetrics.streak > 0 && (
+                {(student?.currentMetrics?.streak || 0) > 0 && (
                   <div className="mt-3 text-xs text-amber-600 flex items-center gap-1">
                     <FaFire className="w-3 h-3" />
                     <span>Continue assim! 🔥</span>
@@ -380,34 +464,34 @@ export default function StudentAnalyticsPage() {
                     <FaTrophy className="w-5 h-5 text-emerald-600" />
                   </div>
                   <span className="text-xs font-medium px-2 py-1 bg-emerald-50 text-emerald-600 rounded-full">
-                    Nível {student.currentMetrics.level}
+                    Nível {student?.currentMetrics?.level || 1}
                   </span>
                 </div>
                 <div className="text-2xl font-bold text-slate-800 mb-1">
-                  {formatNumber(student.currentMetrics.totalPoints)}
+                  {formatNumber(student?.currentMetrics?.totalPoints || 0)}
                 </div>
                 <div className="text-sm text-slate-500">Pontos Totais</div>
                 <div className="mt-3 text-xs text-slate-500">
-                  Média de {student.weeklyHistory[0]?.pointsEarned || 0} pts/semana
+                  Média de {student?.weeklyHistory?.[0]?.pointsEarned || 0} pts/semana
                 </div>
               </div>
 
-              <div className={`rounded-xl shadow-sm border p-5 hover:shadow-md transition-shadow ${getGAD7Color(student.currentMetrics.gad7Score).replace('text-', 'border-').replace('bg-', '')
+              <div className={`rounded-xl shadow-sm border p-5 hover:shadow-md transition-shadow ${getGAD7Color(student?.currentMetrics?.gad7Score).replace('text-', 'border-').replace('bg-', '')
                 }`}>
                 <div className="flex items-center justify-between mb-3">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${getGAD7Color(student.currentMetrics.gad7Score).replace('text-', 'bg-').replace('50', '100')
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${getGAD7Color(student?.currentMetrics?.gad7Score).replace('text-', 'bg-').replace('50', '100')
                     }`}>
-                    {getGAD7Icon(student.currentMetrics.gad7Score)}
+                    {getGAD7Icon(student?.currentMetrics?.gad7Score)}
                   </div>
-                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${getGAD7Color(student.currentMetrics.gad7Score)}`}>
-                    {getSeverityLabel(student.currentMetrics.gad7Severity)}
+                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${getGAD7Color(student?.currentMetrics?.gad7Score)}`}>
+                    {getSeverityLabel(student?.currentMetrics?.gad7Severity)}
                   </span>
                 </div>
                 <div className="text-2xl font-bold text-slate-800 mb-1">
-                  {student.currentMetrics.gad7Score || '—'}
+                  {student?.currentMetrics?.gad7Score || '—'}
                 </div>
                 <div className="text-sm text-slate-500">GAD-7</div>
-                {student.currentMetrics.gad7Score && (
+                {student?.currentMetrics?.gad7Score && (
                   <div className="mt-3 text-xs text-slate-500">
                     Última avaliação: {formatDate(gad7History[0]?.date)}
                   </div>
@@ -416,10 +500,10 @@ export default function StudentAnalyticsPage() {
             </div>
 
             {/* Fatores de Risco e Insights Prioritários */}
-            {(student.riskFactors.length > 0 || priorityInsights.length > 0) && (
+            {((student?.riskFactors?.length || 0) > 0 || (priorityInsights?.length || 0) > 0) && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Fatores de Risco */}
-                {student.riskFactors.length > 0 && (
+                {(student?.riskFactors?.length || 0) > 0 && (
                   <div className="bg-amber-50 rounded-xl border border-amber-200 p-6">
                     <h3 className="font-semibold text-amber-800 mb-4 flex items-center gap-2 text-lg">
                       <FaExclamationTriangle className="w-5 h-5" />
@@ -439,7 +523,7 @@ export default function StudentAnalyticsPage() {
                 )}
 
                 {/* Insights Prioritários */}
-                {priorityInsights.length > 0 && (
+                {(priorityInsights?.length || 0) > 0 && (
                   <div className="bg-indigo-50 rounded-xl border border-indigo-200 p-6">
                     <h3 className="font-semibold text-indigo-800 mb-4 flex items-center gap-2 text-lg">
                       <FaBrain className="w-5 h-5" />
@@ -478,7 +562,7 @@ export default function StudentAnalyticsPage() {
               </h3>
 
               <div className="space-y-4">
-                {student.weeklyHistory.slice(0, 8).map((week, index) => (
+                {student?.weeklyHistory?.slice(0, 8).map((week, index) => (
                   <div key={index} className="flex items-center gap-4">
                     <div className="w-16 text-sm font-medium text-slate-600">
                       Semana {week.weekNumber}
@@ -518,7 +602,7 @@ export default function StudentAnalyticsPage() {
               </div>
             </div>
 
-            {/* Estatísticas Detalhadas */}
+            {/* Estatísticas Detalhadas - PLUGANDO VARIÁVEIS NA INTERFACE */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
                 <h4 className="font-medium text-slate-700 mb-4 flex items-center gap-2">
@@ -530,44 +614,46 @@ export default function StudentAnalyticsPage() {
                     <div className="flex justify-between text-sm mb-1">
                       <span className="text-slate-600">Consistência</span>
                       <span className="font-medium text-slate-800">
-                        {student.currentMetrics.consistencyScore.toFixed(1)}%
+                        {(student?.currentMetrics?.consistencyScore || 0).toFixed(1)}%
                       </span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-indigo-600 rounded-full"
-                        style={{ width: `${student.currentMetrics.consistencyScore}%` }}
+                        style={{ width: `${student?.currentMetrics?.consistencyScore || 0}%` }}
                       />
                     </div>
                   </div>
 
+                  {/* ADESÃO AO CRONOGRAMA */}
                   <div>
                     <div className="flex justify-between text-sm mb-1">
                       <span className="text-slate-600">Adesão ao cronograma</span>
                       <span className="font-medium text-slate-800">
-                        {student.currentMetrics.adherenceScore.toFixed(1)}%
+                        {(dbAdherence > 0 ? dbAdherence : (student?.currentMetrics?.adherenceScore || 0)).toFixed(1)}%
                       </span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-emerald-600 rounded-full"
-                        style={{ width: `${student.currentMetrics.adherenceScore}%` }}
+                        style={{ width: `${dbAdherence > 0 ? dbAdherence : (student?.currentMetrics?.adherenceScore || 0)}%` }}
                       />
                     </div>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100">
+                    {/* TEMPO TOTAL INVESTIDO */}
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-600">Tempo total investido</span>
                       <span className="font-medium text-slate-800">
-                        {formatTime(student.weeklyHistory.reduce((sum, w) => sum + w.timeSpent, 0))}
+                        {formatTime(totalRealTime > 0 ? totalRealTime : (student?.weeklyHistory?.reduce((sum, w) => sum + (w.timeSpent || 0), 0) || 0))}
                       </span>
                     </div>
+                    {/* MÉDIA POR ATIVIDADE */}
                     <div className="flex justify-between text-sm mt-2">
                       <span className="text-slate-600">Média por atividade</span>
                       <span className="font-medium text-slate-800">
-                        {Math.round(student.weeklyHistory.reduce((sum, w) => sum + w.timeSpent, 0) /
-                          student.weeklyHistory.reduce((sum, w) => sum + w.activitiesCompleted, 1))} min
+                        {avgTimePerActivity > 0 ? avgTimePerActivity : Math.round((student?.weeklyHistory?.reduce((sum, w) => sum + (w.timeSpent || 0), 0) || 0) / (student?.weeklyHistory?.reduce((sum, w) => sum + (w.activitiesCompleted || 0), 0) || 1))} min
                       </span>
                     </div>
                   </div>
@@ -584,7 +670,7 @@ export default function StudentAnalyticsPage() {
                     <FaMedal className="w-8 h-8 text-yellow-500" />
                     <div>
                       <div className="font-medium text-slate-800">Pontuação Total</div>
-                      <div className="text-sm text-slate-500">{formatNumber(student.currentMetrics.totalPoints)} pontos</div>
+                      <div className="text-sm text-slate-500">{formatNumber(student?.currentMetrics?.totalPoints || 0)} pontos</div>
                     </div>
                   </div>
 
@@ -593,17 +679,18 @@ export default function StudentAnalyticsPage() {
                     <div>
                       <div className="font-medium text-slate-800">Maior Streak</div>
                       <div className="text-sm text-slate-500">
-                        {Math.max(...student.weeklyHistory.map(w => w.streakAtEnd))} dias
+                        {Math.max(...(student?.weeklyHistory?.map(w => w.streakAtEnd) || [0]))} dias
                       </div>
                     </div>
                   </div>
 
+                  {/* TOTAL DE ATIVIDADES */}
                   <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
                     <FaCheckCircle className="w-8 h-8 text-emerald-500" />
                     <div>
                       <div className="font-medium text-slate-800">Total de Atividades</div>
                       <div className="text-sm text-slate-500">
-                        {student.weeklyHistory.reduce((sum, w) => sum + w.activitiesCompleted, 0)} concluídas
+                        {completedActivities.length > 0 ? completedActivities.length : (student?.weeklyHistory?.reduce((sum, w) => sum + (w.activitiesCompleted || 0), 0) || 0)} concluídas
                       </div>
                     </div>
                   </div>
@@ -625,7 +712,7 @@ export default function StudentAnalyticsPage() {
               </div>
 
               <div className="divide-y divide-slate-200">
-                {student.weeklyHistory.map((week, index) => (
+                {student?.weeklyHistory?.map((week, index) => (
                   <div key={index} className="p-4 hover:bg-slate-50 transition-colors">
                     {/* Cabeçalho da Semana */}
                     <div
@@ -645,7 +732,7 @@ export default function StudentAnalyticsPage() {
                             {formatDate(week.weekStartDate)} - {formatDate(week.weekEndDate)}
                           </div>
                           <div className="flex items-center gap-3 mt-1 text-sm">
-                            <span className="text-slate-500">{week.completionRate.toFixed(1)}% concluído</span>
+                            <span className="text-slate-500">{(week.completionRate || 0).toFixed(1)}% concluído</span>
                             <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
                             <span className="text-slate-500">{week.pointsEarned} pontos</span>
                             {week.gad7 && (
@@ -691,7 +778,7 @@ export default function StudentAnalyticsPage() {
                           <div>
                             <h5 className="text-sm font-medium text-slate-700 mb-3">Desempenho por dia</h5>
                             <div className="space-y-2">
-                              {Object.entries(week.dailyBreakdown).map(([day, data]) => {
+                              {Object.entries(week.dailyBreakdown || {}).map(([day, data]: [string, any]) => {
                                 const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
                                 return (
                                   <div key={day} className="flex items-center gap-2">
@@ -699,7 +786,7 @@ export default function StudentAnalyticsPage() {
                                     <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                       <div
                                         className="h-full bg-indigo-600 rounded-full"
-                                        style={{ width: `${(data.completed / data.total) * 100}%` }}
+                                        style={{ width: `${data.total > 0 ? (data.completed / data.total) * 100 : 0}%` }}
                                       />
                                     </div>
                                     <span className="text-xs text-slate-600 min-w-[4rem]">
@@ -717,19 +804,19 @@ export default function StudentAnalyticsPage() {
                             <div className="space-y-2 text-sm">
                               <div className="flex justify-between">
                                 <span className="text-slate-600">Consistência</span>
-                                <span className="font-medium text-slate-800">{week.consistencyScore.toFixed(1)}%</span>
+                                <span className="font-medium text-slate-800">{(week.consistencyScore || 0).toFixed(1)}%</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-slate-600">Adesão</span>
-                                <span className="font-medium text-slate-800">{week.adherenceScore.toFixed(1)}%</span>
+                                <span className="font-medium text-slate-800">{(week.adherenceScore || 0).toFixed(1)}%</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-slate-600">Tempo investido</span>
-                                <span className="font-medium text-slate-800">{formatTime(week.timeSpent)}</span>
+                                <span className="font-medium text-slate-800">{formatTime(week.timeSpent || 0)}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-slate-600">Streak no fim da semana</span>
-                                <span className="font-medium text-slate-800">{week.streakAtEnd} dias</span>
+                                <span className="font-medium text-slate-800">{week.streakAtEnd || 0} dias</span>
                               </div>
                             </div>
                           </div>
@@ -751,12 +838,12 @@ export default function StudentAnalyticsPage() {
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
                 <div className="text-sm text-slate-500 mb-1">Última avaliação</div>
                 <div className="text-2xl font-bold text-slate-800 mb-2">
-                  {student.currentMetrics.gad7Score || '—'}
+                  {student?.currentMetrics?.gad7Score || '—'}
                 </div>
-                {student.currentMetrics.gad7Severity && (
-                  <div className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${getGAD7Color(student.currentMetrics.gad7Score)
+                {student?.currentMetrics?.gad7Severity && (
+                  <div className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${getGAD7Color(student?.currentMetrics?.gad7Score)
                     }`}>
-                    {getSeverityLabel(student.currentMetrics.gad7Severity)}
+                    {getSeverityLabel(student?.currentMetrics?.gad7Severity)}
                   </div>
                 )}
                 <div className="text-xs text-slate-400 mt-3">
@@ -780,15 +867,15 @@ export default function StudentAnalyticsPage() {
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
                 <div className="text-sm text-slate-500 mb-1">Tendência</div>
                 <div className="flex items-center gap-2 mb-2">
-                  {getTrendIcon(student.trends.gad7Score)}
+                  {getTrendIcon(student?.trends?.gad7Score)}
                   <span className="text-lg font-semibold text-slate-800">
-                    {student.trends.gad7Score === 'improving' ? 'Melhorando' :
-                      student.trends.gad7Score === 'declining' ? 'Aumentando' :
+                    {student?.trends?.gad7Score === 'improving' ? 'Melhorando' :
+                      student?.trends?.gad7Score === 'declining' ? 'Aumentando' :
                         'Estável'}
                   </span>
                 </div>
                 <div className="text-xs text-slate-500">
-                  Confiança: {student.trends.confidence}
+                  Confiança: {student?.trends?.confidence || 'N/A'}
                 </div>
               </div>
             </div>
@@ -830,7 +917,7 @@ export default function StudentAnalyticsPage() {
                                   assessment.score <= 14 ? 'bg-orange-100 text-orange-700' :
                                     'bg-red-100 text-red-700'
                               }`}>
-                              {assessment.severity}
+                              {getSeverityLabel(assessment.severity)}
                             </span>
                           </div>
                           <div className="mt-2 flex items-center gap-4 text-sm text-slate-500">
@@ -880,66 +967,92 @@ export default function StudentAnalyticsPage() {
           </div>
         )}
 
-        {/* TAB: INSIGHTS E ANÁLISES */}
+        {/* TAB: INSIGHTS E ANÁLISES (SUBSTITUIDA POR DADOS ENVIADOS NO CSS ORIGINAL) */}
         {activeTab === 'insights' && (
           <div className="space-y-6">
-            {/* Todos os Insights */}
+            {/* Todos os Insights -> Dados Enviados */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-6 border-b border-slate-200">
                 <h3 className="font-semibold text-slate-800 text-lg flex items-center gap-2">
                   <FaBrain className="w-5 h-5 text-indigo-600" />
-                  Todos os Insights
+                  Insights e Dados do Aluno
                 </h3>
               </div>
 
               <div className="divide-y divide-slate-100">
-                {student.insights.length === 0 ? (
+                {(student?.insights?.length || 0) === 0 && completedActivities.length === 0 ? (
                   <div className="p-8 text-center">
                     <FaBrain className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                     <p className="text-slate-500">Nenhum insight disponível no momento</p>
                   </div>
                 ) : (
-                  student.insights.map((insight, index) => (
-                    <div key={index} className="p-6 hover:bg-slate-50 transition-colors">
-                      <div className="flex items-start gap-4">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${insight.type === 'risk' ? 'bg-red-100' :
-                            insight.type === 'warning' ? 'bg-amber-100' :
-                              insight.type === 'success' ? 'bg-emerald-100' :
-                                'bg-indigo-100'
-                          }`}>
-                          {insight.type === 'risk' && <FaExclamationTriangle className={`w-5 h-5 text-red-600`} />}
-                          {insight.type === 'warning' && <FaExclamationTriangle className={`w-5 h-5 text-amber-600`} />}
-                          {insight.type === 'success' && <FaCheckCircle className={`w-5 h-5 text-emerald-600`} />}
-                          {insight.type === 'info' && <FaBrain className={`w-5 h-5 text-indigo-600`} />}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between mb-1">
-                            <h4 className="font-semibold text-slate-800">{insight.title}</h4>
-                            <span className={`text-xs px-2 py-1 rounded-full ${insight.type === 'risk' ? 'bg-red-100 text-red-700' :
-                                insight.type === 'warning' ? 'bg-amber-100 text-amber-700' :
-                                  insight.type === 'success' ? 'bg-emerald-100 text-emerald-700' :
-                                    'bg-indigo-100 text-indigo-700'
-                              }`}>
-                              {insight.type === 'risk' ? 'Atenção Imediata' :
-                                insight.type === 'warning' ? 'Alerta' :
-                                  insight.type === 'success' ? 'Conquista' :
-                                    'Informação'}
-                            </span>
+                  <>
+                    {student?.insights?.map((insight, index) => (
+                      <div key={`insight-${index}`} className="p-6 hover:bg-slate-50 transition-colors">
+                        <div className="flex items-start gap-4">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${insight.type === 'risk' ? 'bg-red-100' :
+                              insight.type === 'warning' ? 'bg-amber-100' :
+                                insight.type === 'success' ? 'bg-emerald-100' :
+                                  'bg-indigo-100'
+                            }`}>
+                            {insight.type === 'risk' && <FaExclamationTriangle className={`w-5 h-5 text-red-600`} />}
+                            {insight.type === 'warning' && <FaExclamationTriangle className={`w-5 h-5 text-amber-600`} />}
+                            {insight.type === 'success' && <FaCheckCircle className={`w-5 h-5 text-emerald-600`} />}
+                            {insight.type === 'info' && <FaBrain className={`w-5 h-5 text-indigo-600`} />}
                           </div>
-                          <p className="text-slate-600">{insight.description}</p>
-                          {insight.metric && insight.value && (
-                            <div className="mt-3 flex items-center gap-4 text-sm">
-                              <span className="text-slate-500">{insight.metric}:</span>
-                              <span className="font-medium text-slate-700">{insight.value.toFixed(1)}</span>
-                              {insight.threshold && (
-                                <span className="text-slate-400">(limite: {insight.threshold})</span>
-                              )}
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between mb-1">
+                              <h4 className="font-semibold text-slate-800">{insight.title}</h4>
+                              <span className={`text-xs px-2 py-1 rounded-full ${insight.type === 'risk' ? 'bg-red-100 text-red-700' :
+                                  insight.type === 'warning' ? 'bg-amber-100 text-amber-700' :
+                                    insight.type === 'success' ? 'bg-emerald-100 text-emerald-700' :
+                                      'bg-indigo-100 text-indigo-700'
+                                }`}>
+                                {insight.type === 'risk' ? 'Atenção Imediata' :
+                                  insight.type === 'warning' ? 'Alerta' :
+                                    insight.type === 'success' ? 'Conquista' :
+                                      'Informação'}
+                              </span>
                             </div>
-                          )}
+                            <p className="text-slate-600">{insight.description}</p>
+                            {insight.metric && insight.value && (
+                              <div className="mt-3 flex items-center gap-4 text-sm">
+                                <span className="text-slate-500">{insight.metric}:</span>
+                                <span className="font-medium text-slate-700">{insight.value.toFixed(1)}</span>
+                                {insight.threshold && (
+                                  <span className="text-slate-400">(limite: {insight.threshold})</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                    
+                    {/* Renderização das atividades da planilha */}
+                    {completedActivities.map((act, index) => (
+                      <div key={`act-${index}`} className="p-6 hover:bg-slate-50 transition-colors">
+                        <div className="flex items-start gap-4">
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-indigo-100">
+                            <FaTasks className="w-5 h-5 text-indigo-600" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between mb-1">
+                              <h4 className="font-semibold text-slate-800">{act.name}</h4>
+                              <span className="text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Concluído</span>
+                            </div>
+                            <p className="text-slate-600">{act.description}</p>
+                            <div className="mt-3 flex items-center gap-4 text-sm">
+                              <span className="text-slate-500">Módulo:</span>
+                              <span className="font-medium text-slate-700">{act.subject}</span>
+                              <span className="text-slate-400">({act.duration} min)</span>
+                              <span className="text-slate-400 ml-auto">{formatDate(act.completedAt)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
                 )}
               </div>
             </div>

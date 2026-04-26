@@ -2,49 +2,67 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ScheduleInstanceService } from '@/lib/services/ScheduleInstanceService';
+import { ProgressService } from '@/lib/services/ProgressService';
 import { ActivityProgress, ScheduleInstance } from '@/types/schedule';
 import { useAuth } from '@/context/AuthContext';
-<<<<<<< HEAD
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
-=======
->>>>>>> fcbeaae (lógica calendário civil estabelecida)
+import { DateUtils } from '@/lib/utils/dateUtils';
 
 export function useStudentSchedule() {
   const { user } = useAuth();
   const [instances, setInstances] = useState<ScheduleInstance[]>([]);
-<<<<<<< HEAD
-  const [todayActivities, setTodayActivities] = useState<ActivityProgress[]>([]);
+  const [instancesLoaded, setInstancesLoaded] = useState(false); // 🟢 A Verdadeira Luz Verde
+  const [weekActivities, setWeekActivities] = useState<ActivityProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 1. CARREGAR INSTÂNCIAS ATIVAS
+  /**
+   * 1. CARREGAR INSTÂNCIAS (Roda apenas 1 vez, na montagem do componente)
+   */
+  const fetchInstances = useCallback(async () => {
+    if (!user?.id || user.role !== 'student') return;
+    
+    console.group('🔍 [HOOK] Auditoria Inicial de Instâncias');
+    console.log(`⏳ Buscando instâncias ativas para: ${user.id}`);
+    
+    try {
+      const active = await ScheduleInstanceService.getStudentActiveInstances(user.id);
+      console.log(`📡 Instâncias legítimas baixadas do banco: ${active.length}`);
+      setInstances(active); // Guarda no state oficial
+    } catch (err) {
+      console.error("❌ Falha ao buscar instâncias:", err);
+      setError("Erro ao carregar instâncias ativas.");
+    } finally {
+      setInstancesLoaded(true); // Acende a luz verde APÓS os dados estarem no state
+      console.groupEnd();
+    }
+  }, [user?.id, user?.role]);
+
+  // Disparo Inicial
   useEffect(() => {
-    if (!user || user.role !== 'student') return;
-
-    const fetchInstances = async () => {
-      try {
-        const active = await ScheduleInstanceService.getStudentActiveInstances(user.id);
-        setInstances(active);
-      } catch (err) {
-        console.error("❌ Erro ao buscar instâncias:", err);
-      }
-    };
-
     fetchInstances();
-  }, [user]);
+  }, [fetchInstances]);
 
-  // 2. LISTENER EM TEMPO REAL (SEM DEPENDÊNCIA DE ÍNDICE COMPOSTO)
+  /**
+   * 2. LISTENER REAL-TIME COM TRAVA BLINDADA
+   */
   useEffect(() => {
-    if (!user || user.role !== 'student') {
-      setLoading(false);
+    // 🛑 A TRAVA: Se não tem usuário OU se as instâncias ainda não carregaram, MORRE AQUI.
+    if (!user?.id || user.role !== 'student' || !instancesLoaded) {
+      console.log('⏳ [REAL-TIME] Aguardando luz verde das instâncias...');
       return;
     }
 
-    setLoading(true);
-    console.log('📡 [FIREBASE] Conectando ao banco de PRODUÇÃO...');
+    console.group('📡 [REAL-TIME] Iniciando Conexão com Firebase');
+    
+    const now = new Date();
+    const startOfWeek = DateUtils.getWeekStartDate(now);
+    const endOfWeek = DateUtils.getWeekEndDate(now);
+    
+    const validInstanceIds = new Set(instances.map(i => i.id));
+    console.log(`🛡️ O Firebase vai validar as atividades contra ${validInstanceIds.size} instâncias mães.`);
 
-    // Query simplificada para evitar erro de "Failed Precondition" (falta de índice)
     const q = query(
       collection(firestore, 'activityProgress'),
       where('studentId', '==', user.id),
@@ -52,137 +70,89 @@ export function useStudentSchedule() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log('📊 [DEBUG] Documentos brutos no Firestore:', snapshot.size);
+      console.group('📊 [SNAPSHOT EVENT] Dados do Firebase!');
+      console.log(`📦 Lidos ${snapshot.size} documentos brutos.`);
       
-      const allProgress: ActivityProgress[] = [];
-      const now = new Date();
-      
-      // Ajuste técnico: Se for antes das 4h da manhã, ainda consideramos "hoje" como o dia anterior
-      // Isso evita que o fuso horário UTC do Firebase pule o dia prematuramente
-      const offset = now.getHours() < 4 ? 1 : 0;
-      const adjustDate = new Date(now.getTime() - (offset * 24 * 60 * 60 * 1000));
-      const todayStr = adjustDate.toISOString().split('T')[0]; 
+      const filteredActivities: ActivityProgress[] = [];
 
       snapshot.forEach((doc) => {
         const data = doc.data();
         const scheduledDate = data.scheduledDate?.toDate();
-        const scheduledDateStr = scheduledDate?.toISOString().split('T')[0];
 
-        // Filtro de data no lado do cliente (mais seguro e rápido)
-        if (scheduledDateStr === todayStr) {
-          allProgress.push({
+        if (!scheduledDate) return;
+
+        const isLegit = validInstanceIds.has(data.scheduleInstanceId);
+        const isWithinWeek = scheduledDate >= startOfWeek && scheduledDate <= endOfWeek;
+
+        if (isLegit && isWithinWeek) {
+          filteredActivities.push({
             id: doc.id,
             ...data,
             scheduledDate,
             startedAt: data.startedAt?.toDate(),
             completedAt: data.completedAt?.toDate(),
           } as ActivityProgress);
+        } else {
+          // Log reduzido para não floodar o console
+          if (!isLegit) console.log(`🚫 [ÓRFÃO] Barrado (Sem instância mãe): ${data.activitySnapshot?.title || doc.id}`);
         }
       });
 
-      // Ordenação manual por data de criação/atualização
-      allProgress.sort((a, b) => {
-        const dateA = a.updatedAt?.seconds || 0;
-        const dateB = b.updatedAt?.seconds || 0;
-        return dateB - dateA;
-      });
+      filteredActivities.sort((a, b) => (a.scheduledDate?.getTime() || 0) - (b.scheduledDate?.getTime() || 0));
 
-      setTodayActivities(allProgress);
+      console.log(`✨ [SUCESSO] ${filteredActivities.length} atividades limpas e prontas para a tela.`);
+      setWeekActivities(filteredActivities);
       setLoading(false);
       setError(null);
+      console.groupEnd();
     }, (err) => {
       console.error("❌ [FIREBASE ERROR]:", err.message);
-      setError("Erro ao sincronizar dados em tempo real.");
+      setError("Erro de sincronização.");
       setLoading(false);
     });
 
+    console.groupEnd();
+    
     return () => unsubscribe();
-  }, [user]);
+    
+    // 👇 O PULO DO GATO: O useEffect agora depende do state 'instances'. 
+    // Quando ele muda (ao terminar o fetch), o React injeta a lista certa no Firebase.
+  }, [user?.id, user?.role, instancesLoaded, instances]); 
 
-  // 3. AÇÕES (START / COMPLETE)
+  /**
+   * 3. FILTRO PARA HOJE
+   */
+  const todayActivities = useMemo(() => {
+    const todayStr = new Date().toLocaleDateString('pt-BR');
+    return weekActivities.filter(a => a.scheduledDate?.toLocaleDateString('pt-BR') === todayStr);
+  }, [weekActivities]);
+
+  const totalTodayActivities = useMemo(() => todayActivities.length, [todayActivities]);
+
+  /**
+   * 4. AÇÕES
+   */
   const startActivity = useCallback(async (id: string) => {
     if (!user?.id) return;
-    await ProgressService.startActivity(id, user.id);
-    // O onSnapshot cuidará do refresh da UI automaticamente
+    try { await ProgressService.startActivity(id, user.id); } 
+    catch (err) { console.error("❌ Erro ao startar:", err); }
   }, [user?.id]);
 
   const completeActivity = useCallback(async (id: string, data?: any) => {
     if (!user?.id) return;
-    await ProgressService.completeActivity(id, user.id, data);
+    try { await ProgressService.completeActivity(id, user.id, data); } 
+    catch (err) { console.error("❌ Erro ao completar:", err); }
   }, [user?.id]);
 
   return {
     instances,
+    weekActivities,
     todayActivities,
+    totalTodayActivities,
     loading,
     error,
-    refresh: () => {}, // Agora é real-time, não precisa de refresh manual
+    refresh: fetchInstances,
     startActivity,
-    completeActivity,
-    totalTodayActivities: todayActivities.length
-=======
-  const [weekActivities, setWeekActivities] = useState<ActivityProgress[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadData = useCallback(async () => {
-    if (!user?.id) {
-      console.log('⚠️ [HOOK] Abortando loadData: Usuário não autenticado.');
-      return;
-    }
-    
-    console.log(`🚀 [HOOK] Iniciando carregamento para: ${user.id} às ${new Date().toLocaleTimeString()}`);
-    
-    try {
-      setLoading(true);
-      
-      // Busca instâncias com auditoria interna
-      const activeInstances = await ScheduleInstanceService.getStudentActiveInstances(user.id);
-      
-      // Busca atividades agregadas da semana
-      const activities = await ScheduleInstanceService.getWeekActivities(user.id);
-
-      console.log('✨ [HOOK] Carga finalizada com sucesso:', {
-        instanciasAtivas: activeInstances.length,
-        totalAtividadesSemana: activities.length
-      });
-
-      setInstances(activeInstances);
-      setWeekActivities(activities);
-      setError(null);
-    } catch (err: any) {
-      console.error('❌ [HOOK] Erro fatal na carga de dados:', err);
-      setError(err.message || 'Erro ao carregar cronograma');
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  // Filtro para Hoje (usado no Sidebar e Dashboard)
-  const todayActivities = useMemo(() => {
-    const todayStr = new Date().toLocaleDateString('pt-BR');
-    const filtered = weekActivities.filter(a => 
-      a.scheduledDate?.toLocaleDateString('pt-BR') === todayStr
-    );
-    console.log(`📅 [MEMO] Calculando todayActivities para ${todayStr}: ${filtered.length} encontradas.`);
-    return filtered;
-  }, [weekActivities]);
-
-  // 🔥 FIX: Adicionando campo totalTodayActivities exigido pelo StudentSidebar
-  const totalTodayActivities = useMemo(() => todayActivities.length, [todayActivities]);
-
-  return { 
-    instances, 
-    todayActivities, 
-    weekActivities, 
-    totalTodayActivities, // Retorno garantido para o Sidebar
-    loading, 
-    error,
-    refresh: loadData 
->>>>>>> fcbeaae (lógica calendário civil estabelecida)
+    completeActivity
   };
 }

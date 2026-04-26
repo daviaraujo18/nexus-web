@@ -92,6 +92,82 @@ export class ScheduleService {
   }
 
   /**
+   * 🔥 FUNÇÃO INJETADA PARA CORRIGIR O ERRO "is not a function" NO FORM DE EDIÇÃO
+   */
+  static async updateScheduleTemplate(
+    scheduleId: string,
+    data: CreateScheduleDTO
+  ): Promise<void> {
+    console.group(`🔥 [SERVICE] Atualizando Cronograma: ${scheduleId}`);
+    try {
+      const validation = ValidationUtils.validateScheduleData(data);
+      if (!validation.isValid) {
+        throw new Error(`Dados inválidos: ${validation.errors.join(', ')}`);
+      }
+
+      const sanitizedData = ValidationUtils.sanitizeScheduleData(data);
+      const metrics = this.calculateScheduleMetrics(sanitizedData.activities);
+
+      const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
+      const batch = writeBatch(firestore);
+
+      // 1. Atualizar o Documento Principal (Template)
+      console.log(`📝 Preparando payload do template...`);
+      batch.update(templateRef, {
+        name: sanitizedData.name,
+        description: sanitizedData.description,
+        category: sanitizedData.category,
+        startDate: Timestamp.fromDate(sanitizedData.startDate),
+        endDate: sanitizedData.endDate ? Timestamp.fromDate(sanitizedData.endDate) : null,
+        activeDays: sanitizedData.activeDays,
+        'repeatRules.resetOnRepeat': sanitizedData.repeatRules.resetOnRepeat,
+        'metadata.estimatedWeeklyHours': metrics.estimatedWeeklyHours,
+        'metadata.totalActivities': metrics.totalActivities,
+        'metadata.tags': metrics.tags,
+        updatedAt: serverTimestamp()
+      });
+
+      // 2. Limpar atividades antigas
+      console.log(`🧹 Buscando atividades antigas para limpeza...`);
+      const oldActivitiesQuery = query(
+        collection(firestore, this.COLLECTIONS.ACTIVITIES),
+        where('scheduleTemplateId', '==', scheduleId)
+      );
+      const oldActivitiesSnap = await getDocs(oldActivitiesQuery);
+      
+      oldActivitiesSnap.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      console.log(`🗑️ ${oldActivitiesSnap.docs.length} atividades antigas removidas do lote.`);
+
+      // 3. Inserir as atividades novas/editadas
+      console.log(`➕ Adicionando ${sanitizedData.activities.length} atividades novas ao lote...`);
+      sanitizedData.activities.forEach((a, i) => {
+        const actId = `${scheduleId}_act_${i}_${Date.now()}`; // Adiciona timestamp pra garantir ID único
+        const actRef = doc(firestore, this.COLLECTIONS.ACTIVITIES, actId);
+        batch.set(actRef, {
+          scheduleTemplateId: scheduleId,
+          ...a,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          isActive: true
+        });
+      });
+
+      // 4. Executa a transação no banco
+      console.log(`🚀 Disparando transação no banco...`);
+      await batch.commit();
+
+      console.log(`✅ Cronograma ${scheduleId} atualizado com sucesso!`);
+      console.groupEnd();
+    } catch (error: any) {
+      console.error('❌ Erro na atualização do cronograma:', error);
+      console.groupEnd();
+      throw new Error(`Falha ao atualizar cronograma: ${error.message}`);
+    }
+  }
+
+  /**
    * EXCLUSÃO SEGURA (Preserva dados enviados pelos alunos)
    */
   static async deleteSchedule(scheduleId: string, professionalId: string): Promise<void> {

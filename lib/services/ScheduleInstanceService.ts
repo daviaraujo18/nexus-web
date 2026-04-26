@@ -17,207 +17,224 @@ export class ScheduleInstanceService {
   };
 
   /**
-   * 🚀 [LOG TOTAL] Atribuição com TRAVA DE SEGURANÇA TEMPORAL
+   * 🚀 [ATRIBUIÇÃO] Mantida a trava de segurança que estabelecemos
    */
   static async assignScheduleToStudents(
     professionalId: string,
     scheduleTemplateId: string,
     assignData: AssignScheduleDTO
   ): Promise<{ successful: any[]; failed: any[] }> {
-    console.group(`🚀 [ATRIBUIÇÃO CRÍTICA] Iniciando para Template: ${scheduleTemplateId}`);
-    console.log('📦 Payload BRUTO recebido:', JSON.stringify(assignData, null, 2));
-    
+    console.group(`🚀 [SERVICE] Atribuindo Template: ${scheduleTemplateId}`);
     try {
       const schedule = await ScheduleService.getScheduleTemplate(scheduleTemplateId);
-      console.log('📄 Dados Mestre do Template:', {
-        nome: schedule.name,
-        templateStartDate: schedule.startDate?.toLocaleDateString('pt-BR')
-      });
-
       const successful = [];
       const failed = [];
 
       for (const studentId of assignData.studentIds) {
-        console.group(`👤 Processando Aluno: ${studentId}`);
         try {
           const dateFromForm = assignData.startDate ? new Date(assignData.startDate) : null;
           const dateFromTemplate = schedule.startDate ? new Date(schedule.startDate) : null;
           const today = new Date();
           today.setHours(0, 0, 0, 0);
 
-          console.log('🕒 Auditoria de Datas:', {
-            vindaDoFormulario: dateFromForm?.toLocaleDateString('pt-BR') || 'NULO',
-            vindaDoTemplate: dateFromTemplate?.toLocaleDateString('pt-BR') || 'NULO',
-            hoje: today.toLocaleDateString('pt-BR')
-          });
-
-          // 🔥 TRAVA DE SEGURANÇA NUCLEAR:
-          // Se o formulário mandou HOJE (24/04), mas o template diz que é dia 30/04,
-          // o Service agora FORÇA o uso do dia 30/04.
           let startDate: Date;
-          
+          // 🔥 TRAVA DE SEGURANÇA: Prioriza a data futura do template se houver
           if (dateFromTemplate && dateFromTemplate > today) {
-            console.warn(`⚠️ [TRAVA ATIVADA] O template é futuro (${dateFromTemplate.toLocaleDateString()}). Ignorando erro do formulário.`);
+            console.warn(`⚠️ [TRAVA] Forçando data do template: ${dateFromTemplate.toLocaleDateString()}`);
             startDate = dateFromTemplate;
           } else {
             startDate = dateFromForm || dateFromTemplate || today;
           }
           
           startDate.setHours(0, 0, 0, 0);
-          console.log(`🎯 DATA FINAL QUE SERÁ GRAVADA: ${startDate.toLocaleDateString('pt-BR')}`);
-
           const instanceId = `${scheduleTemplateId}_${studentId.substring(0, 8)}_${Date.now()}`;
-          
-          // Recalcula as janelas com a data CORRIGIDA (dia 30)
           const weekStart = DateUtils.getWeekStartDate(startDate);
           const weekEnd = DateUtils.getWeekEndDate(startDate);
-          
-          console.log('📏 Janela de Cronograma Calculada:', {
-            weekStart: weekStart.toLocaleDateString('pt-BR'),
-            weekEnd: weekEnd.toLocaleDateString('pt-BR')
-          });
 
           const instanceData = {
             scheduleTemplateId,
             studentId,
             professionalId,
             currentWeekNumber: 1,
-            currentWeekStartDate: weekStart,
-            currentWeekEndDate: weekEnd,
-            status: 'active',
-            startedAt: startDate,
-            isActive: true,
-            isDeleted: false,
-          };
-
-          console.log(`💾 Persistindo Instância [${instanceId}] no Firestore...`);
-          await setDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
-            ...instanceData,
             currentWeekStartDate: Timestamp.fromDate(weekStart),
             currentWeekEndDate: Timestamp.fromDate(weekEnd),
+            status: 'active',
             startedAt: Timestamp.fromDate(startDate),
+            isActive: true,
+            isDeleted: false,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
-          });
+          };
 
-          console.log('✅ Instância salva. Gerando atividades para a semana futura...');
-          await this.generateWeekActivities(instanceId, 1);
+          await setDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), instanceData);
+          console.log(`✅ [SUCESSO] Instância criada: ${instanceId}`);
           
+          await this.generateWeekActivities(instanceId, 1);
           successful.push({ studentId, instanceId });
-          console.log('🎊 Atribuição concluída sem erros de data.');
         } catch (err: any) {
-          console.error(`❌ FALHA no aluno ${studentId}:`, err);
+          console.error(`❌ [ERRO] Falha no aluno ${studentId}:`, err);
           failed.push({ studentId, error: err.message });
         }
-        console.groupEnd();
       }
-      console.groupEnd();
       return { successful, failed };
-    } catch (error: any) {
-      console.error('❌ ERRO FATAL NA ATRIBUIÇÃO:', error);
-      console.groupEnd();
-      throw error;
-    }
+    } finally { console.groupEnd(); }
   }
 
   /**
-   * 🛠️ [LOG TOTAL] Gera atividades baseadas na data da INSTÂNCIA
+   * 🛠️ [GERAÇÃO ATIVIDADES]
    */
   static async generateWeekActivities(instanceId: string, weekNo: number) {
-    console.group(`🛠️ [GERAÇÃO] Instância: ${instanceId}`);
+    console.log(`⚙️ [SERVICE] Gerando atividades para instância ${instanceId} (Semana ${weekNo})`);
+    const snap = await getDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
+    const inst = snap.data();
+    if (!inst) {
+      console.warn(`⚠️ [AVISO] Instância ${instanceId} não encontrada para gerar atividades.`);
+      return;
+    }
+
+    const activities = await ActivityService.listScheduleActivities(inst.scheduleTemplateId);
+    const weekStartDate = inst.currentWeekStartDate.toDate();
+    const batch = writeBatch(firestore);
+
+    for (const act of activities) {
+      const activityDate = DateUtils.calculateActivityDate(weekStartDate, act.dayOfWeek);
+      const progressId = `${instanceId}_w${weekNo}_${act.id}`;
+      batch.set(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
+        scheduleInstanceId: instanceId,
+        activityId: act.id,
+        studentId: inst.studentId,
+        weekNumber: weekNo,
+        dayOfWeek: act.dayOfWeek,
+        activitySnapshot: act,
+        status: 'pending',
+        scheduledDate: Timestamp.fromDate(activityDate),
+        isActive: true,
+        isDeleted: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+    await batch.commit();
+    console.log(`✨ [SUCESSO] ${activities.length} atividades geradas e salvas no banco.`);
+  }
+
+  /**
+   * 🔍 [AUDITORIA] Getters filtrando instâncias órfãs (AGORA OTIMIZADO EM PARALELO)
+   */
+  static async getStudentActiveInstances(studentId: string): Promise<ScheduleInstance[]> {
+    console.group(`🔍 [SERVICE] Auditoria de Instâncias - Aluno: ${studentId}`);
     try {
-      const snap = await getDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
-      const inst = snap.data();
-      if (!inst) {
-        console.error('❌ Abortando: Instância não encontrada!');
-        console.groupEnd();
-        return;
-      }
-
-      const activities = await ActivityService.listScheduleActivities(inst.scheduleTemplateId);
-      const weekStartDate = inst.currentWeekStartDate.toDate();
+      const q = query(
+        collection(firestore, this.COLLECTIONS.INSTANCES), 
+        where('studentId', '==', studentId), 
+        where('isActive', '==', true), 
+        where('status', '==', 'active')
+      );
       
-      console.log(`📅 Calculando datas baseadas em (WeekStart): ${weekStartDate.toLocaleDateString('pt-BR')}`);
-
-      const batch = writeBatch(firestore);
-      for (const act of activities) {
-        const activityDate = DateUtils.calculateActivityDate(weekStartDate, act.dayOfWeek);
+      console.log(`⏳ [SERVICE] Buscando documentos brutos na collection...`);
+      const snap = await getDocs(q);
+      console.log(`📦 [SERVICE] ${snap.size} instâncias brutas encontradas. Validando integridade...`);
+      
+      // 🔥 OTIMIZAÇÃO: Promise.all para buscar os templates em paralelo em vez de um por um
+      const validationPromises = snap.docs.map(async (instDoc) => {
+        const inst = { id: instDoc.id, ...instDoc.data() } as any;
         
-        console.log(`   🔹 Atividade: [${act.title}] | Dia:${act.dayOfWeek} -> DATA CALCULADA: ${activityDate.toLocaleDateString('pt-BR')}`);
+        try {
+          const templateSnap = await getDoc(doc(firestore, this.COLLECTIONS.TEMPLATES, inst.scheduleTemplateId));
+          
+          // Se o cronograma pai não existe ou foi deletado, ignoramos a instância (órfã)
+          if (!templateSnap.exists() || templateSnap.data()?.isDeleted) {
+            console.log(`🗑️ [BLOQUEIO ÓRFÃO] Instância ignorada (Template deletado/inexistente): ${inst.id.substring(0,12)}...`);
+            return null; 
+          }
 
-        const progressId = `${instanceId}_w${weekNo}_${act.id}`;
-        batch.set(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
-          scheduleInstanceId: instanceId,
-          activityId: act.id,
-          studentId: inst.studentId,
-          weekNumber: weekNo,
-          dayOfWeek: act.dayOfWeek,
-          activitySnapshot: act,
-          status: 'pending',
-          scheduledDate: Timestamp.fromDate(activityDate),
-          isActive: true,
-          isDeleted: false,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-      }
-      await batch.commit();
-      console.log('✅ Batch de atividades gravado com sucesso.');
+          return {
+            ...inst,
+            startedAt: inst.startedAt?.toDate(),
+            currentWeekStartDate: inst.currentWeekStartDate?.toDate(),
+            currentWeekEndDate: inst.currentWeekEndDate?.toDate()
+          } as ScheduleInstance;
+        } catch (error) {
+          console.error(`❌ Erro ao validar template da instância ${inst.id}:`, error);
+          return null;
+        }
+      });
+
+      // Aguarda todas as validações terminarem na velocidade da luz
+      const results = await Promise.all(validationPromises);
+      
+      // Filtra os nulos (as órfãs que descartamos)
+      const validInstances = results.filter((inst): inst is ScheduleInstance => inst !== null);
+      
+      console.log(`✅ [RESULTADO] ${validInstances.length} instâncias legítimas de fato aprovadas.`);
+      return validInstances;
     } catch (err) {
-      console.error('❌ ERRO NA GERAÇÃO:', err);
-    } finally {
-      console.groupEnd();
+      console.error("❌ [ERRO CRÍTICO] Erro ao auditar instâncias:", err);
+      return [];
+    } finally { 
+      console.groupEnd(); 
     }
   }
 
   /**
-   * 🔍 [LOG TOTAL] Auditoria e Filtros (Getters)
+   * 📅 [FILTRO SEMANAL] Pente fino para não mostrar lixo na tela
    */
-  static async getStudentActiveInstances(studentId: string): Promise<ScheduleInstance[]> {
-    console.group(`🔍 [AUDITORIA] Buscando para Aluno: ${studentId}`);
-    try {
-      const q = query(collection(firestore, this.COLLECTIONS.INSTANCES), where('studentId', '==', studentId), where('isActive', '==', true), where('status', '==', 'active'));
-      const snap = await getDocs(q);
-      const validInstances: ScheduleInstance[] = [];
-      for (const instDoc of snap.docs) {
-        const inst = { id: instDoc.id, ...instDoc.data() } as any;
-        const templateSnap = await getDoc(doc(firestore, this.COLLECTIONS.TEMPLATES, inst.scheduleTemplateId));
-        if (!templateSnap.exists() || templateSnap.data()?.isDeleted) continue;
-        validInstances.push({ ...inst, startedAt: inst.startedAt?.toDate(), currentWeekStartDate: inst.currentWeekStartDate?.toDate(), currentWeekEndDate: inst.currentWeekEndDate?.toDate() } as ScheduleInstance);
-      }
-      console.log(`📊 TOTAL LEGÍTIMO: ${validInstances.length}`);
-      console.groupEnd();
-      return validInstances;
-    } catch { console.groupEnd(); return []; }
-  }
-
   static async getWeekActivities(studentId: string): Promise<ActivityProgress[]> {
-    console.group(`📅 [FILTRO SEMANAL] Aluno: ${studentId}`);
+    console.group(`📅 [SERVICE] Buscando Grade Semanal - Aluno: ${studentId}`);
     try {
+      // Primeiro, pegamos apenas as instâncias que sobreviveram à auditoria de órfãos
       const active = await this.getStudentActiveInstances(studentId);
-      if (active.length === 0) { console.groupEnd(); return []; }
+      if (active.length === 0) { 
+        console.warn('🛑 [SERVICE] Nenhuma instância legítima. Tela será zerada.');
+        return []; 
+      }
+
       const activeIds = active.map(i => i.id);
       const now = new Date();
       const start = DateUtils.getWeekStartDate(now);
       const end = DateUtils.getWeekEndDate(now);
-      start.setHours(0, 0, 0, 0); end.setHours(23, 59, 59, 999);
-      console.log(`🌐 Exibindo apenas entre: ${start.toLocaleDateString()} e ${end.toLocaleDateString()}`);
-      const q = query(collection(firestore, this.COLLECTIONS.PROGRESS), where('scheduleInstanceId', 'in', activeIds.slice(0, 30)), where('isActive', '==', true));
+      
+      console.log(`🌐 [SERVICE] Janela Civil: ${start.toLocaleDateString()} a ${end.toLocaleDateString()}`);
+
+      const q = query(
+        collection(firestore, this.COLLECTIONS.PROGRESS), 
+        where('studentId', '==', studentId),
+        where('isActive', '==', true)
+      );
+
       const snap = await getDocs(q);
       const activities: ActivityProgress[] = [];
+
       snap.forEach(dDoc => {
         const data = dDoc.data();
         const scheduledDate = data.scheduledDate?.toDate();
+        
+        if (!scheduledDate) return;
+
+        // VERIFICAÇÃO 1: A instância pai desta tarefa ainda é válida?
+        const isLegit = activeIds.includes(data.scheduleInstanceId);
+        // VERIFICAÇÃO 2: A tarefa está dentro da semana civil atual?
         const isWithinRange = scheduledDate >= start && scheduledDate <= end;
-        if (isWithinRange && !data.isDeleted) {
+
+        if (isLegit && isWithinRange && !data.isDeleted) {
           activities.push({ id: dDoc.id, ...data, scheduledDate } as ActivityProgress);
         } else {
-          console.log(`      ⏭️ IGNORADA: [${data.activitySnapshot?.title}] Data: ${scheduledDate?.toLocaleDateString('pt-BR')} (Fora da Semana)`);
+          // Log para sabermos por que a tarefa sumiu (ou por que não sumiu)
+          if (!isLegit) {
+            console.log(`🚫 [BLOQUEIO ÓRFÃO] Tarefa bloqueada: [${data.activitySnapshot?.title || 'Sem título'}] | Instância: ${data.scheduleInstanceId.substring(0,8)}...`);
+          } else if (!isWithinRange) {
+            console.log(`⏭️ [BLOQUEIO DATA] Fora da semana: [${data.activitySnapshot?.title || 'Sem título'}] | Data: ${scheduledDate.toLocaleDateString('pt-BR')}`);
+          }
         }
       });
-      console.log(`🎯 TOTAL NA TELA: ${activities.length}`);
-      console.groupEnd();
+
+      console.log(`🎯 [SERVICE] TOTAL FINAL NA GRADE: ${activities.length} atividades limpas.`);
       return activities;
-    } catch { console.groupEnd(); return []; }
+    } catch (err) {
+      console.error("❌ [ERRO CRÍTICO] Erro fatal no filtro semanal:", err);
+      return [];
+    } finally { 
+      console.groupEnd(); 
+    }
   }
 }

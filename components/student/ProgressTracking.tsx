@@ -1,7 +1,6 @@
-// components/student/ProgressTracking.tsx
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FaChartLine,
   FaTrophy,
@@ -59,10 +58,15 @@ interface WeeklyProgress {
 }
 
 export default function ProgressTracking() {
+  // 1. IMPORTAÇÃO CORRETA E LIMPA: Puxamos o "data" REAL que o novo hook gera consultando o banco
   const { data, loading, error, refresh } = useStudentWeeklyProgress();
   
   const [activeTab, setActiveTab] = useState<'overview' | 'achievements' | 'stats'>('overview');
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
+
+  useEffect(() => {
+    console.log(`👁️ [UI-RENDER] Renderizando ProgressTracking. Aba ativa: ${activeTab}`);
+  }, [activeTab]);
 
   const getTrend = (improvement?: number): 'up' | 'down' | 'stable' => {
     if (improvement === undefined) return 'stable';
@@ -117,14 +121,6 @@ export default function ProgressTracking() {
     return Math.min(100, Math.max(0, (xpInThisLevel / xpForThisLevel) * 100));
   };
 
-  const getTrendIcon = (trend: 'up' | 'down' | 'stable') => {
-    switch (trend) {
-      case 'up': return <FaArrowTrendUp className="w-4 h-4 text-emerald-500" />;
-      case 'down': return <FaArrowTrendDown className="w-4 h-4 text-red-500" />;
-      default: return <FaMinus className="w-4 h-4 text-gray-400" />;
-    }
-  };
-
   const getTrendColor = (trend: 'improving' | 'declining' | 'stable') => {
     switch (trend) {
       case 'improving': return 'text-emerald-600 bg-emerald-50 border-emerald-100';
@@ -173,14 +169,6 @@ export default function ProgressTracking() {
     );
   };
 
-  const formatDate = (date?: Date) => {
-    if (!date) return '';
-    return date.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit'
-    });
-  };
-
   const formatFullDate = (date?: Date) => {
     if (!date) return '';
     return date.toLocaleDateString('pt-BR', {
@@ -204,6 +192,7 @@ export default function ProgressTracking() {
     return { label: 'Atenção', icon: '🔴', color: 'text-red-600' };
   };
 
+  // 3. FLUXO DE TELAS
   if (loading) {
     return (
       <div className="flex justify-center items-center h-96">
@@ -219,7 +208,9 @@ export default function ProgressTracking() {
     );
   }
 
+  // Se deu erro REAL no hook
   if (error || !data) {
+    console.warn(`🛑 [UI-ERROR] Tela de erro acionada! Motivo: error="${error}", data=${data}`);
     return (
       <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl border border-gray-200 p-8 shadow-sm">
         <div className="text-center">
@@ -243,11 +234,13 @@ export default function ProgressTracking() {
     );
   }
 
+  // 4. PREPARANDO AS VARIÁVEIS PARA A TELA PERFEITA
   const { currentMetrics } = data;
   const weeklyProgress = getWeeklyProgress();
   const bestWeek = getBestWeek();
   const weeklyAverage = getWeeklyAverage();
   const levelProgress = getLevelProgress(currentMetrics.level);
+  
   const achievements = AchievementUtils.calculateAchievements(
     '', // studentId não é mais usado
     [], // instances não são mais usadas
@@ -442,7 +435,7 @@ export default function ProgressTracking() {
             </div>
           </div>
 
-          {/* Histórico Semanal Detalhado - UI/UX Melhorada */}
+          {/* Histórico Semanal Detalhado */}
           <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl border border-gray-200 p-6 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div className="flex items-center gap-3">
@@ -479,21 +472,18 @@ export default function ProgressTracking() {
                           : 'border-gray-200 hover:border-indigo-200 hover:shadow-md'
                       }`}
                     >
-                      {/* Cabeçalho da Semana - Melhorado */}
                       <div 
                         className="p-5 cursor-pointer"
                         onClick={() => setSelectedWeek(isSelected ? null : week.weekNumber)}
                       >
                         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                           <div className="flex items-start gap-4">
-                            {/* Ícone da Semana */}
                             <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${getCompletionBgColor(week.completionRate)}`}>
                               <span className={`text-xl font-bold ${getCompletionTextColor(week.completionRate)}`}>
                                 {week.weekNumber}
                               </span>
                             </div>
 
-                            {/* Informações da Semana */}
                             <div className="flex-1">
                               <div className="flex flex-wrap items-center gap-3 mb-2">
                                 <span className="font-semibold text-gray-900">
@@ -537,7 +527,6 @@ export default function ProgressTracking() {
                             </div>
                           </div>
 
-                          {/* Barra de Progresso */}
                           <div className="lg:w-48">
                             <div className="flex items-center gap-3">
                               <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
@@ -554,7 +543,6 @@ export default function ProgressTracking() {
                         </div>
                       </div>
 
-                      {/* Detalhes Expandidos - Melhorados */}
                       {isSelected && (
                         <div className="p-5 bg-gradient-to-br from-gray-50 to-white border-t border-gray-200">
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

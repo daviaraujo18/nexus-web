@@ -1,4 +1,4 @@
-// app/student/dashboard/page.tsx
+// app/student/progress/page.tsx
 'use client';
 
 import React from 'react';

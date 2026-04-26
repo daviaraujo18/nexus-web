@@ -12,8 +12,9 @@ export class ValidationUtils {
       errors.push('Nome do cronograma deve ter pelo menos 3 caracteres');
     }
 
-    // Datas - CORREÇÃO: Comparação CORRETA
-    const normalizeDate = (date: Date | string) => {
+    // Datas - Protegido contra undefined
+    const normalizeDate = (date: Date | string | undefined) => {
+      if (!date) return new Date();
       const d = typeof date === 'string'
         ? new Date(date + 'T00:00:00')
         : new Date(date);
@@ -23,7 +24,7 @@ export class ValidationUtils {
     };
 
     const today = normalizeDate(new Date());
-    const startDate = normalizeDate(data.startDate);
+    const startDate = data.startDate ? normalizeDate(data.startDate) : today;
 
     // A data de hoje é permitida, só datas anteriores são bloqueadas
     if (startDate < today) {
@@ -42,39 +43,37 @@ export class ValidationUtils {
       }
     }
 
-    // Dias ativos
-    if (!data.activeDays.length) {
+    // Dias ativos - 🔥 BLINDADO: Verifica se é undefined ANTES de ler o length
+    if (!data.activeDays || data.activeDays.length === 0) {
       errors.push('Selecione pelo menos um dia da semana');
-    }
-
-    if (data.activeDays.some(day => day < 0 || day > 6)) {
+    } else if (data.activeDays.some(day => day < 0 || day > 6)) {
       errors.push('Dias da semana devem estar entre 0 (domingo) e 6 (sábado)');
     }
 
-    // Atividades
+    // Atividades - 🔥 BLINDADO: Verifica se é undefined ANTES de ler o length
     if (!data.activities || data.activities.length === 0) {
       errors.push('Adicione pelo menos uma atividade');
+    } else {
+      // Validar atividades individuais apenas se o array existir
+      data.activities.forEach((activity, index) => {
+        if (activity.dayOfWeek < 0 || activity.dayOfWeek > 6) {
+          errors.push(`Atividade ${index + 1}: Dia da semana inválido`);
+        }
+
+        if (activity.estimatedDuration <= 0) {
+          errors.push(`Atividade ${index + 1}: Duração estimada deve ser positiva`);
+        }
+
+        if (activity.pointsOnCompletion < 0) {
+          errors.push(`Atividade ${index + 1}: Pontuação não pode ser negativa`);
+        }
+
+        // Validação extra: atividade em dia não ativo (blindado com array fallback)
+        if (data.activeDays && !data.activeDays.includes(activity.dayOfWeek)) {
+          errors.push(`Atividade ${index + 1}: Dia ${activity.dayOfWeek} não está ativo no cronograma`);
+        }
+      });
     }
-
-    // Validar atividades individuais
-    data.activities.forEach((activity, index) => {
-      if (activity.dayOfWeek < 0 || activity.dayOfWeek > 6) {
-        errors.push(`Atividade ${index + 1}: Dia da semana inválido`);
-      }
-
-      if (activity.estimatedDuration <= 0) {
-        errors.push(`Atividade ${index + 1}: Duração estimada deve ser positiva`);
-      }
-
-      if (activity.pointsOnCompletion < 0) {
-        errors.push(`Atividade ${index + 1}: Pontuação não pode ser negativa`);
-      }
-
-      // Validação extra: atividade em dia não ativo
-      if (!data.activeDays.includes(activity.dayOfWeek)) {
-        errors.push(`Atividade ${index + 1}: Dia ${activity.dayOfWeek} não está ativo no cronograma`);
-      }
-    });
 
     return {
       isValid: errors.length === 0,
@@ -83,6 +82,8 @@ export class ValidationUtils {
   }
 
   static validateActivityConfig(type: ActivityType, config: any): boolean {
+    if (!config) return false; // Fallback de segurança
+
     switch (type) {
       case 'quick':
         return typeof config.autoComplete === 'boolean';
@@ -114,6 +115,10 @@ export class ValidationUtils {
   }
 
   static sanitizeScheduleData(data: any): CreateScheduleDTO {
+    // Array fallbacks para garantir que a interface ou backend não mandem undefined no lugar de Arrays
+    const activeDays = Array.isArray(data.activeDays) ? data.activeDays : [];
+    const activities = Array.isArray(data.activities) ? data.activities : [];
+
     return {
       ...data,
       name: (data.name || '').trim(),
@@ -122,8 +127,8 @@ export class ValidationUtils {
       endDate: data.endDate || new Date(
         (data.startDate || new Date()).getTime() + (28 * 24 * 60 * 60 * 1000)
       ),
-      activeDays: Array.from(new Set(data.activeDays || [])).sort(),
-      activities: (data.activities || []).map((activity: any) => ({
+      activeDays: Array.from(new Set(activeDays)).sort(),
+      activities: activities.map((activity: any) => ({
         ...activity,
         title: (activity.title || '').trim(),
         instructions: (activity.instructions || '').trim(),
