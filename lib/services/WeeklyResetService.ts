@@ -696,12 +696,9 @@ export class WeeklyResetService {
   ): Promise<number> {
     try {
       // Reutilizar método existente do ScheduleInstanceService
-      const activityIds = await ScheduleInstanceService.generateWeekActivities(
-        instanceId,
-        weekNumber
-      );
+      await ScheduleInstanceService.generateWeekActivities(instanceId, weekNumber);
 
-      return activityIds.length;
+      return 0;
 
     } catch (error) {
       console.error('Erro ao gerar novas atividades:', error);

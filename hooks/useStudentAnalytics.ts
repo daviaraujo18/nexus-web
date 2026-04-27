@@ -1,7 +1,7 @@
 // hooks/useStudentAnalytics.ts
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { StudentAnalyticsSummary, Insight } from '@/types/analytics';
 import { AnalyticsService } from '@/lib/services/AnalyticsService';
@@ -17,8 +17,7 @@ export function useStudentAnalytics(studentId: string) {
   const [error, setError] = useState<string>();
   const [data, setData] = useState<StudentAnalyticsSummary | null>(null);
 
-  // Instancia o serviço com base no papel do usuário
-  const analyticsService = new AnalyticsService(user?.role);
+  const analyticsService = useMemo(() => new AnalyticsService(user?.role), [user?.role]);
 
   /**
    * Função principal de carga de dados

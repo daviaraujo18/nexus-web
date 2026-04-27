@@ -4,20 +4,15 @@
 import React, { useState, useMemo } from 'react';
 import {
   FaSearch,
-  FaCalendarAlt,
   FaExclamationCircle
 } from 'react-icons/fa';
 import { FiGrid, FiList } from 'react-icons/fi';
-import { useAuth } from '@/context/AuthContext';
 import { useStudentSchedule } from '@/hooks/useStudentSchedule';
 import Link from 'next/link';
 
-// Componentes
-import ScheduleList from '@/components/schedules/ScheduleList';
 import ScheduleWeekView from '@/components/schedules/ScheduleWeekView';
 
 export default function MySchedulesPage() {
-  const { user } = useAuth();
   const {
     instances,
     weekActivities = [], // Default para evitar erros de undefined
@@ -33,9 +28,7 @@ export default function MySchedulesPage() {
   
   // Estado para controlar qual cronograma está em foco
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
-  const [expandedSchedule, setExpandedSchedule] = useState<string | null>(null);
   const [expandedActivity, setExpandedActivity] = useState<string | null>(null);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'paused' | 'completed'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   // 🔥 FIX: Lógica Multi-Cronograma Blindada
@@ -132,55 +125,33 @@ export default function MySchedulesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
-          {activeView === 'week' ? (
-            <ScheduleWeekView
-              selectedDay={selectedDay}
-              selectedWeek={selectedWeek}
-              weekActivities={filteredWeekActivities}
-              expandedActivity={expandedActivity}
-              onDaySelect={setSelectedDay}
-              onActivityExpand={setExpandedActivity}
-              onActivityUpdate={refresh}
-            />
-          ) : (
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-               <h3 className="font-bold mb-4">Programas Ativos</h3>
-               <div className="space-y-4">
-                 {instances.map(inst => (
-                   <div key={inst.id} className="p-4 border rounded-xl flex justify-between items-center">
-                     <div>
-                       <div className="font-bold">Programa de Desenvolvimento</div>
-                       <div className="text-xs text-gray-500">ID: {inst.id}</div>
-                     </div>
-                     <Link href={`/student/schedules/${inst.id}`} className="text-purple-600 text-sm font-medium">Ver Detalhes</Link>
-                   </div>
-                 ))}
-               </div>
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-6">
-          <ScheduleList
-            schedules={instances}
-            expandedSchedule={expandedSchedule}
-            onScheduleExpand={(id) => {
-              setExpandedSchedule(id);
-              setSelectedInstanceId(id);
-            }}
-            searchTerm={searchTerm}
-            filterStatus={filterStatus}
+      <div>
+        {activeView === 'week' ? (
+          <ScheduleWeekView
+            selectedDay={selectedDay}
+            selectedWeek={selectedWeek}
+            weekActivities={filteredWeekActivities}
+            expandedActivity={expandedActivity}
+            onDaySelect={setSelectedDay}
+            onActivityExpand={setExpandedActivity}
+            onActivityUpdate={refresh}
           />
-          
-          <div className="bg-purple-600 rounded-2xl p-6 text-white shadow-lg">
-            <h4 className="font-bold mb-2">Visão Geral</h4>
-            <p className="text-purple-100 text-sm mb-4">Você está visualizando {selectedInstanceId ? 'um cronograma específico' : 'sua agenda integrada'}.</p>
-            <div className="text-3xl font-bold">{filteredWeekActivities.length}</div>
-            <div className="text-xs text-purple-200 uppercase tracking-wider">Atividades na semana</div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+            <h3 className="font-bold mb-4">Programas Ativos</h3>
+            <div className="space-y-4">
+              {instances.map(inst => (
+                <div key={inst.id} className="p-4 border rounded-xl flex justify-between items-center">
+                  <div>
+                    <div className="font-bold">Programa de Desenvolvimento</div>
+                    <div className="text-xs text-gray-500">ID: {inst.id}</div>
+                  </div>
+                  <Link href={`/student/schedules/${inst.id}`} className="text-purple-600 text-sm font-medium">Ver Detalhes</Link>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

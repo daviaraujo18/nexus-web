@@ -45,27 +45,29 @@ export function ActivityBreakdown({ breakdown }: ActivityBreakdownProps) {
   }, {} as Record<ActivityType, { completion: number; time: number; points: number }>);
 
   const getActivityIcon = (type: ActivityType) => {
-    const icons = {
+    const icons: Record<ActivityType, string> = {
       quick: '⚡',
       text: '📝',
       quiz: '❓',
       video: '🎥',
       checklist: '✅',
       file: '📎',
-      app: '📱'
+      app: '📱',
+      physical_activity: '🏃'
     };
     return icons[type] || '📋';
   };
 
   const getActivityName = (type: ActivityType) => {
-    const names = {
+    const names: Record<ActivityType, string> = {
       quick: 'Rápida',
       text: 'Texto',
       quiz: 'Quiz',
       video: 'Vídeo',
       checklist: 'Checklist',
       file: 'Arquivo',
-      app: 'App'
+      app: 'App',
+      physical_activity: 'Ativ. Física'
     };
     return names[type] || type;
   };

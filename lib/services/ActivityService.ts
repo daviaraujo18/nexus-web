@@ -57,27 +57,15 @@ export class ActivityService {
     } = {}
   ): Promise<ScheduleActivity[]> {
     try {
-      let q = query(
+      // Usa apenas igualdade simples para evitar índice composto obrigatório no Firestore.
+      // Filtragem e ordenação são feitas em memória.
+      const q = query(
         collection(firestore, this.COLLECTION),
         where('scheduleTemplateId', '==', scheduleId)
       );
 
-      if (!options.includeInactive) {
-        q = query(q, where('isActive', '==', true));
-      }
-
-      if (options.dayOfWeek !== undefined) {
-        q = query(q, where('dayOfWeek', '==', options.dayOfWeek));
-      }
-
-      if (options.type) {
-        q = query(q, where('type', '==', options.type));
-      }
-
-      q = query(q, orderBy('dayOfWeek'), orderBy('orderIndex'));
-
       const snapshot = await getDocs(q);
-      const activities: ScheduleActivity[] = [];
+      let activities: ScheduleActivity[] = [];
 
       snapshot.forEach(doc => {
         const data = doc.data();
@@ -88,6 +76,24 @@ export class ActivityService {
           updatedAt: data.updatedAt?.toDate()
         } as ScheduleActivity);
       });
+
+      // Filtros em memória
+      if (!options.includeInactive) {
+        activities = activities.filter(a => a.isActive !== false);
+      }
+      if (options.dayOfWeek !== undefined) {
+        activities = activities.filter(a => a.dayOfWeek === options.dayOfWeek);
+      }
+      if (options.type) {
+        activities = activities.filter(a => a.type === options.type);
+      }
+
+      // Ordenação em memória
+      activities.sort((a, b) =>
+        a.dayOfWeek !== b.dayOfWeek
+          ? a.dayOfWeek - b.dayOfWeek
+          : (a.orderIndex ?? 0) - (b.orderIndex ?? 0)
+      );
 
       return activities;
 
@@ -181,7 +187,8 @@ export class ActivityService {
       'video': 'Vídeo',
       'checklist': 'Checklist',
       'file': 'Arquivo',
-      'app': 'App'
+      'app': 'App',
+      'physical_activity': 'Atividade Física'
     };
 
     const difficultyLabels: Record<string, string> = {

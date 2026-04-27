@@ -5,9 +5,8 @@ import React, { useState, useEffect } from 'react';
 import { AssignScheduleDTO } from '@/types/schedule';
 import { Student } from '@/types/auth';
 import { useScheduleAssignment } from '@/hooks/useScheduleAssignment';
-import { FaUser, FaCheck, FaExclamationTriangle, FaUsers, FaCalendarAlt } from 'react-icons/fa';
+import { FaUser, FaCheck, FaExclamationTriangle, FaUsers, FaCalendarAlt, FaCheckCircle } from 'react-icons/fa';
 import { useAuth } from '@/context/AuthContext';
-import { StudentService } from '@/lib/services/StudentService';
 
 interface StudentWithStatus extends Student {
   hasActiveInstance?: boolean;
@@ -29,6 +28,7 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [partialResult, setPartialResult] = useState<{ ok: number; failed: Array<{ studentId: string; error: string }> } | null>(null);
 
   // 🔥 LÓGICA AUTOMÁTICA: O estado de atribuição espelha o cronograma pai sem inputs extras
   const [assignmentData, setAssignmentData] = useState<AssignScheduleDTO>({
@@ -60,8 +60,9 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     const init = async () => {
       try {
         setLoading(true);
-        console.log('🚀 [LOAD] Carregando dados para atribuição:', scheduleId);
-        await Promise.all([loadScheduleData(scheduleId), loadStudents()]);
+        // Carrega cronograma primeiro para que loadStudents possa verificar instâncias ativas
+        await loadScheduleData(scheduleId);
+        await loadStudents();
       } catch (err: any) {
         console.error('❌ Erro ao inicializar Assignment:', err);
         setError('Falha ao carregar dados do cronograma.');
@@ -85,15 +86,22 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     
     try {
       setError(null);
-      // 🔥 Forçamos os IDs selecionados para dentro do payload final
+      setPartialResult(null);
       const finalPayload: AssignScheduleDTO = {
         ...assignmentData,
         studentIds: selectedStudents
       };
 
-      await assignSchedule(scheduleId, finalPayload);
-      console.log('✅ Sucesso!');
-      if (onSuccess) onSuccess();
+      const result = await assignSchedule(scheduleId, finalPayload);
+      console.log('✅ Resultado:', result);
+
+      if (result.failed.length > 0) {
+        setPartialResult({ ok: result.successful.length, failed: result.failed });
+        // Só chama onSuccess se pelo menos um aluno foi atribuído com sucesso
+        if (result.successful.length > 0 && onSuccess) onSuccess();
+      } else {
+        if (onSuccess) onSuccess();
+      }
     } catch (err: any) {
       console.error('❌ Erro no Submit:', err);
       setError(err.message || 'Erro ao atribuir cronograma');
@@ -198,6 +206,29 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
           </button>
         </div>
       </div>
+
+      {partialResult && partialResult.failed.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2">
+          <div className="flex items-center gap-2 text-amber-800 font-bold">
+            <FaExclamationTriangle className="flex-shrink-0" />
+            <span>
+              {partialResult.ok > 0
+                ? `${partialResult.ok} atribuído(s) com sucesso, mas ${partialResult.failed.length} falhou:`
+                : `Falha ao atribuir ${partialResult.failed.length} aluno(s):`}
+            </span>
+          </div>
+          <ul className="text-sm text-amber-700 space-y-1 pl-6 list-disc">
+            {partialResult.failed.map(f => {
+              const student = students.find(s => s.id === f.studentId);
+              return (
+                <li key={f.studentId}>
+                  {student?.name || f.studentId}: {f.error}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-3 text-red-600 font-bold text-sm bg-red-50 p-4 rounded-xl border border-red-100 animate-in fade-in slide-in-from-top-2">

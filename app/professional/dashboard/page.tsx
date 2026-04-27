@@ -33,6 +33,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useSchedules } from '@/hooks/useSchedules';
 import { ScheduleInstanceService } from '@/lib/services/ScheduleInstanceService';
 import { StudentService } from '@/lib/services/StudentService';
+import { collectionGroup, query, where, getDocs } from 'firebase/firestore';
+import { firestore } from '@/firebase/config';
+import SubjectBarChart, { computeSubjectStats, SubjectStat } from '@/components/charts/SubjectBarChart';
 
 export default function ProfessionalDashboardPage() {
   const { user } = useAuth();
@@ -52,6 +55,10 @@ export default function ProfessionalDashboardPage() {
   const [loadingStats, setLoadingStats] = useState(true);
   const [recentActivities, setRecentActivities] = useState<any[]>([]);
   const [topStudents, setTopStudents] = useState<any[]>([]);
+  const [allStudents, setAllStudents] = useState<any[]>([]);
+  const [chartStudentId, setChartStudentId] = useState<string>('');
+  const [chartData, setChartData] = useState<SubjectStat[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -64,6 +71,7 @@ export default function ProfessionalDashboardPage() {
         const students = await StudentService.getStudentsByProfessional(user.id, {
           activeOnly: true
         });
+        setAllStudents(students);
         
         // Contar instâncias ativas e calcular engajamento
         let activeInstances = 0;
@@ -135,6 +143,25 @@ export default function ProfessionalDashboardPage() {
     
     loadDashboardData();
   }, [user, schedules]);
+
+  useEffect(() => {
+    if (!chartStudentId) { setChartData([]); return; }
+    const load = async () => {
+      setChartLoading(true);
+      try {
+        const q = query(
+          collectionGroup(firestore, 'activityProgress'),
+          where('studentId', '==', chartStudentId),
+          where('status', '==', 'completed')
+        );
+        const snap = await getDocs(q);
+        const docs = snap.docs.map(d => ({ status: 'completed', activitySnapshot: d.data().activitySnapshot }));
+        setChartData(computeSubjectStats(docs));
+      } catch { setChartData([]); }
+      finally { setChartLoading(false); }
+    };
+    load();
+  }, [chartStudentId]);
 
   const refreshData = () => {
     setLoadingStats(true);
@@ -311,83 +338,44 @@ export default function ProfessionalDashboardPage() {
             )}
           </div>
 
-          {/* Alunos com Melhor Desempenho */}
+          {/* Atividades por Matéria */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 flex items-center justify-center">
-                    <FaTrophy className="w-5 h-5 text-amber-600" />
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-100 to-indigo-100 flex items-center justify-center">
+                    <FaChartBar className="w-5 h-5 text-violet-600" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold text-gray-900">Melhor Desempenho</h2>
-                    <p className="text-sm text-gray-600">Alunos com maior engajamento</p>
+                    <h2 className="text-lg font-bold text-gray-900">Atividades por Matéria</h2>
+                    <p className="text-sm text-gray-600">Concluídas por disciplina</p>
                   </div>
                 </div>
-                <Link
-                  href="/professional/students"
-                  className="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+                <select
+                  className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-violet-400 outline-none max-w-[180px]"
+                  value={chartStudentId}
+                  onChange={e => setChartStudentId(e.target.value)}
                 >
-                  Ver todos
-                  <FaChevronRight className="w-3 h-3" />
-                </Link>
+                  <option value="">Selecionar aluno</option>
+                  {allStudents.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
               </div>
             </div>
-            
-            {topStudents.length === 0 ? (
-              <div className="p-8 text-center">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl mb-4">
-                  <FaUsers className="w-8 h-8 text-gray-400" />
+            <div className="p-6">
+              {!chartStudentId ? (
+                <div className="text-center py-6 text-gray-400 text-sm">
+                  Selecione um aluno para ver o gráfico
                 </div>
-                <p className="text-gray-500">
-                  Sem dados de desempenho disponíveis
-                </p>
-              </div>
-            ) : (
-              <div className="p-6">
-                <div className="space-y-4">
-                  {topStudents.map((student, index) => (
-                    <div key={student.id} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-white rounded-xl border border-gray-200">
-                      <div className="flex items-center gap-4">
-                        <div className="relative">
-                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center">
-                            <span className="font-bold text-blue-700">
-                              {student.name.split(' ').map((n:any) => n[0]).join('').toUpperCase().substring(0, 2)}
-                            </span>
-                          </div>
-                          {index === 0 && (
-                            <div className="absolute -top-1 -right-1 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center">
-                              <FaStar className="w-3 h-3 text-white" />
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-gray-900">{student.name}</h4>
-                          <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
-                            <div className="flex items-center gap-1">
-                              <FiActivity className="w-3 h-3" />
-                              <span>{student.engagement}% engajamento</span>
-                            </div>
-                            <span>•</span>
-                            <div className="flex items-center gap-1">
-                              <FaFire className="w-3 h-3 text-amber-500" />
-                              <span>{student.streak} dias</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="text-right">
-                        <div className="text-lg font-bold text-gray-900">
-                          {student.engagement}%
-                        </div>
-                        <div className="text-xs text-gray-500">Engajamento</div>
-                      </div>
-                    </div>
-                  ))}
+              ) : chartLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="w-6 h-6 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
                 </div>
-              </div>
-            )}
+              ) : (
+                <SubjectBarChart data={chartData} />
+              )}
+            </div>
           </div>
         </div>
 

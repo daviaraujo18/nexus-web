@@ -5,6 +5,8 @@ import React, { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import StudentSidebar from '@/components/layout/StudentSidebar';
 import StudentNavbar from '@/components/layout/StudentNavbar';
+import { ActivityTimerProvider } from '@/context/ActivityTimerContext';
+import FloatingTimer from '@/components/student/FloatingTimer';
 
 export default function StudentLayout({
   children,
@@ -59,6 +61,7 @@ export default function StudentLayout({
 
   return (
     <ProtectedRoute allowedRoles={['student']}>
+      <ActivityTimerProvider>
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 lg:flex">
         {/* ✅ Sidebar - Desktop: fixa e altura total */}
         <div className={`lg:fixed lg:inset-y-0 lg:left-0 ${sidebarOpen ? "lg:z-40" : ""}`}>
@@ -100,6 +103,8 @@ export default function StudentLayout({
           </main>
         </div>
       </div>
+      <FloatingTimer />
+      </ActivityTimerProvider>
     </ProtectedRoute>
   );
 }

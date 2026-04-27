@@ -1,5 +1,5 @@
 // hooks/useAnalytics.ts
-import { useState, useEffect, useCallback, useReducer } from 'react';
+import { useState, useEffect, useCallback, useReducer, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   AnalyticsFilters,
@@ -53,8 +53,7 @@ export function useAnalytics() {
   const { user } = useAuth();
   const [state, dispatch] = useReducer(analyticsReducer, initialState);
 
-  // Passar o role do usuário para o serviço
-  const analyticsService = new AnalyticsService(user?.role);
+  const analyticsService = useMemo(() => new AnalyticsService(user?.role), [user?.role]);
 
   const loadData = useCallback(async (filters?: AnalyticsFilters) => {
     if (!user?.id) return;
@@ -91,7 +90,9 @@ export function useAnalytics() {
           user.id,
           currentFilters
         );
-        dispatch({ type: 'SET_CORRELATIONS', payload: correlations });
+        if (correlations) {
+          dispatch({ type: 'SET_CORRELATIONS', payload: correlations });
+        }
       }
 
       dispatch({ type: 'SET_FILTERS', payload: currentFilters });

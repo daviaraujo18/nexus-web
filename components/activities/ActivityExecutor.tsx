@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ActivityProgress, ActivityType, AppActivityConfig, ChecklistActivityConfig, FileActivityConfig, ProgressStatus, QuickActivityConfig, QuizActivityConfig, ScheduleActivity, TextActivityConfig, VideoActivityConfig } from '@/types/schedule';
+import { useActivityTimer } from '@/context/ActivityTimerContext';
 import QuickActivity from './QuickActivity';
 import TextActivity from './TextActivity';
 import QuizActivity from './QuizActivity';
@@ -39,6 +40,7 @@ export default function ActivityExecutor({
   const [startTime, setStartTime] = useState<Date | null>(null);
 
   const [activityProgress, setActivityProgress] = useState(progress);
+  const { startTimer, stopTimer, elapsedSeconds } = useActivityTimer();
 
   useEffect(() => {
     // Atualizar progresso quando prop mudar
@@ -49,21 +51,12 @@ export default function ActivityExecutor({
   }, [progress]);
 
 
-  // Iniciar timer quando atividade começa
+  // Sincroniza timeSpent local com o timer global (em minutos)
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-
-    if (currentStatus === 'in_progress' && startTime) {
-      interval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - startTime.getTime()) / 60000); // minutos
-        setTimeSpent(elapsed);
-      }, 60000); // atualizar a cada minuto
+    if (currentStatus === 'in_progress') {
+      setTimeSpent(Math.ceil(elapsedSeconds / 60));
     }
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [currentStatus, startTime]);
+  }, [elapsedSeconds, currentStatus]);
 
   const handleStartActivity = async () => {
     if (readOnly) return;
@@ -86,6 +79,16 @@ export default function ActivityExecutor({
       setActivityProgress(updatedProgress);
       setCurrentStatus('in_progress');
       setStartTime(new Date());
+
+      // Iniciar timer global persistente
+      startTimer({
+        progressId: activityProgress.id,
+        activityId: activityProgress.activityId,
+        studentId: activityProgress.studentId,
+        title: activityProgress.activitySnapshot.title,
+        estimatedMinutes: activityProgress.activitySnapshot.metadata.estimatedDuration || 30,
+        startedAt: new Date()
+      });
 
       // Mostrar modal de estado emocional inicial
       setShowEmotionalModal(true);
@@ -130,6 +133,7 @@ export default function ActivityExecutor({
       );
 
       setCurrentStatus('completed');
+      stopTimer();
       onCompletion?.(progress.id, result);
       onStatusChange?.(progress.id, 'completed');
     } catch (error) {

@@ -87,7 +87,7 @@ export default function StudentAnalyticsPage() {
         }
 
         // 2. Busca atividades concluídas em múltiplas coleções de progresso para calcular Tempo Total 
-        const activityCollections = ['scheduleActivities', 'activityProgress'];
+        const activityCollections = ['activityProgress'];
         let allDocs: any[] = [];
 
         for (const col of activityCollections) {
@@ -99,16 +99,19 @@ export default function StudentAnalyticsPage() {
           const snap = await getDocs(q);
           snap.forEach(doc => {
             const d = doc.data();
-            const snapshot = d.activitySnapshot || {}; // Extraído do seu .txt
-            const meta = snapshot.metadata || d.metadata || {}; // Local da duração estimada
+            const snapshot = d.activitySnapshot || {};
+            const meta = snapshot.metadata || d.metadata || {};
 
             allDocs.push({
               id: doc.id,
               name: snapshot.title || d.title || 'Atividade',
-              subject: snapshot.type || d.type || 'Geral',
-              description: snapshot.description || d.description || '',
-              completedAt: d.updatedAt || d.createdAt || null, // Firebase Timestamp
-              duration: Number(meta.estimatedDuration || 15) // Puxa os 60min conforme seu doc
+              activityType: snapshot.type || d.type || 'quick',
+              subject: meta.subject || null,
+              gradeLevel: meta.gradeLevel || null,
+              description: snapshot.description || d.description || snapshot.instructions || d.instructions || '',
+              completedAt: d.updatedAt || d.createdAt || null,
+              duration: Number(meta.estimatedDuration || 15),
+              attachments: (d.executionData?.attachments || []) as string[]
             });
           });
         }
@@ -403,9 +406,9 @@ export default function StudentAnalyticsPage() {
                 }`}
             >
               <div className="flex items-center justify-center gap-2">
-                <FaBrain className="w-4 h-4" />
-                <span className="hidden sm:inline">Insights</span>
-                <span className="sm:hidden">Análises</span>
+                <FaTasks className="w-4 h-4" />
+                <span className="hidden sm:inline">Dados do Aluno</span>
+                <span className="sm:hidden">Dados</span>
               </div>
             </button>
           </div>
@@ -967,126 +970,113 @@ export default function StudentAnalyticsPage() {
           </div>
         )}
 
-        {/* TAB: INSIGHTS E ANÁLISES (SUBSTITUIDA POR DADOS ENVIADOS NO CSS ORIGINAL) */}
+        {/* TAB: DADOS DO ALUNO */}
         {activeTab === 'insights' && (
-          <div className="space-y-6">
-            {/* Todos os Insights -> Dados Enviados */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="p-6 border-b border-slate-200">
-                <h3 className="font-semibold text-slate-800 text-lg flex items-center gap-2">
-                  <FaBrain className="w-5 h-5 text-indigo-600" />
-                  Insights e Dados do Aluno
-                </h3>
-              </div>
-
-              <div className="divide-y divide-slate-100">
-                {(student?.insights?.length || 0) === 0 && completedActivities.length === 0 ? (
-                  <div className="p-8 text-center">
-                    <FaBrain className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                    <p className="text-slate-500">Nenhum insight disponível no momento</p>
-                  </div>
-                ) : (
-                  <>
-                    {student?.insights?.map((insight, index) => (
-                      <div key={`insight-${index}`} className="p-6 hover:bg-slate-50 transition-colors">
-                        <div className="flex items-start gap-4">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${insight.type === 'risk' ? 'bg-red-100' :
-                              insight.type === 'warning' ? 'bg-amber-100' :
-                                insight.type === 'success' ? 'bg-emerald-100' :
-                                  'bg-indigo-100'
-                            }`}>
-                            {insight.type === 'risk' && <FaExclamationTriangle className={`w-5 h-5 text-red-600`} />}
-                            {insight.type === 'warning' && <FaExclamationTriangle className={`w-5 h-5 text-amber-600`} />}
-                            {insight.type === 'success' && <FaCheckCircle className={`w-5 h-5 text-emerald-600`} />}
-                            {insight.type === 'info' && <FaBrain className={`w-5 h-5 text-indigo-600`} />}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-1">
-                              <h4 className="font-semibold text-slate-800">{insight.title}</h4>
-                              <span className={`text-xs px-2 py-1 rounded-full ${insight.type === 'risk' ? 'bg-red-100 text-red-700' :
-                                  insight.type === 'warning' ? 'bg-amber-100 text-amber-700' :
-                                    insight.type === 'success' ? 'bg-emerald-100 text-emerald-700' :
-                                      'bg-indigo-100 text-indigo-700'
-                                }`}>
-                                {insight.type === 'risk' ? 'Atenção Imediata' :
-                                  insight.type === 'warning' ? 'Alerta' :
-                                    insight.type === 'success' ? 'Conquista' :
-                                      'Informação'}
-                              </span>
-                            </div>
-                            <p className="text-slate-600">{insight.description}</p>
-                            {insight.metric && insight.value && (
-                              <div className="mt-3 flex items-center gap-4 text-sm">
-                                <span className="text-slate-500">{insight.metric}:</span>
-                                <span className="font-medium text-slate-700">{insight.value.toFixed(1)}</span>
-                                {insight.threshold && (
-                                  <span className="text-slate-400">(limite: {insight.threshold})</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    
-                    {/* Renderização das atividades da planilha */}
-                    {completedActivities.map((act, index) => (
-                      <div key={`act-${index}`} className="p-6 hover:bg-slate-50 transition-colors">
-                        <div className="flex items-start gap-4">
-                          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-indigo-100">
-                            <FaTasks className="w-5 h-5 text-indigo-600" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-1">
-                              <h4 className="font-semibold text-slate-800">{act.name}</h4>
-                              <span className="text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Concluído</span>
-                            </div>
-                            <p className="text-slate-600">{act.description}</p>
-                            <div className="mt-3 flex items-center gap-4 text-sm">
-                              <span className="text-slate-500">Módulo:</span>
-                              <span className="font-medium text-slate-700">{act.subject}</span>
-                              <span className="text-slate-400">({act.duration} min)</span>
-                              <span className="text-slate-400 ml-auto">{formatDate(act.completedAt)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </>
+          <div className="space-y-4">
+            {/* Header com contador */}
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <FaTasks className="w-4 h-4 text-indigo-600" />
+                Atividades Concluídas
+                {completedActivities.length > 0 && (
+                  <span className="ml-1 text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                    {completedActivities.length}
+                  </span>
                 )}
-              </div>
+              </h3>
+              {isFetching && (
+                <span className="text-xs text-slate-400">Carregando...</span>
+              )}
             </div>
 
-            {/* Recomendações */}
-            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl p-6 text-white">
-              <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
-                <FaRocket className="w-5 h-5" />
-                Recomendações Personalizadas
-              </h4>
-              <p className="text-indigo-100 mb-4">
-                Baseado no histórico e padrões de comportamento do aluno
-              </p>
-              <ul className="space-y-3">
-                <li className="flex items-start gap-3">
-                  <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-xs">1</span>
+            {completedActivities.length === 0 && !isFetching ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+                <FaCheckCircle className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                <p className="text-slate-500 font-medium">Nenhuma atividade concluída ainda</p>
+                <p className="text-slate-400 text-sm mt-1">As atividades aparecerão aqui conforme o aluno as completa</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                {completedActivities.map((act, index) => (
+                  <div key={act.id || index} className="p-5 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-start gap-4">
+                      {/* Ícone */}
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        act.activityType === 'file' ? 'bg-blue-100' :
+                        act.activityType === 'physical_activity' ? 'bg-emerald-100' :
+                        'bg-indigo-100'
+                      }`}>
+                        {act.activityType === 'file'
+                          ? <FaDownload className="w-4 h-4 text-blue-600" />
+                          : act.activityType === 'physical_activity'
+                            ? <FaTasks className="w-4 h-4 text-emerald-600" />
+                            : <FaCheckCircle className="w-4 h-4 text-indigo-600" />
+                        }
+                      </div>
+
+                      {/* Conteúdo */}
+                      <div className="flex-1 min-w-0">
+                        {/* Nome + badge */}
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <h4 className="font-semibold text-slate-800 leading-snug">{act.name}</h4>
+                          <span className="flex-shrink-0 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                            Concluída
+                          </span>
+                        </div>
+
+                        {/* Descrição */}
+                        {act.description && (
+                          <p className="text-sm text-slate-600 mb-3 leading-relaxed">{act.description}</p>
+                        )}
+
+                        {/* Badges de contexto */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full">
+                            <FaSchool className="w-3 h-3" />
+                            {getSchoolLabel(student?.studentSchool)}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full">
+                            <FaGraduationCap className="w-3 h-3" />
+                            {getGradeLabel(student?.studentGrade)}
+                          </span>
+                          {act.subject && (
+                            <span className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full">
+                              {act.subject}
+                            </span>
+                          )}
+                          <span className="text-xs text-slate-400 ml-auto">
+                            {formatDate(act.completedAt)}
+                          </span>
+                        </div>
+
+                        {/* Documentos enviados */}
+                        {act.activityType === 'file' && act.attachments?.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {(act.attachments as string[]).map((url: string, i: number) => (
+                              <a
+                                key={i}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors border border-blue-100"
+                              >
+                                <FaDownload className="w-3 h-3" />
+                                {act.attachments.length > 1 ? `Documento ${i + 1}` : 'Baixar documento'}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Indicação sem anexo para atividade de arquivo */}
+                        {act.activityType === 'file' && (!act.attachments || act.attachments.length === 0) && (
+                          <p className="mt-2 text-xs text-slate-400 italic">Nenhum arquivo enviado</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <span>Manter consistência nos dias de maior engajamento (terça e quinta)</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-xs">2</span>
-                  </div>
-                  <span>Oferecer atividades mais curtas em dias de maior ansiedade</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <span className="text-xs">3</span>
-                  </div>
-                  <span>Agendar check-in após quedas significativas no engajamento</span>
-                </li>
-              </ul>
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

@@ -79,13 +79,15 @@ export default function SchedulesPage() {
       }
     });
 
-  const handleArchive = async (scheduleId: string, scheduleName: string) => {
-    if (window.confirm(`Tem certeza que deseja arquivar o cronograma "${scheduleName}"?`)) {
+  const handleArchive = async (schedule: any) => {
+    const isActive = schedule.isActive !== false;
+    const action = isActive ? 'arquivar' : 'restaurar';
+    if (window.confirm(`Tem certeza que deseja ${action} o cronograma "${schedule.name}"?`)) {
       try {
-        await archiveSchedule(scheduleId);
-        alert('Cronograma arquivado com sucesso!');
+        await archiveSchedule(schedule.id);
+        alert(`Cronograma ${isActive ? 'arquivado' : 'restaurado'} com sucesso!`);
       } catch (err: any) {
-        alert(`Erro ao arquivar: ${err.message}`);
+        alert(`Erro ao ${action}: ${err.message}`);
       }
     }
   };
@@ -534,7 +536,7 @@ export default function SchedulesPage() {
 
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => handleArchive(schedule.id, schedule.name)}
+                            onClick={() => handleArchive(schedule)}
                             className="p-2 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors"
                             title={schedule.isActive ? 'Arquivar' : 'Restaurar'}
                           >

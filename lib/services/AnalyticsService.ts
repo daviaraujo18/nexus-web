@@ -14,11 +14,10 @@ import {
   collectionGroup // 🔥 IMPORT INJETADO PARA BUSCA NUCLEAR
 } from 'firebase/firestore';
 import { 
-  AnalyticsFilters, 
-  ComparativeAnalysis, 
-  StudentAnalyticsSummary, 
-  StudentWeeklyMetrics, 
-  DateRange, 
+  AnalyticsFilters,
+  ComparativeAnalysis,
+  StudentAnalyticsSummary,
+  DateRange,
   Insight 
 } from '@/types/analytics';
 import { WeeklySnapshot } from '@/types/schedule';
@@ -41,7 +40,7 @@ export class AnalyticsService {
   // 1. DASHBOARD INDIVIDUAL (ALUNO ESPECÍFICO)
   // ============================================
 
-  async getStudentAnalytics(studentId: string, userId: string, weeks: number = 12): Promise<StudentAnalyticsSummary> {
+  async getStudentAnalytics(studentId: string, _userId: string, weeks: number = 12): Promise<StudentAnalyticsSummary> {
     console.group(`🔍 [SERVICE] Auditoria Individual: ${studentId}`);
     try {
       const [snapshots, allGad7, studentData] = await Promise.all([
@@ -72,7 +71,7 @@ export class AnalyticsService {
 
       // 2. Busca Atividades Concluídas e Tempo (estimatedDuration)
       try {
-        const activityCollections = ['scheduleActivities', 'activityProgress'];
+        const activityCollections = ['activityProgress'];
         for (const col of activityCollections) {
           const qAct = query(collectionGroup(firestore, col), where('studentId', '==', studentId), where('status', '==', 'completed'));
           const snapAct = await getDocs(qAct);
@@ -103,12 +102,14 @@ export class AnalyticsService {
 
       // 🔥 CONVERSÃO MÁGICA PARA A INTERFACE NATIVA
       // Transforma as atividades em "Insights" para que a sua UI renderize na aba "Dados Enviados" sem alterar o JSX!
-      const activityInsights: Insight[] = completedActivitiesList.map(act => ({
+      const activityInsights: Insight[] = completedActivitiesList.map((act, i) => ({
+        id: `act-${act.id || i}`,
         type: 'success',
         title: act.name,
         description: `${act.description} (Módulo: ${act.subject}) | Concluída em: ${act.completedAt.toLocaleDateString('pt-BR')}`,
         metric: 'Tempo investido',
-        value: act.duration
+        value: act.duration,
+        createdAt: act.completedAt
       }));
 
       // Ajusta o Profile
@@ -215,8 +216,9 @@ export class AnalyticsService {
 
   private generateWeeklyHistory(snaps: any[], gad: any[]): any[] {
     const gad7Map = new Map(gad.map(a => [a.weekNumber, a]));
-    
-    return snaps.map((s, index) => {
+
+    // Map each snapshot to a raw entry first
+    const rawEntries = snaps.map((s, index) => {
       const m = s.metrics || {};
       const items = Array.isArray(s.activities) ? s.activities : (Array.isArray(s.tasks) ? s.tasks : []);
 
@@ -235,8 +237,9 @@ export class AnalyticsService {
       let adherence = Number(m.adherenceScore || s.adherenceScore || m.adherenceRate || s.adherenceRate || 0);
       if (adherence === 0 && actTot > 0) adherence = (actComp / actTot) * 100;
 
+      const weekNum = s.weekNumber || (snaps.length - index);
       return {
-        weekNumber: s.weekNumber || (snaps.length - index),
+        weekNumber: weekNum,
         weekStartDate: s.weekStartDate?.toDate?.() || new Date(s.weekStartDate),
         weekEndDate: s.weekEndDate?.toDate?.() || new Date(s.weekEndDate),
         completionRate: Number(m.completionRate || s.completionRate || 0) || (actTot > 0 ? (actComp/actTot)*100 : 0),
@@ -245,12 +248,41 @@ export class AnalyticsService {
         pointsEarned: Number(m.totalPointsEarned || s.pointsEarned || s.totalPointsEarned || 0),
         timeSpent: time,
         activitiesCompleted: actComp,
+        activitiesTotal: actTot,
         streakAtEnd: Number(m.streakAtEndOfWeek || s.streak || 0),
         activityBreakdown: s.activityTypeBreakdown || s.activityBreakdown || {},
         dailyBreakdown: s.dailyBreakdown || {},
-        gad7: gad7Map.get(s.weekNumber) ? { score: gad7Map.get(s.weekNumber)!.totalScore, severity: gad7Map.get(s.weekNumber)!.severity } : undefined
+        gad7: gad7Map.get(weekNum) ? { score: gad7Map.get(weekNum)!.totalScore, severity: gad7Map.get(weekNum)!.severity } : undefined
       };
     });
+
+    // Deduplicate by weekNumber: aggregate multiple instances for the same week
+    const weekMap = new Map<number, any>();
+    for (const entry of rawEntries) {
+      const wn = entry.weekNumber;
+      if (!weekMap.has(wn)) {
+        weekMap.set(wn, { ...entry });
+      } else {
+        const existing = weekMap.get(wn)!;
+        const mergedComp = existing.activitiesCompleted + entry.activitiesCompleted;
+        const mergedTot = existing.activitiesTotal + entry.activitiesTotal;
+        weekMap.set(wn, {
+          ...existing,
+          activitiesCompleted: mergedComp,
+          activitiesTotal: mergedTot,
+          completionRate: mergedTot > 0 ? (mergedComp / mergedTot) * 100 : Math.max(existing.completionRate, entry.completionRate),
+          pointsEarned: existing.pointsEarned + entry.pointsEarned,
+          timeSpent: existing.timeSpent + entry.timeSpent,
+          consistencyScore: Math.max(existing.consistencyScore, entry.consistencyScore),
+          adherenceScore: Math.max(existing.adherenceScore, entry.adherenceScore),
+          streakAtEnd: Math.max(existing.streakAtEnd, entry.streakAtEnd),
+          gad7: existing.gad7 || entry.gad7
+        });
+      }
+    }
+
+    // Return sorted descending by weekNumber (most recent first)
+    return Array.from(weekMap.values()).sort((a, b) => b.weekNumber - a.weekNumber);
   }
 
   private async fetchStudentSnapshots(sid: string, weeks: number): Promise<any[]> {
@@ -259,7 +291,7 @@ export class AnalyticsService {
     return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
 
-  private async fetchStudentGAD7(sid: string, weeks: number): Promise<any[]> {
+  private async fetchStudentGAD7(sid: string, _weeks: number): Promise<any[]> {
     const q = query(collection(firestore, 'gad7Assessments'), where('studentId', '==', sid), orderBy('completedAt', 'desc'), limit(5));
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -269,7 +301,7 @@ export class AnalyticsService {
   // 2. DASHBOARD GERAL (COMPARATIVO / RANKING)
   // ============================================
 
-  async getComparativeAnalysis(userId: string, filters: AnalyticsFilters): Promise<ComparativeAnalysis> {
+  async getComparativeAnalysis(userId: string, _filters: AnalyticsFilters): Promise<ComparativeAnalysis> {
     console.group('📊 [SERVICE] getComparativeAnalysis (Global)');
     try {
       const dateRange = { startDate: subWeeks(new Date(), 4), endDate: new Date(), label: 'Últimas 4 semanas' };
@@ -293,7 +325,7 @@ export class AnalyticsService {
         period: dateRange,
         summary: { totalStudents: studentIds.length, activeStudents: new Set(snapshots.map(s => s.studentId)).size, studentsWithGAD7: new Set(assessments.map(a => a.studentId)).size, metrics },
         studentRankings, classInsights: [],
-        distributions: { completionRate: { bins: [], counts: [], average: metrics.averageCompletionRate }, gad7Score: { bins: [], counts: [], average: metrics.averageGAD7Score }, consistencyScore: { bins: [], counts: [], average: metrics.averageConsistencyScore } },
+        distributions: { completionRate: { bins: [], counts: [], average: metrics.averageCompletionRate, median: 0, stdDev: 0 }, gad7Score: { bins: [], counts: [], average: metrics.averageGAD7Score, median: 0, stdDev: 0 }, consistencyScore: { bins: [], counts: [], average: metrics.averageConsistencyScore, median: 0, stdDev: 0 } },
         classHeatmap: {}
       };
     } catch (error) {
@@ -350,7 +382,16 @@ export class AnalyticsService {
         const profile = await this.fetchStudentData(id);
         const snaps = studentMap.get(id) || [];
         const avg = snaps.length > 0 ? snaps.reduce((acc, s) => acc + (s.metrics?.completionRate || 0), 0) / snaps.length : 0;
-        items.push({ studentId: id, studentName: profile.name, studentTotalPoints: profile.totalPoints, value: avg, trend: 'stable', isAtRisk: avg < 30 });
+        items.push({
+          studentId: id,
+          studentName: profile.name,
+          studentGrade: profile.grade,
+          studentSchool: profile.school,
+          studentTotalPoints: profile.totalPoints,
+          value: avg,
+          trend: 'stable',
+          isAtRisk: avg < 30
+        });
       } catch (e) {}
     }));
 
@@ -364,7 +405,11 @@ export class AnalyticsService {
     return snap.docs.map(d => d.id);
   }
 
-  private getEmptyComparativeAnalysis(r: DateRange): ComparativeAnalysis { 
-    return { period: r, summary: { totalStudents: 0, activeStudents: 0, studentsWithGAD7: 0, metrics: {} as any }, studentRankings: { byEngagement: [], byPoints: [], byImprovement: [], byGAD7Improvement: [], atRisk: [] }, classInsights: [], distributions: {} as any, classHeatmap: {} }; 
+  async getCorrelationAnalysis(_userId: string, _filters: AnalyticsFilters): Promise<null> {
+    return null;
+  }
+
+  private getEmptyComparativeAnalysis(r: DateRange): ComparativeAnalysis {
+    return { period: r, summary: { totalStudents: 0, activeStudents: 0, studentsWithGAD7: 0, metrics: {} as any }, studentRankings: { byEngagement: [], byPoints: [], byImprovement: [], byGAD7Improvement: [], atRisk: [] }, classInsights: [], distributions: {} as any, classHeatmap: {} };
   }
 }

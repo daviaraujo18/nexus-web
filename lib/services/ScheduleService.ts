@@ -96,16 +96,18 @@ export class ScheduleService {
    */
   static async updateScheduleTemplate(
     scheduleId: string,
-    data: CreateScheduleDTO
+    professionalIdOrData: string | CreateScheduleDTO,
+    data?: CreateScheduleDTO
   ): Promise<void> {
+    const resolvedData: CreateScheduleDTO = data ?? (professionalIdOrData as CreateScheduleDTO);
     console.group(`🔥 [SERVICE] Atualizando Cronograma: ${scheduleId}`);
     try {
-      const validation = ValidationUtils.validateScheduleData(data);
+      const validation = ValidationUtils.validateScheduleData(resolvedData);
       if (!validation.isValid) {
         throw new Error(`Dados inválidos: ${validation.errors.join(', ')}`);
       }
 
-      const sanitizedData = ValidationUtils.sanitizeScheduleData(data);
+      const sanitizedData = ValidationUtils.sanitizeScheduleData(resolvedData);
       const metrics = this.calculateScheduleMetrics(sanitizedData.activities);
 
       const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
@@ -234,6 +236,27 @@ export class ScheduleService {
     } catch (error: any) {
       console.error('❌ Erro na desativação segura:', error);
       throw error;
+    }
+  }
+
+  static async archiveSchedule(scheduleId: string, _professionalId: string): Promise<void> {
+    try {
+      const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
+      const snap = await getDoc(templateRef);
+      if (!snap.exists()) throw new Error('Cronograma não encontrado');
+
+      const isCurrentlyActive = snap.data().isActive !== false;
+
+      await updateDoc(templateRef, {
+        isActive: !isCurrentlyActive,
+        status: isCurrentlyActive ? 'archived' : 'active',
+        updatedAt: serverTimestamp()
+      });
+
+      console.log(`✅ Cronograma ${scheduleId} ${isCurrentlyActive ? 'arquivado' : 'restaurado'}.`);
+    } catch (error: any) {
+      console.error('❌ Erro ao arquivar/restaurar cronograma:', error);
+      throw new Error(`Falha ao arquivar cronograma: ${error.message}`);
     }
   }
 

@@ -62,6 +62,14 @@ export class ScheduleInstanceService {
             startedAt: Timestamp.fromDate(startDate),
             isActive: true,
             isDeleted: false,
+            progressCache: {
+              completedActivities: 0,
+              totalActivities: 0,
+              completionPercentage: 0,
+              streakDays: 0,
+              totalPointsEarned: 0,
+              lastUpdatedAt: serverTimestamp()
+            },
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           };
@@ -108,6 +116,11 @@ export class ScheduleInstanceService {
         activitySnapshot: act,
         status: 'pending',
         scheduledDate: Timestamp.fromDate(activityDate),
+        scoring: {
+          pointsEarned: 0,
+          bonusPoints: 0,
+          penaltyPoints: 0
+        },
         isActive: true,
         isDeleted: false,
         createdAt: serverTimestamp(),
@@ -118,10 +131,61 @@ export class ScheduleInstanceService {
     console.log(`✨ [SUCESSO] ${activities.length} atividades geradas e salvas no banco.`);
   }
 
+  static async getScheduleInstanceById(instanceId: string): Promise<ScheduleInstance> {
+    const snap = await getDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
+    if (!snap.exists()) throw new Error(`Instância ${instanceId} não encontrada`);
+    const d = snap.data();
+    return {
+      id: snap.id,
+      ...d,
+      startedAt: d.startedAt?.toDate(),
+      currentWeekStartDate: d.currentWeekStartDate?.toDate(),
+      currentWeekEndDate: d.currentWeekEndDate?.toDate()
+    } as ScheduleInstance;
+  }
+
+  static async getWeekProgress(instanceId: string, weekNumber: number): Promise<ActivityProgress[]> {
+    const q = query(
+      collection(firestore, this.COLLECTIONS.PROGRESS),
+      where('scheduleInstanceId', '==', instanceId),
+      where('weekNumber', '==', weekNumber),
+      where('isActive', '==', true)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+      scheduledDate: d.data().scheduledDate?.toDate()
+    })) as ActivityProgress[];
+  }
+
+  static async updateProgressCache(instanceId: string): Promise<void> {
+    const progress = await this.getWeekProgress(instanceId, 1);
+    const total = progress.length;
+    const completed = progress.filter(p => p.status === 'completed').length;
+    const points = progress.reduce((sum, p) => sum + (p.scoring?.pointsEarned || 0), 0);
+    await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
+      'progressCache.totalActivities': total,
+      'progressCache.completedActivities': completed,
+      'progressCache.completionPercentage': total > 0 ? Math.round((completed / total) * 100) : 0,
+      'progressCache.totalPointsEarned': points,
+      'progressCache.lastUpdatedAt': serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  static async completeSchedule(instanceId: string): Promise<void> {
+    await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
+      status: 'completed',
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  }
+
   /**
    * 🔍 [AUDITORIA] Getters filtrando instâncias órfãs (AGORA OTIMIZADO EM PARALELO)
    */
-  static async getStudentActiveInstances(studentId: string): Promise<ScheduleInstance[]> {
+  static async getStudentActiveInstances(studentId: string, _options?: { includeProgress?: boolean; limit?: number }): Promise<ScheduleInstance[]> {
     console.group(`🔍 [SERVICE] Auditoria de Instâncias - Aluno: ${studentId}`);
     try {
       const q = query(

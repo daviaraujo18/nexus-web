@@ -1,7 +1,7 @@
 // components/student/StudentDashboard.tsx - VERSÃO RESPONSIVA
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import TodayActivities from './TodayActivities';
 import { useStudentSchedule } from '@/hooks/useStudentSchedule';
 import {
@@ -11,15 +11,17 @@ import {
   FaChartLine,
   FaCheckCircle,
   FaCrown,
-  FaCalendar,
-  FaBook,
   FaBell,
   FaArrowRight,
+  FaClock,
+  FaChartBar,
   FaLightbulb,
-  FaClock
+  FaBook,
+  FaCalendar
 } from 'react-icons/fa';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
+import SubjectBarChart, { computeSubjectStats } from '@/components/charts/SubjectBarChart';
 
 interface StudentDashboardProps {
   showHeader?: boolean;
@@ -30,12 +32,11 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
   const student = user?.role === 'student' ? user : null;
   
   const {
-    todayActivities,
+    weekActivities, // Pegamos TODAS as atividades da janela de tempo
     instances,
     loading,
     error,
     refresh,
-    totalTodayActivities
   } = useStudentSchedule();
 
   const [todaysDate] = useState(new Date());
@@ -57,10 +58,63 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     return 'Boa noite';
   };
 
-  // Estatísticas calculadas
-  const completedToday = todayActivities.filter(a => a.status === 'completed').length;
-  const pendingToday = todayActivities.filter(a => a.status === 'pending').length;
+  // 🔥 FILTRAGEM BLINDADA CONTRA FUSO HORÁRIO E DEDUPLICAÇÃO
+  const dedupedTodayActivities = useMemo(() => {
+    const now = new Date();
+    // Ex: "2026-04-27"
+    const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const currentDayOfWeek = now.getDay(); // 0 (Dom) a 6 (Sáb)
+
+    const seen = new Set<string>();
+    
+    return weekActivities.filter(a => {
+      let isToday = false;
+
+      // Como weekActivities agora foi expurgado de vazamentos, confiar no dia da semana é perfeito
+      if (a.dayOfWeek !== undefined) {
+        isToday = a.dayOfWeek === currentDayOfWeek;
+      } else if (a.scheduledDate) {
+        let d = a.scheduledDate;
+        if (typeof (d as any).toDate === 'function') d = (d as any).toDate();
+        else if (!(d instanceof Date)) d = new Date(d);
+
+        if (!isNaN(d.getTime())) {
+          // Resolve o conflito verificando se a data é UTC Midnight (00:00:00Z) para fixar a métrica em apenas 1 dia
+          const isUTCMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
+          
+          let dateStr = '';
+          if (isUTCMidnight) {
+            dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+          } else {
+            dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          }
+
+          if (dateStr === localToday) {
+            isToday = true;
+          }
+        }
+      }
+
+      if (!isToday) return false;
+
+      // Deduplicação (evita exibir a mesma atividade duas vezes caso existam instâncias repetidas)
+      const key = a.activityId || a.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      
+      return true;
+    });
+  }, [weekActivities]);
+
+  const totalTodayActivities = dedupedTodayActivities.length;
+
+  // Estatísticas calculadas baseadas APENAS nas atividades blindadas de hoje
+  const completedToday = dedupedTodayActivities.filter(a => a.status === 'completed').length;
+  const pendingToday = dedupedTodayActivities.filter(a => a.status === 'pending').length;
   const completionRate = totalTodayActivities > 0 ? Math.round((completedToday / totalTodayActivities) * 100) : 0;
+
+  // Gráfico de matérias: atividades concluídas da semana agrupadas por matéria
+  const subjectStats = useMemo(() => computeSubjectStats(weekActivities || []), [weekActivities]);
 
   const getMotivationalMessage = () => {
     const messages = [
@@ -235,7 +289,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                     <div className="flex items-center gap-2 text-slate-500 text-sm">
                       <FaClock className="w-3 h-3 md:w-4 md:h-4" />
                       <span className="font-medium">
-                        {todayActivities.reduce((total, a) => total + a.activitySnapshot.metadata.estimatedDuration, 0)} min total
+                        {dedupedTodayActivities.reduce((total, a) => total + (a.activitySnapshot?.metadata?.estimatedDuration || 0), 0)} min total
                       </span>
                     </div>
                   </div>
@@ -247,31 +301,12 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   </div>
                 </div>
 
-                {/* Componente TodayActivities mantido */}
                 <div>
                   <TodayActivities
-                    activities={todayActivities}
+                    activities={dedupedTodayActivities}
                     onActivityUpdate={refresh}
                   />
                 </div>
-
-                {/* Quick Actions - Mobile hidden, Desktop visible 
-                <div className="hidden md:flex gap-4 mt-6">
-                  <Link
-                    href="/student/schedules"
-                    className="flex-1 inline-flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white px-4 py-3 md:px-6 md:py-4 rounded-xl font-bold hover:shadow-lg hover:shadow-indigo-200 transition-all text-sm md:text-base"
-                  >
-                    <FaCalendarDay className="w-4 h-4 md:w-5 md:h-5" />
-                    <span className="whitespace-nowrap">Ver Cronograma Completo</span>
-                  </Link>
-                  <Link
-                    href="/student/programs"
-                    className="flex-1 inline-flex items-center justify-center gap-3 bg-white text-indigo-600 border-2 border-slate-200 px-4 py-3 md:px-6 md:py-4 rounded-xl font-bold hover:bg-slate-50 transition-colors text-sm md:text-base"
-                  >
-                    <FaBook className="w-4 h-4 md:w-5 md:h-5" />
-                    <span className="whitespace-nowrap">Meus Programas</span>
-                  </Link>
-                </div>*/}
               </>
             )}
           </div>
@@ -279,58 +314,21 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
 
         {/* SIDEBAR - Design Inspirador */}
         <div className="space-y-4 md:space-y-6">
-          {/* Cronogramas */}
+          {/* Gráfico de Matérias */}
           <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6">
-            <div className="flex justify-between items-center mb-3 md:mb-4">
+            <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm md:text-base">
-                <FaCalendar className="w-3 h-3 md:w-4 md:h-4" />
-                <span className="whitespace-nowrap">Meus Cronogramas</span>
+                <FaChartBar className="w-3 h-3 md:w-4 md:h-4 text-violet-600" />
+                <span>Atividades por Matéria</span>
               </h3>
               <Link href="/student/schedules" className="text-indigo-600 hover:text-indigo-700">
                 <FaArrowRight className="w-3 h-3 md:w-3.5 md:h-3.5" />
               </Link>
             </div>
-
-            {instances.length === 0 ? (
-              <div className="text-center py-6 md:py-8 text-slate-400">
-                <FaCalendar className="w-6 h-6 md:w-8 md:h-8 mx-auto mb-2" />
-                <p className="text-xs md:text-sm">Nenhum cronograma</p>
-              </div>
-            ) : (
-              <div className="space-y-2 md:space-y-3">
-                {instances.slice(0, 3).map(instance => (
-                  <Link
-                    key={instance.id}
-                    href={`/student/schedules/${instance.id}`}
-                    className="flex items-center gap-2 md:gap-3 p-3 md:p-4 bg-slate-50 rounded-lg md:rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors"
-                  >
-                    <div 
-                      className="w-2 h-2 md:w-3 md:h-3 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: '#8b5cf6' }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-slate-800 truncate text-sm">
-                        Cronograma {instance.scheduleTemplateId?.slice(0, 8) || 'Ativo'}
-                      </div>
-                      <div className="flex items-center gap-2 md:gap-3 mt-1">
-                        <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full rounded-full"
-                            style={{ 
-                              width: `${instance.progressCache?.completionPercentage || 0}%`,
-                              backgroundColor: '#8b5cf6'
-                            }}
-                          />
-                        </div>
-                        <span className="text-xs md:text-sm font-semibold text-slate-600 min-w-6 md:min-w-10">
-                          {(instance.progressCache?.completionPercentage) && Math.round(instance.progressCache?.completionPercentage) || 0}%
-                        </span>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
+            <SubjectBarChart
+              data={subjectStats}
+              emptyMessage="Complete atividades com matéria para ver o gráfico"
+            />
           </div>
 
           {/* Lembretes */}
@@ -357,26 +355,6 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
               )}
             </div>
           </div>
-
-          {/* Quick Actions para Mobile
-          {totalTodayActivities > 0 && (
-            <div className="md:hidden grid grid-cols-2 gap-3">
-              <Link
-                href="/student/schedules"
-                className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white px-4 py-3 rounded-lg font-semibold hover:shadow-md transition-all text-sm"
-              >
-                <FaCalendarDay className="w-3 h-3" />
-                <span>Cronograma</span>
-              </Link>
-              <Link
-                href="/student/programs"
-                className="inline-flex items-center justify-center gap-2 bg-white text-indigo-600 border border-slate-200 px-4 py-3 rounded-lg font-semibold hover:bg-slate-50 transition-colors text-sm"
-              >
-                <FaBook className="w-3 h-3" />
-                <span>Programas</span>
-              </Link>
-            </div>
-          )} */}
         </div>
       </div>
     </div>

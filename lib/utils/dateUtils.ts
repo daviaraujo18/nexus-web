@@ -57,8 +57,45 @@ export class DateUtils {
   static formatWeekRange(date: Date = new Date()): string {
     const start = this.getWeekStartDate(date);
     const end = this.getWeekEndDate(date);
-    
+
     const options: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit' };
     return `${start.toLocaleDateString('pt-BR', options)} - ${end.toLocaleDateString('pt-BR', options)}`;
+  }
+
+  static addWeeks(date: Date, weeks: number): Date {
+    const result = new Date(date);
+    result.setDate(result.getDate() + weeks * 7);
+    return result;
+  }
+
+  static getDayOfWeek(date: Date): number {
+    return date.getDay();
+  }
+
+  static getDaysBetween(d1: Date, d2: Date): number {
+    const ms = Math.abs(new Date(d2).getTime() - new Date(d1).getTime());
+    return Math.floor(ms / (1000 * 60 * 60 * 24));
+  }
+
+  static getWeekNumber(date: Date): number {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+    const yearStart = new Date(d.getFullYear(), 0, 4);
+    return 1 + Math.round(((d.getTime() - yearStart.getTime()) / 86400000 - 3 + ((yearStart.getDay() + 6) % 7)) / 7);
+  }
+
+  static isSameDay(d1: Date, d2: Date): boolean {
+    const a = new Date(d1);
+    const b = new Date(d2);
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+
+  static getTimeOfDay(date: Date): 'morning' | 'afternoon' | 'evening' | 'night' {
+    const h = new Date(date).getHours();
+    if (h >= 6 && h < 12) return 'morning';
+    if (h >= 12 && h < 18) return 'afternoon';
+    if (h >= 18 && h < 24) return 'evening';
+    return 'night';
   }
 }

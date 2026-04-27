@@ -261,6 +261,7 @@ export default function ScheduleDetailPage() {
               </button>
               
               <button
+                onClick={() => router.push(`/professional/schedules/${scheduleId}/edit`)}
                 className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium flex items-center gap-2"
               >
                 <FaEdit className="w-4 h-4" />
@@ -679,7 +680,7 @@ export default function ScheduleDetailPage() {
                           </div>
 
                           {/* 🔥 NOVA SEÇÃO: ENVIO DE ARQUIVOS (Renderiza se o tipo for upload ou se exigir arquivo na config) */}
-                          {(activity.type?.toLowerCase().includes('upload') || activity.config?.requiresFileUpload || activity.metadata?.requiresFileUpload) && (
+                          {(activity.type?.toLowerCase().includes('upload') || (activity.config as any)?.requiresFileUpload || (activity.metadata as any)?.requiresFileUpload) && (
                             <div className="mt-4 pt-4 border-t border-gray-100">
                               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-blue-50/50 p-4 rounded-xl border border-blue-100 gap-4">
                                 <div className="flex items-center gap-3">

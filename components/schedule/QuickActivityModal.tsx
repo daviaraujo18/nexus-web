@@ -23,7 +23,9 @@ import {
   FaCheck,
   FaTag,
   FaPlus,
-  FaTrash
+  FaTrash,
+  FaRunning,
+  FaChevronDown
 } from 'react-icons/fa';
 
 interface QuickActivityModalProps {
@@ -36,6 +38,63 @@ interface QuickActivityModalProps {
   availableDays: number[];
   formData: CreateScheduleDTO;
 }
+
+const SUBJECTS_BY_GRADE: Record<string, string[]> = {
+  '1ano-em': [
+    'Língua Portuguesa',
+    'Leitura e Produção de Textos',
+    'Inglês',
+    'Literatura',
+    'Arte',
+    'Filosofia',
+    'Sociologia',
+    'Geografia Humana',
+    'Geografia Física',
+    'História do Brasil',
+    'História Geral',
+    'História da América',
+    'Química 1',
+    'Química 2',
+    'Biologia 1',
+    'Biologia 2',
+    'Física 1',
+    'Física 2',
+    'Matemática Básica',
+    'Álgebra',
+    'Geometria',
+  ],
+  '2ano-em': [
+    'Língua Portuguesa',
+    'Leitura e Produção de Texto',
+    'Arte',
+    'Inglês',
+    'Literatura',
+    'Filosofia',
+    'Sociologia',
+    'História do Brasil',
+    'História Geral',
+    'História Contemporânea',
+    'Geografia Física',
+    'Geografia Humana',
+    'Geografia Política',
+    'Química Orgânica',
+    'Físico-Química',
+    'Física 1',
+    'Física 2',
+    'Física 3',
+    'Biologia 1',
+    'Biologia 2',
+    'Biologia 3',
+    'Matemática Básica',
+    'Álgebra',
+    'Geometria',
+  ],
+};
+
+const GRADE_LABELS: Record<string, string> = {
+  '1ano-em': '1ª Série',
+  '2ano-em': '2ª Série',
+};
 
 const activityTypes: Array<{
   type: ActivityType;
@@ -64,6 +123,13 @@ const activityTypes: Array<{
       label: 'Arquivo',
       color: 'bg-indigo-500',
       description: 'Upload de arquivos'
+    },
+    {
+      type: 'physical_activity',
+      icon: <FaRunning />,
+      label: 'Atividade Física',
+      color: 'bg-emerald-500',
+      description: 'Exercício ou esporte'
     }
   ];
 
@@ -111,7 +177,9 @@ export default function QuickActivityModal({
       estimatedDuration: 60,
       difficulty: 'medium',
       therapeuticFocus: [],
-      educationalFocus: []
+      educationalFocus: [],
+      gradeLevel: null,
+      subject: null
     },
     estimatedDuration: 60,
     pointsOnCompletion: 10
@@ -139,8 +207,10 @@ export default function QuickActivityModal({
         metadata: {
           estimatedDuration: initialData.metadata?.estimatedDuration || 60,
           difficulty: initialData.metadata?.difficulty || 'medium',
-          therapeuticFocus: initialData.metadata?.therapeuticFocus || [], // ✅ Garantir array vazio
-          educationalFocus: initialData.metadata?.educationalFocus || []  // ✅ Garantir array vazio
+          therapeuticFocus: initialData.metadata?.therapeuticFocus || [],
+          educationalFocus: initialData.metadata?.educationalFocus || [],
+          gradeLevel: initialData.metadata?.gradeLevel || null,
+          subject: initialData.metadata?.subject || null
         }
       });
 
@@ -192,7 +262,9 @@ export default function QuickActivityModal({
         estimatedDuration: form.metadata?.estimatedDuration || 15,
         difficulty: form.metadata?.difficulty || 'medium',
         therapeuticFocus: form.metadata?.therapeuticFocus || [],
-        educationalFocus: form.metadata?.educationalFocus || []
+        educationalFocus: form.metadata?.educationalFocus || [],
+        gradeLevel: form.metadata?.gradeLevel || null,
+        subject: form.metadata?.subject || null
       },
       estimatedDuration: form.metadata?.estimatedDuration || 15,
       pointsOnCompletion: form.scoring?.pointsOnCompletion || 10
@@ -274,11 +346,11 @@ export default function QuickActivityModal({
             {/* Seção 1: Tipo e Repetição */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Tipo de Atividade */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
+              <div className="space-y-4">
+                <label className="block text-sm font-medium text-gray-700">
                   Tipo de Atividade *
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {activityTypes.map((type) => (
                     <button
                       key={type.type}
@@ -293,12 +365,66 @@ export default function QuickActivityModal({
                         <div className={`w-10 h-10 rounded-full ${type.color} flex items-center justify-center text-white`}>
                           {type.icon}
                         </div>
-                        <span className="text-xs font-medium text-gray-700">
+                        <span className="text-xs font-medium text-gray-700 text-center leading-tight">
                           {type.label}
                         </span>
                       </div>
                     </button>
                   ))}
+                </div>
+
+                {/* Série e Matéria */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-600">
+                      Série
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={form.metadata?.gradeLevel || ''}
+                        onChange={(e) => setForm({
+                          ...form,
+                          metadata: {
+                            ...form.metadata!,
+                            gradeLevel: e.target.value || null,
+                            subject: null
+                          }
+                        })}
+                        className="w-full appearance-none px-3 py-2.5 pr-8 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      >
+                        <option value="">Selecionar série</option>
+                        {Object.entries(GRADE_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <FaChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-600">
+                      Matéria
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={form.metadata?.subject || ''}
+                        onChange={(e) => setForm({
+                          ...form,
+                          metadata: { ...form.metadata!, subject: e.target.value || null }
+                        })}
+                        disabled={!form.metadata?.gradeLevel}
+                        className="w-full appearance-none px-3 py-2.5 pr-8 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
+                      >
+                        <option value="">
+                          {form.metadata?.gradeLevel ? 'Selecionar matéria' : 'Selecione a série primeiro'}
+                        </option>
+                        {(SUBJECTS_BY_GRADE[form.metadata?.gradeLevel || ''] || []).map((subject) => (
+                          <option key={subject} value={subject}>{subject}</option>
+                        ))}
+                      </select>
+                      <FaChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                    </div>
+                  </div>
                 </div>
               </div>
 

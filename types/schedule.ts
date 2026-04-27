@@ -1,6 +1,6 @@
 // types/schedule.ts
 export type ScheduleCategory = 'therapeutic' | 'educational' | 'mixed';
-export type ActivityType = 'quick' | 'text' | 'quiz' | 'video' | 'checklist' | 'file' | 'app';
+export type ActivityType = 'quick' | 'text' | 'quiz' | 'video' | 'checklist' | 'file' | 'app' | 'physical_activity';
 export type DifficultyLevel = 'easy' | 'medium' | 'hard';
 export type ScheduleStatus = 'draft' | 'active' | 'archived';
 export type InstanceStatus = 'active' | 'paused' | 'completed' | 'overdue';
@@ -127,6 +127,8 @@ export interface ScheduleActivity extends BaseModel {
     difficulty: DifficultyLevel;
     therapeuticFocus?: string[];
     educationalFocus?: string[];
+    gradeLevel?: string | null;
+    subject?: string | null;
   };
 
   // Recursos
@@ -316,6 +318,8 @@ export interface CreateActivityDTO {
     difficulty: DifficultyLevel;
     therapeuticFocus?: string[];
     educationalFocus?: string[];
+    gradeLevel?: string | null;
+    subject?: string | null;
   };
   estimatedDuration: number; // ADICIONADO, COMENTADO - DEVE SER RETIRADO
   pointsOnCompletion: number; // ADICIONADO, COMENTADO - DEVE SER RETIRADO
@@ -324,6 +328,7 @@ export interface CreateActivityDTO {
 export interface AssignScheduleDTO {
   studentIds: string[];
   startDate: Date;
+  endDate?: Date;
   allowMultiple?: boolean;
   customizations?: Record<string, {
     excludedActivities?: string[];

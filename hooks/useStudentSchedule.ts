@@ -1,3 +1,4 @@
+// hooks/useStudentSchedule.ts
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -7,7 +8,6 @@ import { ActivityProgress, ScheduleInstance } from '@/types/schedule';
 import { useAuth } from '@/context/AuthContext';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
-import { DateUtils } from '@/lib/utils/dateUtils';
 
 export function useStudentSchedule() {
   const { user } = useAuth();
@@ -45,7 +45,7 @@ export function useStudentSchedule() {
   }, [fetchInstances]);
 
   /**
-   * 2. LISTENER REAL-TIME COM TRAVA BLINDADA
+   * 2. LISTENER REAL-TIME COM TRAVA BLINDADA E JANELA AMPLIADA
    */
   useEffect(() => {
     // 🛑 A TRAVA: Se não tem usuário OU se as instâncias ainda não carregaram, MORRE AQUI.
@@ -56,9 +56,25 @@ export function useStudentSchedule() {
 
     console.group('📡 [REAL-TIME] Iniciando Conexão com Firebase');
     
-    const now = new Date();
-    const startOfWeek = DateUtils.getWeekStartDate(now);
-    const endOfWeek = DateUtils.getWeekEndDate(now);
+    // 🔥 CORREÇÃO: Usar a janela exata da semana ativa de cada instância
+    const instanceWindows = new Map();
+    instances.forEach(i => {
+      let start: any = i.currentWeekStartDate;
+      let end: any = i.currentWeekEndDate;
+      if (start && typeof start.toDate === 'function') start = start.toDate();
+      else if (!(start instanceof Date)) start = new Date(start);
+      
+      if (end && typeof end.toDate === 'function') end = end.toDate();
+      else if (!(end instanceof Date)) end = new Date(end);
+      
+      if (start instanceof Date && !isNaN(start.getTime()) && end instanceof Date && !isNaN(end.getTime())) {
+        const s = new Date(start);
+        s.setHours(0, 0, 0, 0); // Exatamente meia-noite local
+        const e = new Date(end);
+        e.setHours(23, 59, 59, 999); // Exatamente fim do dia local
+        instanceWindows.set(i.id, { start: s, end: e, weekNumber: i.currentWeekNumber });
+      }
+    });
     
     const validInstanceIds = new Set(instances.map(i => i.id));
     console.log(`🛡️ O Firebase vai validar as atividades contra ${validInstanceIds.size} instâncias mães.`);
@@ -82,9 +98,30 @@ export function useStudentSchedule() {
         if (!scheduledDate) return;
 
         const isLegit = validInstanceIds.has(data.scheduleInstanceId);
-        const isWithinWeek = scheduledDate >= startOfWeek && scheduledDate <= endOfWeek;
+        let isWithinWindow = false;
+        
+        if (isLegit) {
+          const window = instanceWindows.get(data.scheduleInstanceId);
+          if (window) {
+            if (data.weekNumber !== undefined && window.weekNumber !== undefined) {
+              isWithinWindow = data.weekNumber === window.weekNumber;
+            } else {
+              // Neutraliza problemas de fuso horário movendo a data alvo para o meio-dia (12:00) local
+              // antes de verificar se pertence à semana exata, sem precisar alargar as bordas.
+              const isUTCMidnight = scheduledDate.getUTCHours() === 0 && scheduledDate.getUTCMinutes() === 0;
+              const intendedYear = isUTCMidnight ? scheduledDate.getUTCFullYear() : scheduledDate.getFullYear();
+              const intendedMonth = isUTCMidnight ? scheduledDate.getUTCMonth() : scheduledDate.getMonth();
+              const intendedDate = isUTCMidnight ? scheduledDate.getUTCDate() : scheduledDate.getDate();
+              
+              const safeActivityDate = new Date(intendedYear, intendedMonth, intendedDate, 12, 0, 0);
+              isWithinWindow = safeActivityDate >= window.start && safeActivityDate <= window.end;
+            }
+          } else {
+            isWithinWindow = true; // Fallback se não houver datas configuradas na instância
+          }
+        }
 
-        if (isLegit && isWithinWeek) {
+        if (isLegit && isWithinWindow) {
           filteredActivities.push({
             id: doc.id,
             ...data,
@@ -93,7 +130,7 @@ export function useStudentSchedule() {
             completedAt: data.completedAt?.toDate(),
           } as ActivityProgress);
         } else {
-          // Log reduzido para não floodar o console
+          // Log reduzido
           if (!isLegit) console.log(`🚫 [ÓRFÃO] Barrado (Sem instância mãe): ${data.activitySnapshot?.title || doc.id}`);
         }
       });
@@ -114,17 +151,42 @@ export function useStudentSchedule() {
     console.groupEnd();
     
     return () => unsubscribe();
-    
-    // 👇 O PULO DO GATO: O useEffect agora depende do state 'instances'. 
-    // Quando ele muda (ao terminar o fetch), o React injeta a lista certa no Firebase.
   }, [user?.id, user?.role, instancesLoaded, instances]); 
 
   /**
-   * 3. FILTRO PARA HOJE
+   * 3. FILTRO PARA HOJE BLINDADO (MATEMÁTICA PURA)
    */
   const todayActivities = useMemo(() => {
-    const todayStr = new Date().toLocaleDateString('pt-BR');
-    return weekActivities.filter(a => a.scheduledDate?.toLocaleDateString('pt-BR') === todayStr);
+    const now = new Date();
+    const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const currentDayOfWeek = now.getDay();
+    
+    return weekActivities.filter(a => {
+      // 1. Verificação robusta e imutável pelo dia da semana planejado
+      if (a.dayOfWeek !== undefined) {
+        return a.dayOfWeek === currentDayOfWeek;
+      }
+
+      if (!a.scheduledDate) return false;
+      
+      let d = a.scheduledDate;
+      if (typeof (d as any).toDate === 'function') d = (d as any).toDate();
+      else if (!(d instanceof Date)) d = new Date(d);
+
+      if (isNaN(d.getTime())) return false;
+
+      // Detecta se a data foi salva como UTC Midnight (00:00:00Z)
+      const isUTCMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
+      
+      let dateStr = '';
+      if (isUTCMidnight) {
+        dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      } else {
+        dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+      
+      return dateStr === localToday;
+    });
   }, [weekActivities]);
 
   const totalTodayActivities = useMemo(() => todayActivities.length, [todayActivities]);
