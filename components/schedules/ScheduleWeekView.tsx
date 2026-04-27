@@ -42,22 +42,28 @@ export default function ScheduleWeekView({
 }: ScheduleWeekViewProps) {
   const currentDate = new Date();
 
-  // Calcular datas da semana selecionada
+  // Calcular datas da semana selecionada (semana começa na Segunda)
   const getWeekDates = (weekOffset: number) => {
     const now = new Date();
-    const currentDay = now.getDay();
-    const currentDate = now.getDate();
+    const currentDay = now.getDay(); // 0=Dom, 1=Seg, ...
 
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(currentDate - currentDay + (weekOffset * 7));
-    startOfWeek.setHours(0, 0, 0, 0);
+    // Calcular a Segunda-feira da semana atual
+    const daysToMonday = currentDay === 0 ? -6 : 1 - currentDay;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + daysToMonday + weekOffset * 7);
+    monday.setHours(0, 0, 0, 0);
 
-    const weekDates = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(startOfWeek);
-      date.setDate(startOfWeek.getDate() + i);
-      weekDates.push(date);
+    // weekDates indexado por getDay(): 1=Seg, 2=Ter, ..., 6=Sáb, 0=Dom (fim da semana)
+    const weekDates: Date[] = new Array(7);
+    for (let i = 1; i <= 6; i++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + (i - 1));
+      weekDates[i] = date;
     }
+    // Domingo = Segunda + 6 dias (fim da semana)
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    weekDates[0] = sunday;
 
     return weekDates;
   };

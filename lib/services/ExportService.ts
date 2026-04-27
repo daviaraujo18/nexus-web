@@ -83,6 +83,7 @@ export class ExportService {
             }],
             byImprovement: [],
             byGAD7Improvement: [],
+            byWellness: [],
             atRisk: data.riskLevel === 'high' || data.riskLevel === 'critical' ? [{
               studentId: data.studentId,
               studentName: data.studentName,

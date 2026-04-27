@@ -372,6 +372,20 @@ export class AnalyticsService {
     });
   }
 
+  private async countCompletedActivities(studentId: string): Promise<number> {
+    try {
+      const q = query(
+        collectionGroup(firestore, 'activityProgress'),
+        where('studentId', '==', studentId),
+        where('status', '==', 'completed')
+      );
+      const snap = await getDocs(q);
+      return snap.size;
+    } catch {
+      return 0;
+    }
+  }
+
   private async generateRankings(snapshots: WeeklySnapshot[], studentIds: string[]): Promise<ComparativeAnalysis['studentRankings']> {
     const items: any[] = [];
     const studentMap = new Map<string, WeeklySnapshot[]>();
@@ -379,9 +393,22 @@ export class AnalyticsService {
 
     await Promise.all(studentIds.map(async (id) => {
       try {
-        const profile = await this.fetchStudentData(id);
+        const [profile, gad7List, completedCount] = await Promise.all([
+          this.fetchStudentData(id),
+          this.fetchStudentGAD7(id, 4),
+          this.countCompletedActivities(id)
+        ]);
         const snaps = studentMap.get(id) || [];
         const avg = snaps.length > 0 ? snaps.reduce((acc, s) => acc + (s.metrics?.completionRate || 0), 0) / snaps.length : 0;
+        const latestGAD7 = gad7List[0] || null;
+        const gad7Score: number | null = latestGAD7?.totalScore ?? null;
+
+        // Score combinado para byWellness: normaliza GAD-7 invertido (0-21) + atividades
+        // Quanto menor o GAD-7 e mais atividades, maior o wellnessScore
+        const gadNorm = gad7Score != null ? (21 - gad7Score) / 21 : 0; // 0..1 (maior = melhor)
+        const actNorm = Math.min(completedCount / 100, 1);              // 0..1 cap em 100
+        const wellnessScore = gadNorm * 0.6 + actNorm * 0.4;           // peso 60/40
+
         items.push({
           studentId: id,
           studentName: profile.name,
@@ -390,12 +417,18 @@ export class AnalyticsService {
           studentTotalPoints: profile.totalPoints,
           value: avg,
           trend: 'stable',
-          isAtRisk: avg < 30
+          isAtRisk: avg < 30,
+          gad7Score,
+          gad7Severity: latestGAD7?.severity ?? null,
+          completedActivities: completedCount,
+          wellnessScore
         });
       } catch (e) {}
     }));
 
-    return { byEngagement: [...items].sort((a, b) => b.value - a.value), byPoints: [...items].sort((a, b) => b.studentTotalPoints - a.studentTotalPoints), byImprovement: items, byGAD7Improvement: [], atRisk: items.filter(i => i.isAtRisk) };
+    // byWellness: maior wellnessScore primeiro (menor GAD-7 + mais atividades = topo)
+    const byWellness = [...items].sort((a, b) => (b.wellnessScore ?? 0) - (a.wellnessScore ?? 0));
+    return { byEngagement: [...items].sort((a, b) => b.value - a.value), byPoints: [...items].sort((a, b) => b.studentTotalPoints - a.studentTotalPoints), byImprovement: items, byGAD7Improvement: [], byWellness, atRisk: items.filter(i => i.isAtRisk) };
   }
 
   private async getAccessibleStudentIds(userId: string): Promise<string[]> {
@@ -410,6 +443,6 @@ export class AnalyticsService {
   }
 
   private getEmptyComparativeAnalysis(r: DateRange): ComparativeAnalysis {
-    return { period: r, summary: { totalStudents: 0, activeStudents: 0, studentsWithGAD7: 0, metrics: {} as any }, studentRankings: { byEngagement: [], byPoints: [], byImprovement: [], byGAD7Improvement: [], atRisk: [] }, classInsights: [], distributions: {} as any, classHeatmap: {} };
+    return { period: r, summary: { totalStudents: 0, activeStudents: 0, studentsWithGAD7: 0, metrics: {} as any }, studentRankings: { byEngagement: [], byPoints: [], byImprovement: [], byGAD7Improvement: [], byWellness: [], atRisk: [] }, classInsights: [], distributions: {} as any, classHeatmap: {} };
   }
 }

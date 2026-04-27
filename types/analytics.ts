@@ -182,6 +182,7 @@ export interface ComparativeAnalysis {
     byPoints: StudentRankingItem[];
     byImprovement: StudentRankingItem[];
     byGAD7Improvement: StudentRankingItem[];
+    byWellness: StudentRankingItem[];
     atRisk: StudentRankingItem[];
   };
   
@@ -222,6 +223,10 @@ export interface StudentRankingItem {
   trend: AnalyticsTrend;
   percentile: number;
   isAtRisk: boolean;
+  gad7Score?: number | null;
+  gad7Severity?: string | null;
+  completedActivities?: number;
+  wellnessScore?: number;
 }
 
 export interface DistributionData {

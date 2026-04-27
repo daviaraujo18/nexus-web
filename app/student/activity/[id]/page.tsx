@@ -7,8 +7,9 @@ import ActivityExecutor from '@/components/activities/ActivityExecutor';
 import { ProgressService } from '@/lib/services/ProgressService';
 import { ActivityProgress } from '@/types/schedule';
 import { useAuth } from '@/context/AuthContext';
-import { 
-  FaArrowLeft, 
+import { useActivityTimer } from '@/context/ActivityTimerContext';
+import {
+  FaArrowLeft,
   FaHome,
   FaCalendarAlt,
   FaStar,
@@ -32,6 +33,8 @@ export default function ActivityPage() {
   const [error, setError] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const { active, startTimer, stopTimer } = useActivityTimer();
+  const [completedByTimer, setCompletedByTimer] = useState(false);
 
   // Detectar dispositivo
   useEffect(() => {
@@ -59,17 +62,32 @@ export default function ActivityPage() {
         if (progress.status === 'pending') {
           try {
             await ProgressService.startActivity(id as string, user.id);
-            setActivityProgress(prev => prev ? { 
-              ...prev, 
-              status: 'in_progress',
-              executionData: {
-                ...prev.executionData,
-                startedAt: new Date()
-              }
-            } : null);
+            const updated = {
+              ...progress,
+              status: 'in_progress' as const,
+              executionData: { ...progress.executionData, startedAt: new Date() }
+            };
+            setActivityProgress(updated);
+            startTimer({
+              progressId: updated.id,
+              activityId: updated.activityId,
+              studentId: updated.studentId,
+              title: updated.activitySnapshot.title,
+              estimatedMinutes: updated.activitySnapshot.metadata.estimatedDuration || 30,
+              startedAt: new Date()
+            });
           } catch (startError) {
             console.warn('Não foi possível iniciar automaticamente:', startError);
           }
+        } else if (progress.status === 'in_progress' && !active) {
+          startTimer({
+            progressId: progress.id,
+            activityId: progress.activityId,
+            studentId: progress.studentId,
+            title: progress.activitySnapshot.title,
+            estimatedMinutes: progress.activitySnapshot.metadata.estimatedDuration || 30,
+            startedAt: new Date()
+          });
         }
         
       } catch (err: any) {
@@ -83,11 +101,43 @@ export default function ActivityPage() {
     loadActivity();
   }, [id, user]);
 
+  // Detecta quando o FloatingTimer concluiu a atividade externamente
+  useEffect(() => {
+    if (!active && activityProgress?.status === 'in_progress' && !loading) {
+      setCompletedByTimer(true);
+      setActivityProgress(prev => prev ? { ...prev, status: 'completed' } : null);
+    }
+  }, [active]);
+
   const handleActivityCompletion = (result: any) => {
-    // Animar feedback de sucesso antes de redirecionar
-    setTimeout(() => {
+    stopTimer();
+    setTimeout(() => router.push('/student/dashboard'), 1500);
+  };
+
+  const handleManualComplete = async () => {
+    if (!activityProgress || !user) return;
+    // Já foi concluída pelo FloatingTimer
+    if (activityProgress.status === 'completed' || completedByTimer) {
       router.push('/student/dashboard');
-    }, 1500);
+      return;
+    }
+    try {
+      await ProgressService.completeActivity(activityProgress.id, user.id, {
+        timeSpent: active ? Math.ceil((Date.now() - active.startedAt.getTime()) / 60000) : 0
+      });
+      stopTimer();
+      setActivityProgress(prev => prev ? { ...prev, status: 'completed' } : null);
+      setTimeout(() => router.push('/student/dashboard'), 1500);
+    } catch (e: any) {
+      if (e?.message?.includes('não está em progresso')) {
+        // Já foi concluída por outra via
+        stopTimer();
+        setActivityProgress(prev => prev ? { ...prev, status: 'completed' } : null);
+        setTimeout(() => router.push('/student/dashboard'), 1000);
+      } else {
+        console.error('Erro ao concluir atividade:', e);
+      }
+    }
   };
 
   const handleActivityStatusChange = () => {
@@ -472,17 +522,24 @@ export default function ActivityPage() {
                     <FaArrowLeft />
                     <span>Voltar para Anterior</span>
                   </motion.button>
-                  
-                  <div className="flex gap-4">
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                      className="px-6 py-3 border-2 border-indigo-200 text-indigo-700 font-medium rounded-xl hover:bg-indigo-50 transition-all"
-                    >
-                      Voltar ao Topo
-                    </motion.button>
-                    
+
+                  <div className="flex gap-4 flex-wrap justify-end">
+                    {(activityProgress.status === 'in_progress' || completedByTimer) && (
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleManualComplete}
+                        className={`px-8 py-3 font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-3 ${
+                          completedByTimer
+                            ? 'bg-gradient-to-r from-emerald-500 to-green-600 text-white hover:opacity-90'
+                            : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:opacity-90'
+                        }`}
+                      >
+                        <FaStar className="w-4 h-4" />
+                        <span>{completedByTimer ? 'Atividade Concluída ✓' : 'Concluir Atividade'}</span>
+                      </motion.button>
+                    )}
+
                     <motion.div
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}

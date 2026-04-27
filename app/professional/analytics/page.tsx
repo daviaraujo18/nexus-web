@@ -89,21 +89,12 @@ export default function AnalyticsPage() {
     return grades;
   };
 
-  // Função para filtrar alunos
+  // Função para filtrar alunos (Ranking de Bem-Estar usa byWellness)
   const getFilteredStudents = () => {
-    if (!dashboardData?.studentRankings.byPoints) return [];
-
-    console.log('=====HERE====')
-    console.log(dashboardData?.studentRankings.byPoints)
-    return dashboardData.studentRankings.byPoints.filter(student => {
-      // Filtro de escola
-      if (rankingFilters.school !== 'all' && student.studentSchool !== rankingFilters.school) {
-        return false;
-      }
-      // Filtro de série
-      if (rankingFilters.grade !== 'all' && student.studentGrade !== rankingFilters.grade) {
-        return false;
-      }
+    const source = dashboardData?.studentRankings.byWellness ?? dashboardData?.studentRankings.byPoints ?? [];
+    return source.filter(student => {
+      if (rankingFilters.school !== 'all' && student.studentSchool !== rankingFilters.school) return false;
+      if (rankingFilters.grade !== 'all' && student.studentGrade !== rankingFilters.grade) return false;
       return true;
     });
   };
@@ -114,10 +105,11 @@ export default function AnalyticsPage() {
   const filteredStudents = getFilteredStudents();
   const topFilteredStudents = filteredStudents;
 
-  // Calcular média dos alunos filtrados
-  const filteredAverage = filteredStudents.length > 0
-    ? (filteredStudents.reduce((acc, s) => acc + s.studentTotalPoints, 0) / filteredStudents.length).toFixed(1)
-    : '0.0';
+  // Média GAD-7 dos alunos filtrados com score disponível
+  const studentsWithGAD7 = filteredStudents.filter(s => s.gad7Score != null);
+  const filteredAverage = studentsWithGAD7.length > 0
+    ? (studentsWithGAD7.reduce((acc, s) => acc + (s.gad7Score ?? 0), 0) / studentsWithGAD7.length).toFixed(1)
+    : '–';
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
@@ -627,8 +619,8 @@ export default function AnalyticsPage() {
                     {/* Header - Adaptado para mobile */}
                     <div className="flex flex-col gap-3 mb-4">
                       <h4 className="font-semibold text-slate-800 flex items-center gap-2">
-                        <FaTrophy className="w-5 h-5 text-yellow-500 flex-shrink-0" />
-                        <span className="truncate">Ranking de Pontuação</span>
+                        <FaHeart className="w-5 h-5 text-rose-500 flex-shrink-0" />
+                        <span className="truncate">Ranking de Bem-Estar</span>
                       </h4>
 
                       {/* Filtros - Agora com scroll horizontal no mobile */}
@@ -698,76 +690,72 @@ export default function AnalyticsPage() {
                             <button
                               key={student.studentId}
                               onClick={() => handleSelectStudent(student.studentId)}
-                              className={`group w-full flex items-center gap-2 sm:gap-4 p-2 sm:p-3 rounded-xl transition-all duration-200 border hover:shadow-md ${isPodium
+                              className={`group w-full text-left p-3 rounded-xl transition-all duration-200 border hover:shadow-md ${isPodium
                                 ? podiumColors[index] + ' hover:border-opacity-50'
-                                : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/30'
+                                : 'bg-white border-slate-200 hover:border-rose-300 hover:bg-rose-50/20'
                                 }`}
                             >
-                              {/* Posição - Tamanho adaptativo */}
-                              <div className={`
-              w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center font-bold flex-shrink-0 text-sm sm:text-base
-              ${index === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-white' :
+                              <div className="flex items-start gap-3">
+                                {/* Posição */}
+                                <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold flex-shrink-0 text-sm mt-0.5 ${
+                                  index === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-white' :
                                   index === 1 ? 'bg-gradient-to-br from-slate-400 to-slate-500 text-white' :
-                                    index === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white' :
-                                      'bg-slate-100 text-slate-600'
-                                }
-            `}>
-                                {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
-                              </div>
-
-                              {/* Informações do Aluno - Layout responsivo */}
-                              <div className="flex-1 min-w-0 text-left">
-                                <div className="flex items-center gap-1 sm:gap-2">
-                                  <span className="font-medium text-slate-800 truncate group-hover:text-indigo-700 transition-colors text-sm sm:text-base">
-                                    {student.studentName}
-                                  </span>
-                                  {student.isAtRisk && (
-                                    <FaExclamationTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500 flex-shrink-0" title="Aluno em risco" />
-                                  )}
+                                  index === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white' :
+                                  'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${globalIndex + 1}`}
                                 </div>
 
-                                {/* Badges de informação - Empilham no mobile muito pequeno */}
-                                <div className="flex flex-col xs:flex-row xs:items-center gap-1 xs:gap-2 sm:gap-4 text-xs text-slate-500 mt-0.5">
-                                  <span className="flex items-center gap-1 truncate">
-                                    <FaGraduationCap className="w-3 h-3 flex-shrink-0" />
-                                    <span className="truncate">{getGradeLabel(student.studentGrade)}</span>
-                                  </span>
-                                  <span className="hidden xs:flex text-slate-300">•</span>
-                                  <span className="flex items-center gap-1 truncate">
-                                    <FaSchool className="w-3 h-3 flex-shrink-0" />
-                                    <span className="truncate max-w-[80px] xs:max-w-[100px] sm:max-w-[120px]">
-                                      {getSchoolLabel(student.studentSchool)}
+                                {/* Dados principais */}
+                                <div className="flex-1 min-w-0">
+                                  {/* Nome */}
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-semibold text-slate-800 truncate group-hover:text-rose-700 transition-colors text-sm">
+                                      {student.studentName}
                                     </span>
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Pontuação - Layout compacto no mobile */}
-                              <div className="text-right flex-shrink-0 ml-1 sm:ml-2">
-                                <div className="flex items-baseline gap-0.5 sm:gap-1">
-                                  <span className="text-base sm:text-xl font-bold text-indigo-600">
-                                    {Math.round(student.studentTotalPoints)}
-                                  </span>
-                                  <span className="text-[10px] sm:text-xs text-slate-400">pts</span>
-                                </div>
-
-                                {/* Badge de tendência */}
-                                {student.trend && (
-                                  <div className={`
-                                      text-[10px] sm:text-xs mt-0.5
-                                    ${student.trend === 'improving' ? 'text-emerald-600' :
-                                      student.trend === 'declining' ? 'text-red-600' : 'text-slate-400'
-                                    }
-                                  `}>
-                                    {student.trend === 'improving' ? '↑' :
-                                      student.trend === 'declining' ? '↓' : '→'}
+                                    {student.isAtRisk && (
+                                      <FaExclamationTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" title="Aluno em risco" />
+                                    )}
                                   </div>
-                                )}
-                              </div>
 
-                              {/* Seta de navegação - Escondida no mobile para economizar espaço */}
-                              <div className="hidden sm:block opacity-0 group-hover:opacity-100 transition-opacity">
-                                <FaArrowRight className="w-4 h-4 text-indigo-400" />
+                                  {/* Série + Escola */}
+                                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mb-2">
+                                    <span className="flex items-center gap-1">
+                                      <FaGraduationCap className="w-3 h-3 text-slate-400" />
+                                      {getGradeLabel(student.studentGrade) || '—'}
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <FaSchool className="w-3 h-3 text-slate-400" />
+                                      <span className="truncate max-w-[140px]">{getSchoolLabel(student.studentSchool) || '—'}</span>
+                                    </span>
+                                  </div>
+
+                                  {/* GAD-7 + Atividades */}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {student.gad7Score != null ? (
+                                      <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${
+                                        student.gad7Severity === 'minimal' ? 'bg-emerald-100 text-emerald-700' :
+                                        student.gad7Severity === 'mild' ? 'bg-amber-100 text-amber-700' :
+                                        student.gad7Severity === 'moderate' ? 'bg-orange-100 text-orange-700' :
+                                        'bg-red-100 text-red-700'
+                                      }`}>
+                                        <FaHeart className="w-2.5 h-2.5" />
+                                        GAD-7: {student.gad7Score}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-slate-300 italic">sem GAD-7</span>
+                                    )}
+                                    <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
+                                      <FaCheckCircle className="w-2.5 h-2.5" />
+                                      {student.completedActivities ?? 0} atividades
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Seta */}
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity self-center">
+                                  <FaArrowRight className="w-3.5 h-3.5 text-rose-400" />
+                                </div>
                               </div>
                             </button>
                           );
@@ -835,7 +823,7 @@ export default function AnalyticsPage() {
                         <span className="text-slate-500 flex items-center gap-1">
                           <span>⭐</span>
                           <span className="truncate">
-                            Média: <span className="font-medium text-slate-700">{filteredAverage} pts</span>
+                            Média GAD-7: <span className="font-medium text-slate-700">{filteredAverage}</span>
                           </span>
                         </span>
                       </div>

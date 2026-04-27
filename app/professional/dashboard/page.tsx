@@ -33,9 +33,10 @@ import { useAuth } from '@/context/AuthContext';
 import { useSchedules } from '@/hooks/useSchedules';
 import { ScheduleInstanceService } from '@/lib/services/ScheduleInstanceService';
 import { StudentService } from '@/lib/services/StudentService';
-import { collectionGroup, query, where, getDocs } from 'firebase/firestore';
+import { collectionGroup, collection, query, where, getDocs } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import SubjectBarChart, { computeSubjectStats, SubjectStat } from '@/components/charts/SubjectBarChart';
+import { GRADE_OPTIONS, getGradeLabel } from '@/lib/utils/constants';
 
 export default function ProfessionalDashboardPage() {
   const { user } = useAuth();
@@ -56,6 +57,7 @@ export default function ProfessionalDashboardPage() {
   const [recentActivities, setRecentActivities] = useState<any[]>([]);
   const [topStudents, setTopStudents] = useState<any[]>([]);
   const [allStudents, setAllStudents] = useState<any[]>([]);
+  const [chartGrade, setChartGrade] = useState<string>('');
   const [chartStudentId, setChartStudentId] = useState<string>('');
   const [chartData, setChartData] = useState<SubjectStat[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
@@ -67,10 +69,15 @@ export default function ProfessionalDashboardPage() {
       try {
         setLoadingStats(true);
         
-        // Carregar estatísticas
-        const students = await StudentService.getStudentsByProfessional(user.id, {
-          activeOnly: true
-        });
+        // Buscar alunos atribuídos diretamente pela coleção students
+        const studentsSnap = await getDocs(
+          query(
+            collection(firestore, 'students'),
+            where('profile.assignedProfessionals', 'array-contains', user.id),
+            where('isActive', '==', true)
+          )
+        );
+        const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
         setAllStudents(students);
         
         // Contar instâncias ativas e calcular engajamento
@@ -341,7 +348,7 @@ export default function ProfessionalDashboardPage() {
           {/* Atividades por Matéria */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-100 to-indigo-100 flex items-center justify-center">
                     <FaChartBar className="w-5 h-5 text-violet-600" />
@@ -351,22 +358,43 @@ export default function ProfessionalDashboardPage() {
                     <p className="text-sm text-gray-600">Concluídas por disciplina</p>
                   </div>
                 </div>
-                <select
-                  className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-violet-400 outline-none max-w-[180px]"
-                  value={chartStudentId}
-                  onChange={e => setChartStudentId(e.target.value)}
-                >
-                  <option value="">Selecionar aluno</option>
-                  {allStudents.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                {/* Dropdowns série + aluno */}
+                <div className="flex gap-3 flex-wrap">
+                  {/* Dropdown Série */}
+                  <select
+                    className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-violet-400 outline-none flex-1 min-w-[140px]"
+                    value={chartGrade}
+                    onChange={e => { setChartGrade(e.target.value); setChartStudentId(''); }}
+                  >
+                    <option value="">Todas as séries</option>
+                    {GRADE_OPTIONS.filter(g =>
+                      allStudents.some(s => s.profile?.grade === g.value)
+                    ).map(g => (
+                      <option key={g.value} value={g.value}>{g.label}</option>
+                    ))}
+                  </select>
+                  {/* Dropdown Aluno — filtra pela série selecionada */}
+                  <select
+                    className="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:ring-2 focus:ring-violet-400 outline-none flex-1 min-w-[160px]"
+                    value={chartStudentId}
+                    onChange={e => setChartStudentId(e.target.value)}
+                  >
+                    <option value="">Selecionar aluno</option>
+                    {allStudents
+                      .filter(s => !chartGrade || s.profile?.grade === chartGrade)
+                      .map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                  </select>
+                </div>
               </div>
             </div>
             <div className="p-6">
               {!chartStudentId ? (
                 <div className="text-center py-6 text-gray-400 text-sm">
-                  Selecione um aluno para ver o gráfico
+                  {allStudents.length === 0
+                    ? 'Nenhum aluno atribuído'
+                    : 'Selecione um aluno para ver o gráfico'}
                 </div>
               ) : chartLoading ? (
                 <div className="flex justify-center py-8">
