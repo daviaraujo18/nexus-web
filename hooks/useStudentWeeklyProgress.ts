@@ -28,91 +28,107 @@ export function useStudentWeeklyProgress() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 🔥 1. CÁLCULO REATIVO DE TEMPO (COM LOGS DE PENTE FINO)
-  const timeInvestedCalculated = useMemo(() => {
-    console.group('⏱️ [CÁLCULO-TEMPO] Iniciando triagem de atividades');
-    
-    const completed = weeklyActivities.filter(a => {
-      const isDone = a.status === 'completed';
-      if (!isDone) console.log(`⏭️ [IGNORADO] Atividade "${a.activitySnapshot?.title}" está como: ${a.status}`);
-      return isDone;
-    });
+  const calculateTimeSpent = useCallback((activities: ActivityProgress[]): number => {
+    const completed = activities.filter(activity => activity.status === 'completed');
 
-    console.log(`✅ [FILTRO] ${completed.length} atividades concluídas encontradas para soma.`);
+    return completed.reduce((total, activity) => {
+      const realTime = Number(activity.executionData?.timeSpent);
+      const estimatedTime = Number(activity.activitySnapshot?.metadata?.estimatedDuration);
 
-    const total = completed.reduce((acc, curr) => {
-      // 1. Tenta o tempo real investido
-      const realTime = Number(curr.executionData?.timeSpent);
-      // 2. Fallback para duração estimada se o real for inválido
-      const estimatedTime = Number(curr.activitySnapshot?.metadata?.estimatedDuration);
-      
-      let timeToAdd = 0;
-      let fonte = 'NENHUMA';
-
-      if (!isNaN(realTime) && realTime > 0) {
-        timeToAdd = realTime;
-        fonte = 'executionData.timeSpent';
-      } else if (!isNaN(estimatedTime) && estimatedTime > 0) {
-        timeToAdd = estimatedTime;
-        fonte = 'metadata.estimatedDuration (Fallback)';
+      if (Number.isFinite(realTime) && realTime > 0) {
+        return total + realTime;
       }
 
-      console.log(`📌 [SOMA] +${timeToAdd}min | Fonte: ${fonte} | Atividade: ${curr.activitySnapshot?.title}`);
-      return acc + timeToAdd;
-    }, 0);
+      if (Number.isFinite(estimatedTime) && estimatedTime > 0) {
+        return total + estimatedTime;
+      }
 
-    console.log(`🏁 [RESULTADO FINAL] Soma total acumulada: ${total} minutos.`);
-    console.groupEnd();
-    return total;
-  }, [weeklyActivities]);
+      return total;
+    }, 0);
+  }, []);
 
   const loadProgressData = useCallback(async () => {
     if (!user?.id || user.role !== 'student') return;
 
-    console.group(`📊 [PROGRESS-HOOK] Sincronizando Métricas Reais`);
+    console.group('📊 [PROGRESS-HOOK] Sincronizando Métricas Reais');
+
     try {
       setLoading(true);
 
-      // 1. BUSCAR PERFIL (RPG)
       console.log('🔍 [PASSO 1] Lendo perfil do aluno para XP e Streak...');
       const studentRef = doc(firestore, 'students', user.id);
       const studentSnap = await getDoc(studentRef);
       const studentProfile = studentSnap.data()?.profile || {};
-      const totalPoints = studentProfile.totalPoints || 0;
-      const streak = studentProfile.streak || 0;
-      const level = Math.floor(totalPoints / 200) + 1;
 
-      // 2. BUSCAR HISTÓRICO
+      const totalPoints = Number(studentProfile.totalPoints ?? 0);
+      const streak = Number(studentProfile.streak ?? 0);
+      const level = Number(studentProfile.level ?? Math.floor(totalPoints / 200) + 1);
+
       console.log('🔍 [PASSO 2] Buscando WeeklySnapshots...');
-      const snapshotsQuery = query(collection(firestore, 'weeklySnapshots'), where('studentId', '==', user.id));
-      const snapshotsSnap = await getDocs(snapshotsQuery);
-      let snapshots = snapshotsSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        weekStartDate: doc.data().weekStartDate?.toDate(),
-        weekEndDate: doc.data().weekEndDate?.toDate(),
-      } as WeeklySnapshot)).sort((a, b) => b.weekNumber - a.weekNumber);
+      const snapshotsQuery = query(
+        collection(firestore, 'weeklySnapshots'),
+        where('studentId', '==', user.id)
+      );
 
-      // 3. BUSCAR ATIVIDADES ATUAIS
+      const snapshotsSnap = await getDocs(snapshotsQuery);
+      const snapshots = snapshotsSnap.docs
+        .map(snapshotDoc => {
+          const snapshotData = snapshotDoc.data();
+
+          return {
+            id: snapshotDoc.id,
+            ...snapshotData,
+            weekStartDate: snapshotData.weekStartDate?.toDate(),
+            weekEndDate: snapshotData.weekEndDate?.toDate(),
+          } as WeeklySnapshot;
+        })
+        .sort((a, b) => b.weekNumber - a.weekNumber);
+
       console.log('🔍 [PASSO 3] Chamando Service para buscar atividades da semana...');
       const currentActivities = await ScheduleInstanceService.getWeekActivities(user.id);
       console.log(`📦 [DADOS] Recebidas ${currentActivities.length} atividades brutas do Service.`);
+
       setWeeklyActivities(currentActivities);
 
-      // 4. CALCULAR TENDÊNCIA
+      const byStatusWP = currentActivities.reduce<Record<string, number>>((acc, activity) => {
+        acc[activity.status] = (acc[activity.status] || 0) + 1;
+        return acc;
+      }, {});
+
+      console.log('[WEEKLY_PROGRESS_DIAG] currentActivities por status:', byStatusWP);
+
+      const completedActivities = currentActivities.filter(
+        activity => activity.status === 'completed'
+      );
+
+      const totalActivities = currentActivities.length;
+      const completedCount = completedActivities.length;
+      const completionRate =
+        totalActivities > 0
+          ? Math.round((completedCount / totalActivities) * 100)
+          : 0;
+
+      const timeSpent = calculateTimeSpent(currentActivities);
+
+      console.log(
+        `[WEEKLY_PROGRESS_DIAG] completedCount=${completedCount} totalActivities=${totalActivities} rate=${completionRate}% timeSpent=${timeSpent}min`
+      );
+
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
+
       if (snapshots.length >= 2) {
         const latestRate = snapshots[0].metrics.completionRate || 0;
         const previousRate = snapshots[1].metrics.completionRate || 0;
-        if (latestRate > previousRate + 5) trend = 'improving';
-        else if (latestRate < previousRate - 5) trend = 'declining';
+
+        if (latestRate > previousRate + 5) {
+          trend = 'improving';
+        } else if (latestRate < previousRate - 5) {
+          trend = 'declining';
+        }
       }
 
-      // 5. ATUALIZAR INTERFACE
-      const completedCount = currentActivities.filter(a => a.status === 'completed').length;
-      const totalCount = currentActivities.length;
-
       console.log('✨ [HOOK] Preparando objeto final de DATA para a UI...');
+
       setData({
         performanceTrend: trend,
         currentMetrics: {
@@ -120,22 +136,22 @@ export function useStudentWeeklyProgress() {
           totalPoints,
           level,
           completedActivities: completedCount,
-          totalActivities: totalCount,
-          completionRate: totalCount > 0 ? (completedCount / totalCount) * 100 : 0,
-          timeSpent: timeInvestedCalculated // 👈 Plugado no cálculo reativo com logs
+          totalActivities,
+          completionRate,
+          timeSpent,
         },
-        weeklySnapshots: snapshots
+        weeklySnapshots: snapshots,
       });
 
       setError(null);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('❌ [PROGRESS-HOOK] Erro Fatal:', err);
       setError('Erro ao sincronizar progresso.');
     } finally {
       setLoading(false);
       console.groupEnd();
     }
-  }, [user?.id, timeInvestedCalculated]);
+  }, [user?.id, user?.role, calculateTimeSpent]);
 
   useEffect(() => {
     loadProgressData();
@@ -143,14 +159,22 @@ export function useStudentWeeklyProgress() {
 
   const stats = useMemo(() => {
     const total = weeklyActivities.length;
-    const completed = weeklyActivities.filter(a => a.status === 'completed').length;
+    const completed = weeklyActivities.filter(activity => activity.status === 'completed').length;
+
     return {
       total,
       completed,
       percent: total > 0 ? Math.round((completed / total) * 100) : 0,
-      pending: total - completed
+      pending: total - completed,
     };
   }, [weeklyActivities]);
 
-  return { data, weeklyActivities, stats, loading, error, refresh: loadProgressData };
+  return {
+    data,
+    weeklyActivities,
+    stats,
+    loading,
+    error,
+    refresh: loadProgressData,
+  };
 }

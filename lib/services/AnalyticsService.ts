@@ -426,14 +426,16 @@ export class AnalyticsService {
       } catch (e) {}
     }));
 
-    // byWellness: maior wellnessScore primeiro (menor GAD-7 + mais atividades = topo)
-    const byWellness = [...items].sort((a, b) => (b.wellnessScore ?? 0) - (a.wellnessScore ?? 0));
+    // byWellness: menor GAD-7 primeiro; alunos sem GAD-7 ou com GAD-7 = 0 são excluídos
+    const byWellness = items
+      .filter(i => i.gad7Score != null && i.gad7Score > 0)
+      .sort((a, b) => (a.gad7Score ?? Infinity) - (b.gad7Score ?? Infinity));
     return { byEngagement: [...items].sort((a, b) => b.value - a.value), byPoints: [...items].sort((a, b) => b.studentTotalPoints - a.studentTotalPoints), byImprovement: items, byGAD7Improvement: [], byWellness, atRisk: items.filter(i => i.isAtRisk) };
   }
 
   private async getAccessibleStudentIds(userId: string): Promise<string[]> {
     const ref = collection(firestore, 'students');
-    const q = (this.userRole === 'coordinator') ? query(ref, where('isActive', '==', true)) : query(ref, where('assignedProfessionals', 'array-contains', userId), where('isActive', '==', true));
+    const q = (this.userRole === 'coordinator') ? query(ref, where('isActive', '==', true)) : query(ref, where('profile.assignedProfessionals', 'array-contains', userId), where('isActive', '==', true));
     const snap = await getDocs(q);
     return snap.docs.map(d => d.id);
   }

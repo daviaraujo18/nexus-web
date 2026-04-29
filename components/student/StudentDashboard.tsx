@@ -1,7 +1,7 @@
 // components/student/StudentDashboard.tsx - VERSÃO RESPONSIVA
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import TodayActivities from './TodayActivities';
 import { useStudentSchedule } from '@/hooks/useStudentSchedule';
 import {
@@ -22,6 +22,8 @@ import {
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import SubjectBarChart, { computeSubjectStats } from '@/components/charts/SubjectBarChart';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { firestore, auth } from '@/firebase/config';
 
 interface StudentDashboardProps {
   showHeader?: boolean;
@@ -30,7 +32,49 @@ interface StudentDashboardProps {
 export default function StudentDashboard({ showHeader = true }: StudentDashboardProps) {
   const { user } = useAuth();
   const student = user?.role === 'student' ? user : null;
-  
+
+  const [liveProfileStats, setLiveProfileStats] = useState({
+    totalPoints: 0,
+    streak: 0,
+    level: 1,
+  });
+
+  useEffect(() => {
+    // Usa o UID do Firebase Auth diretamente — mais confiável que user.id
+    // (user.id pode ser sobrescrito pelo spread de processedData em UserService.getUser)
+    const uid = auth.currentUser?.uid ?? user?.id;
+    if (!uid) return;
+
+    const ref = doc(firestore, 'students', uid);
+
+    const unsubscribe = onSnapshot(ref, (snap) => {
+      const rawData = snap.data();
+      console.log('[STUDENT_DASHBOARD_PROFILE_STATS]', {
+        uid,
+        exists: snap.exists(),
+        rawData,
+        profile: rawData?.profile,
+        totalPoints: rawData?.profile?.totalPoints,
+        streak: rawData?.profile?.streak,
+        level: rawData?.profile?.level,
+      });
+
+      if (!snap.exists()) return;
+
+      const profile = rawData?.profile ?? {};
+
+      setLiveProfileStats({
+        totalPoints: Number(profile.totalPoints ?? 0),
+        streak: Number(profile.streak ?? 0),
+        level: Number(profile.level ?? 1),
+      });
+    }, (error) => {
+      console.error('[STUDENT_DASHBOARD_PROFILE_STATS_ERROR]', error);
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
+
   const {
     weekActivities, // Pegamos TODAS as atividades da janela de tempo
     instances,
@@ -58,40 +102,36 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     return 'Boa noite';
   };
 
+  // Sempre usa data local — nunca toISOString() que retorna UTC e pode mudar o dia
+  const toLocalDateKey = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   // 🔥 FILTRAGEM BLINDADA CONTRA FUSO HORÁRIO E DEDUPLICAÇÃO
   const dedupedTodayActivities = useMemo(() => {
     const now = new Date();
-    // Ex: "2026-04-27"
-    const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const currentDayOfWeek = now.getDay(); // 0 (Dom) a 6 (Sáb)
+    const todayKey = toLocalDateKey(now);
+    // JS getDay(): 0=Dom, 1=Seg ... Schedule dayOfWeek: 0=Seg, 1=Ter ...
+    // Conversão: (jsDay + 6) % 7
+    const scheduleDayOfWeek = (now.getDay() + 6) % 7;
 
     const seen = new Set<string>();
-    
+
     return weekActivities.filter(a => {
       let isToday = false;
 
-      // Como weekActivities agora foi expurgado de vazamentos, confiar no dia da semana é perfeito
       if (a.dayOfWeek !== undefined) {
-        isToday = a.dayOfWeek === currentDayOfWeek;
+        isToday = a.dayOfWeek === scheduleDayOfWeek;
       } else if (a.scheduledDate) {
         let d = a.scheduledDate;
         if (typeof (d as any).toDate === 'function') d = (d as any).toDate();
         else if (!(d instanceof Date)) d = new Date(d);
 
         if (!isNaN(d.getTime())) {
-          // Resolve o conflito verificando se a data é UTC Midnight (00:00:00Z) para fixar a métrica em apenas 1 dia
-          const isUTCMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
-          
-          let dateStr = '';
-          if (isUTCMidnight) {
-            dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-          } else {
-            dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          }
-
-          if (dateStr === localToday) {
-            isToday = true;
-          }
+          isToday = toLocalDateKey(d) === todayKey;
         }
       }
 
@@ -101,19 +141,37 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
       const key = a.activityId || a.id;
       if (seen.has(key)) return false;
       seen.add(key);
-      
+
       return true;
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekActivities]);
 
+  // Progresso semanal — alimenta o card "Progresso Semanal" no header
+  const weeklyTotal = weekActivities.length;
+  const weeklyCompleted = weekActivities.filter(a => a.status === 'completed').length;
+  const weeklyRate = weeklyTotal > 0 ? Math.round((weeklyCompleted / weeklyTotal) * 100) : 0;
+
+  // Progresso do dia — card diário
   const totalTodayActivities = dedupedTodayActivities.length;
+  
+  const completedToday = dedupedTodayActivities.filter(
+    activity => activity.status === 'completed'
+  ).length;
 
-  // Estatísticas calculadas baseadas APENAS nas atividades blindadas de hoje
-  const completedToday = dedupedTodayActivities.filter(a => a.status === 'completed').length;
-  const pendingToday = dedupedTodayActivities.filter(a => a.status === 'pending').length;
-  const completionRate = totalTodayActivities > 0 ? Math.round((completedToday / totalTodayActivities) * 100) : 0;
+  const pendingToday = dedupedTodayActivities.filter(
+    activity =>
+      activity.status === 'pending' ||
+      activity.status === 'in_progress'
+  ).length;
 
-  // Gráfico de matérias: atividades concluídas da semana agrupadas por matéria
+  const completionRate =
+    totalTodayActivities > 0
+      ? Math.round((completedToday / totalTodayActivities) * 100)
+      : 0;
+  
+      // Gráfico de matérias: atividades concluídas da semana agrupadas por matéria
+  
   const subjectStats = useMemo(() => computeSubjectStats(weekActivities || []), [weekActivities]);
 
   const getMotivationalMessage = () => {
@@ -191,7 +249,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaTrophy className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{student?.profile.totalPoints || 0}</div>
+                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{liveProfileStats.totalPoints}</div>
                   <div className="text-xs md:text-sm text-white/90 truncate">Pontos Totais</div>
                 </div>
               </div>
@@ -203,7 +261,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaFire className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{student?.profile.streak || 0}</div>
+                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{liveProfileStats.streak}</div>
                   <div className="text-xs md:text-sm text-white/90 truncate">Dias Seguidos</div>
                 </div>
               </div>
@@ -215,7 +273,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaChartLine className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">Nível {student?.profile.level || 1}</div>
+                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">Nível {liveProfileStats.level}</div>
                   <div className="text-xs md:text-sm text-white/90 truncate">Seu Nível</div>
                 </div>
               </div>
@@ -227,8 +285,9 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                   <FaCheckCircle className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{completionRate}%</div>
-                  <div className="text-xs md:text-sm text-white/90 truncate">Hoje</div>
+                  <div className="text-lg md:text-xl lg:text-2xl font-bold truncate">{weeklyRate}%</div>
+                  <div className="text-xs md:text-sm text-white/90 truncate">Progresso Semanal</div>
+                  <div className="text-xs text-white/70 truncate">{weeklyCompleted}/{weeklyTotal} atividades</div>
                 </div>
               </div>
             </div>

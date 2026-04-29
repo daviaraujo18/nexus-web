@@ -77,6 +77,9 @@ export function useStudentSchedule() {
     });
     
     const validInstanceIds = new Set(instances.map(i => i.id));
+    // Quando não há instâncias ativas, bypassa a validação de órfão — aluno sem cronograma
+    // ainda deve ver suas atividades históricas
+    const hasActiveInstances = validInstanceIds.size > 0;
     console.log(`🛡️ O Firebase vai validar as atividades contra ${validInstanceIds.size} instâncias mães.`);
 
     const q = query(
@@ -88,7 +91,7 @@ export function useStudentSchedule() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       console.group('📊 [SNAPSHOT EVENT] Dados do Firebase!');
       console.log(`📦 Lidos ${snapshot.size} documentos brutos.`);
-      
+
       const filteredActivities: ActivityProgress[] = [];
 
       snapshot.forEach((doc) => {
@@ -97,7 +100,8 @@ export function useStudentSchedule() {
 
         if (!scheduledDate) return;
 
-        const isLegit = validInstanceIds.has(data.scheduleInstanceId);
+        // Se não há instâncias ativas, aceita qualquer atividade do aluno (sem cronograma = sem filtro de órfão)
+        const isLegit = !hasActiveInstances || validInstanceIds.has(data.scheduleInstanceId);
         let isWithinWindow = false;
         
         if (isLegit) {
@@ -130,12 +134,27 @@ export function useStudentSchedule() {
             completedAt: data.completedAt?.toDate(),
           } as ActivityProgress);
         } else {
-          // Log reduzido
-          if (!isLegit) console.log(`🚫 [ÓRFÃO] Barrado (Sem instância mãe): ${data.activitySnapshot?.title || doc.id}`);
+          if (!isLegit) {
+            console.log(`🚫 [ÓRFÃO] Barrado: "${data.activitySnapshot?.title || doc.id}" | instanceId=${data.scheduleInstanceId}`);
+          } else {
+            console.log(`📅 [FORA JANELA] Barrado: "${data.activitySnapshot?.title || doc.id}" | scheduledDate=${scheduledDate?.toISOString()} | weekNumber=${data.weekNumber} | status=${data.status}`);
+          }
         }
       });
 
       filteredActivities.sort((a, b) => (a.scheduledDate?.getTime() || 0) - (b.scheduledDate?.getTime() || 0));
+
+      // --- DIAGNÓSTICO COMPLETION RATE ---
+      const byStatus = filteredActivities.reduce<Record<string, number>>((acc, a) => {
+        acc[a.status] = (acc[a.status] || 0) + 1;
+        return acc;
+      }, {});
+      console.log('[COMPLETION_RATE_DIAG] weekActivities por status:', byStatus);
+      console.log('[COMPLETION_RATE_DIAG] IDs + status + scheduledDate:');
+      filteredActivities.forEach(a => {
+        console.log(`  id=${a.id} | status=${a.status} | dayOfWeek=${(a as any).dayOfWeek} | scheduledDate=${a.scheduledDate?.toISOString()}`);
+      });
+      // ------------------------------------
 
       console.log(`✨ [SUCESSO] ${filteredActivities.length} atividades limpas e prontas para a tela.`);
       setWeekActivities(filteredActivities);
@@ -159,12 +178,13 @@ export function useStudentSchedule() {
   const todayActivities = useMemo(() => {
     const now = new Date();
     const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const currentDayOfWeek = now.getDay();
-    
+    // JS getDay(): 0=Dom, 1=Seg ... Schedule dayOfWeek: 0=Seg, 1=Ter ...
+    // Conversão: (jsDay + 6) % 7
+    const scheduleDayOfWeek = (now.getDay() + 6) % 7;
+
     return weekActivities.filter(a => {
-      // 1. Verificação robusta e imutável pelo dia da semana planejado
       if (a.dayOfWeek !== undefined) {
-        return a.dayOfWeek === currentDayOfWeek;
+        return a.dayOfWeek === scheduleDayOfWeek;
       }
 
       if (!a.scheduledDate) return false;

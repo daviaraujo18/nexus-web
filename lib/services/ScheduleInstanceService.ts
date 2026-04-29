@@ -248,20 +248,23 @@ export class ScheduleInstanceService {
     try {
       // Primeiro, pegamos apenas as instâncias que sobreviveram à auditoria de órfãos
       const active = await this.getStudentActiveInstances(studentId);
-      if (active.length === 0) { 
-        console.warn('🛑 [SERVICE] Nenhuma instância legítima. Tela será zerada.');
-        return []; 
+      const activeIds = active.map(i => i.id);
+      // Quando não há instâncias ativas, bypassa validação — aluno sem cronograma
+      // ainda deve ver suas atividades históricas
+      const hasActiveInstances = activeIds.length > 0;
+
+      if (!hasActiveInstances) {
+        console.warn('⚠️ [SERVICE] Nenhuma instância ativa. Mostrando atividades sem filtro de instância.');
       }
 
-      const activeIds = active.map(i => i.id);
       const now = new Date();
       const start = DateUtils.getWeekStartDate(now);
       const end = DateUtils.getWeekEndDate(now);
-      
+
       console.log(`🌐 [SERVICE] Janela Civil: ${start.toLocaleDateString()} a ${end.toLocaleDateString()}`);
 
       const q = query(
-        collection(firestore, this.COLLECTIONS.PROGRESS), 
+        collection(firestore, this.COLLECTIONS.PROGRESS),
         where('studentId', '==', studentId),
         where('isActive', '==', true)
       );
@@ -272,11 +275,12 @@ export class ScheduleInstanceService {
       snap.forEach(dDoc => {
         const data = dDoc.data();
         const scheduledDate = data.scheduledDate?.toDate();
-        
+
         if (!scheduledDate) return;
 
         // VERIFICAÇÃO 1: A instância pai desta tarefa ainda é válida?
-        const isLegit = activeIds.includes(data.scheduleInstanceId);
+        // Se não há instâncias ativas, aceita qualquer atividade (sem cronograma = sem filtro de órfão)
+        const isLegit = !hasActiveInstances || activeIds.includes(data.scheduleInstanceId);
         // VERIFICAÇÃO 2: A tarefa está dentro da semana civil atual?
         const isWithinRange = scheduledDate >= start && scheduledDate <= end;
 

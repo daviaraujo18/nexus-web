@@ -7,7 +7,11 @@ import {
   increment,
   arrayUnion,
   getDoc,
-  setDoc
+  setDoc,
+  collection,
+  query,
+  where,
+  getDocs
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import {
@@ -400,20 +404,59 @@ export class ProgressService {
     studentId: string,
     points: number
   ): Promise<void> {
-    try {
-      const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
+    console.log('[updateStudentStats] Iniciando atualização:', { studentId, points });
 
-      await updateDoc(studentRef, {
-        'profile.totalPoints': increment(points),
-        'profile.streak': increment(1),
-        'profile.lastActivityAt': serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+    const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
 
-    } catch (error) {
-      console.error('Erro ao atualizar estatísticas do aluno:', error);
-      // Não falhar a operação principal
+    // 1. Ler estado atual para calcular level e verificar streak
+    const snap = await getDoc(studentRef);
+    if (!snap.exists()) {
+      throw new Error(`[updateStudentStats] Documento students/${studentId} não encontrado`);
     }
+
+    const profile = snap.data()?.profile ?? {};
+    const safePoints = Number(points) || 0; 
+    const currentPoints: number = profile.totalPoints ?? 0;
+    const newTotalPoints = currentPoints + points;
+    const newLevel = Math.floor(newTotalPoints / 200) + 1;
+
+    // 2. Streak: incrementar só se não houver atividade concluída hoje
+    const lastActivityRaw = profile.lastActivityAt;
+    const lastActivityAt: Date | undefined =
+      lastActivityRaw?.toDate?.() instanceof Date
+        ? lastActivityRaw.toDate()
+        : lastActivityRaw instanceof Date
+        ? lastActivityRaw
+        : undefined;
+
+    const today = new Date();
+    const alreadyActiveToday =
+      lastActivityAt != null &&
+      lastActivityAt.getFullYear() === today.getFullYear() &&
+      lastActivityAt.getMonth() === today.getMonth() &&
+      lastActivityAt.getDate() === today.getDate();
+
+    const updatePayload: Record<string, unknown> = {
+      'profile.totalPoints': increment(safePoints),
+      'profile.level': newLevel,
+      'profile.lastActivityAt': serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (!alreadyActiveToday) {
+      updatePayload['profile.streak'] = increment(1);
+    }
+
+    console.log('[updateStudentStats] Gravando:', {
+      newTotalPoints,
+      newLevel,
+      streakIncrement: !alreadyActiveToday,
+    });
+
+    // 3. Escrever — sem silenciar o erro (sobe para o chamador que já tem try/catch)
+    await updateDoc(studentRef, updatePayload);
+
+    console.log('[updateStudentStats] ✅ Concluído com sucesso');
   }
 
   /**
@@ -633,5 +676,102 @@ export class ProgressService {
       console.error('❌ [getActivitiesByWeekAndDay] Erro:', error);
       throw new Error(`Erro ao buscar atividades: ${error.message}`);
     }
+  }
+
+  /**
+   * Recalcula métricas permanentes do aluno a partir do histórico de activityProgress.
+   * Use dryRun: true para inspecionar sem escrever no Firestore.
+   */
+  static async recalculateStudentPermanentMetrics(
+    studentId: string,
+    options: { dryRun?: boolean } = {}
+  ): Promise<{
+    studentId: string;
+    totalActivityProgress: number;
+    totalCompletedActivities: number;
+    totalPoints: number;
+    level: number;
+    dryRun: boolean;
+  }> {
+    const { dryRun = false } = options;
+
+    console.group(`[recalculate] studentId=${studentId} dryRun=${dryRun}`);
+
+    // 1. Buscar TODOS os activityProgress do aluno (sem filtro de isActive)
+    const q = query(
+      collection(firestore, this.COLLECTIONS.PROGRESS),
+      where('studentId', '==', studentId)
+    );
+    const snap = await getDocs(q);
+    console.log(`[recalculate] Documentos encontrados: ${snap.size}`);
+
+    let totalPoints = 0;
+    let totalCompletedActivities = 0;
+    const examples: string[] = [];
+
+    snap.forEach((d) => {
+      const data = d.data();
+      const isCompleted = data.status === 'completed';
+
+      // Calcular pontos desta atividade
+      const earnedFromScoring = Number(data.scoring?.pointsEarned ?? 0);
+      const earnedFromSnapshot = Number(
+        data.activitySnapshot?.scoring?.pointsOnCompletion ?? 0
+      );
+
+      let points = 0;
+      if (earnedFromScoring > 0) {
+        points = earnedFromScoring;
+      } else if (isCompleted && earnedFromSnapshot > 0) {
+        points = earnedFromSnapshot;
+      } else if (isCompleted) {
+        points = 0; // completada sem pontuação registrada
+      }
+
+      if (isCompleted) {
+        totalCompletedActivities += 1;
+        totalPoints += points;
+      }
+
+      if (examples.length < 5) {
+        examples.push(
+          `  [${data.status}] "${data.activitySnapshot?.title ?? d.id}" → scoring.pointsEarned=${earnedFromScoring} | snapshot.pointsOnCompletion=${earnedFromSnapshot} → usado=${points}`
+        );
+      }
+    });
+
+    const level = Math.floor(totalPoints / 200) + 1;
+
+    console.log(`[recalculate] totalActivityProgress : ${snap.size}`);
+    console.log(`[recalculate] totalCompletedActivities: ${totalCompletedActivities}`);
+    console.log(`[recalculate] totalPoints             : ${totalPoints}`);
+    console.log(`[recalculate] level                   : ${level}`);
+    console.log('[recalculate] Exemplos (primeiros 5):');
+    examples.forEach((e) => console.log(e));
+
+    if (!dryRun) {
+      const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
+      await updateDoc(studentRef, {
+        'profile.totalPoints': totalPoints,
+        'profile.level': level,
+        'profile.totalCompletedActivities': totalCompletedActivities,
+        'profile.lastMetricsRecalculatedAt': serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      console.log('[recalculate] ✅ Escrito no Firestore com sucesso');
+    } else {
+      console.log('[recalculate] ⚠️  dryRun=true — nada foi escrito no Firestore');
+    }
+
+    console.groupEnd();
+
+    return {
+      studentId,
+      totalActivityProgress: snap.size,
+      totalCompletedActivities,
+      totalPoints,
+      level,
+      dryRun,
+    };
   }
 }
