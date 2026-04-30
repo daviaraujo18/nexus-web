@@ -49,6 +49,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
 
     const unsubscribe = onSnapshot(ref, (snap) => {
       const rawData = snap.data();
+
       console.log('[STUDENT_DASHBOARD_PROFILE_STATS]', {
         uid,
         exists: snap.exists(),
@@ -76,7 +77,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
   }, [user?.id]);
 
   const {
-    weekActivities, // Pegamos TODAS as atividades da janela de tempo
+    weekActivities,
     instances,
     loading,
     error,
@@ -97,54 +98,35 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
 
   const getGreeting = () => {
     const hour = new Date().getHours();
+
     if (hour < 12) return 'Bom dia';
     if (hour < 18) return 'Boa tarde';
+
     return 'Boa noite';
   };
 
-  // Sempre usa data local — nunca toISOString() que retorna UTC e pode mudar o dia
-  const toLocalDateKey = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  // 🔥 FILTRAGEM BLINDADA CONTRA FUSO HORÁRIO E DEDUPLICAÇÃO
-  const dedupedTodayActivities = useMemo(() => {
-    const now = new Date();
-    const todayKey = toLocalDateKey(now);
-    // JS getDay(): 0=Dom, 1=Seg ... Schedule dayOfWeek: 0=Seg, 1=Ter ...
-    // Conversão: (jsDay + 6) % 7
-    const scheduleDayOfWeek = (now.getDay() + 6) % 7;
-
+  // Usa a mesma referência de dia da tela /student/schedules:
+  // JS getDay(): 0=Domingo, 1=Segunda, ..., 6=Sábado.
+  // Não usa scheduledDate aqui porque os dados antigos podem ter offset de data.
+  const dashboardTodayActivities = useMemo(() => {
+    const selectedDay = new Date().getDay();
     const seen = new Set<string>();
 
-    return weekActivities.filter(a => {
-      let isToday = false;
+    return weekActivities.filter(activity => {
+      if (activity.dayOfWeek !== selectedDay) return false;
 
-      if (a.dayOfWeek !== undefined) {
-        isToday = a.dayOfWeek === scheduleDayOfWeek;
-      } else if (a.scheduledDate) {
-        let d = a.scheduledDate;
-        if (typeof (d as any).toDate === 'function') d = (d as any).toDate();
-        else if (!(d instanceof Date)) d = new Date(d);
+      // Deduplicação leve para evitar exibir a mesma atividade quando há instâncias repetidas.
+      // Prioriza activityId; se não existir, tenta id do snapshot; por último, usa uma chave semântica.
+      const key =
+        activity.activityId ||
+        activity.activitySnapshot?.id ||
+        `${activity.activitySnapshot?.title}-${activity.dayOfWeek}-${activity.activitySnapshot?.type}`;
 
-        if (!isNaN(d.getTime())) {
-          isToday = toLocalDateKey(d) === todayKey;
-        }
-      }
-
-      if (!isToday) return false;
-
-      // Deduplicação (evita exibir a mesma atividade duas vezes caso existam instâncias repetidas)
-      const key = a.activityId || a.id;
       if (seen.has(key)) return false;
-      seen.add(key);
 
+      seen.add(key);
       return true;
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekActivities]);
 
   // Progresso semanal — alimenta o card "Progresso Semanal" no header
@@ -153,13 +135,13 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
   const weeklyRate = weeklyTotal > 0 ? Math.round((weeklyCompleted / weeklyTotal) * 100) : 0;
 
   // Progresso do dia — card diário
-  const totalTodayActivities = dedupedTodayActivities.length;
-  
-  const completedToday = dedupedTodayActivities.filter(
+  const totalTodayActivities = dashboardTodayActivities.length;
+
+  const completedToday = dashboardTodayActivities.filter(
     activity => activity.status === 'completed'
   ).length;
 
-  const pendingToday = dedupedTodayActivities.filter(
+  const pendingToday = dashboardTodayActivities.filter(
     activity =>
       activity.status === 'pending' ||
       activity.status === 'in_progress'
@@ -169,9 +151,8 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     totalTodayActivities > 0
       ? Math.round((completedToday / totalTodayActivities) * 100)
       : 0;
-  
-      // Gráfico de matérias: atividades concluídas da semana agrupadas por matéria
-  
+
+  // Gráfico de matérias: atividades concluídas da semana agrupadas por matéria
   const subjectStats = useMemo(() => computeSubjectStats(weekActivities || []), [weekActivities]);
 
   const getMotivationalMessage = () => {
@@ -182,6 +163,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
       "Hoje é um ótimo dia para aprender! 📚",
       "Seu progresso é inspirador! 🌟"
     ];
+
     return messages[Math.floor(Math.random() * messages.length)];
   };
 
@@ -234,7 +216,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
               </h1>
               <p className="text-indigo-100 text-sm md:text-base">{getMotivationalMessage()}</p>
             </div>
-            
+
             <div className="flex items-center gap-2 text-indigo-100 text-xs md:text-sm">
               <FaCalendarDay className="w-3 h-3 md:w-4 md:h-4" />
               <span className="font-medium">{formatDate(todaysDate)}</span>
@@ -291,7 +273,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                 </div>
               </div>
             </div>
-          </div> 
+          </div>
         </div>
       )}
 
@@ -348,12 +330,12 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
                     <div className="flex items-center gap-2 text-slate-500 text-sm">
                       <FaClock className="w-3 h-3 md:w-4 md:h-4" />
                       <span className="font-medium">
-                        {dedupedTodayActivities.reduce((total, a) => total + (a.activitySnapshot?.metadata?.estimatedDuration || 0), 0)} min total
+                        {dashboardTodayActivities.reduce((total, a) => total + (a.activitySnapshot?.metadata?.estimatedDuration || 0), 0)} min total
                       </span>
                     </div>
                   </div>
                   <div className="w-full h-2 md:h-3 bg-slate-200 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full transition-all duration-500"
                       style={{ width: `${completionRate}%` }}
                     />
@@ -362,7 +344,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
 
                 <div>
                   <TodayActivities
-                    activities={dedupedTodayActivities}
+                    activities={dashboardTodayActivities}
                     onActivityUpdate={refresh}
                   />
                 </div>
