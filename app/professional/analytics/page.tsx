@@ -29,13 +29,49 @@ import { PeriodSelector } from '@/components/analytics/common/PeriodSelector';
 import { StudentSelector } from '@/components/analytics/common/StudentSelector';
 import { getGradeLabel, getSchoolLabel } from '@/lib/utils/constants';
 
+/**
+ * Dashboard analítico do profissional.
+ *
+ * Responsabilidades:
+ * - Exibir métricas agregadas da turma
+ * - Mostrar rankings (engajamento, bem-estar)
+ * - Permitir navegação para relatórios individuais
+ * - Aplicar filtros (período, alunos, escola, série)
+ *
+ * Fonte principal:
+ * - useAnalytics (dados agregados do sistema)
+ *
+ * ⚠️ IMPORTANTE:
+ * Este componente NÃO usa dados brutos diretamente.
+ * Ele depende de dados já processados pelo AnalyticsService.
+ *
+ * ⚠️ Impacto:
+ * - visão macro do profissional
+ * - tomada de decisão estratégica
+ */
 export default function AnalyticsPage() {
   const router = useRouter();
 
-  // Estados para navegação - simplificado, apenas para controlar a view
+  /**
+   * Controle de navegação interna da página.
+   *
+   * Views:
+   * - dashboard → visão geral
+   * - student-list → seleção de alunos
+   */
   const [view, setView] = useState<'dashboard' | 'student-list'>('dashboard');
 
-  // Hooks
+  /**
+   * Hook principal de analytics.
+   *
+   * Fornece:
+   * - métricas agregadas
+   * - rankings de alunos
+   * - distribuição GAD-7
+   * - heatmap da turma
+   *
+   * ⚠️ Tudo aqui já vem processado do backend/serviço
+   */
   const {
     data: dashboardData,
     isLoading: dashboardLoading,
@@ -54,17 +90,37 @@ export default function AnalyticsPage() {
   const formatPercentage = (value: number) => `${Math.round(value)}%`;
   const formatNumber = (value: number) => value.toLocaleString('pt-BR');
 
-  // Handler para redirecionar para a página do aluno
+  /**
+   * Redireciona para o relatório individual do aluno.
+   *
+   * Fluxo:
+   * Dashboard → StudentAnalyticsPage
+   *
+   * ⚠️ Ponto de integração entre visão macro e micro
+   */
   const handleSelectStudent = (studentId: string) => {
     router.push(`/professional/analytics/student/${studentId}`);
   };
 
+  /**
+   * Filtros locais para ranking de alunos.
+   *
+   * Permite:
+   * - filtrar por escola
+   * - filtrar por série
+   *
+   * ⚠️ Atua apenas na UI (não refaz query)
+   */
   const [rankingFilters, setRankingFilters] = useState({
     school: 'all',
     grade: 'all'
   });
 
-  // Função para obter lista única de escolas dos alunos
+  /**
+   * Extrai lista única de escolas dos alunos.
+   *
+   * Usado para popular filtro de seleção.
+   */
   const getUniqueSchools = () => {
     if (!dashboardData?.studentRankings.byEngagement) return [];
     const schools = dashboardData.studentRankings.byEngagement
@@ -74,7 +130,11 @@ export default function AnalyticsPage() {
     return schools;
   };
 
-  // Função para obter lista única de séries dos alunos
+  /**
+   * Extrai lista única de séries dos alunos.
+   *
+   * Inclui ordenação numérica (1º, 2º, etc).
+   */
   const getUniqueGrades = () => {
     if (!dashboardData?.studentRankings.byEngagement) return [];
     const grades = dashboardData.studentRankings.byEngagement
@@ -89,7 +149,15 @@ export default function AnalyticsPage() {
     return grades;
   };
 
-  // Função para filtrar alunos (Ranking de Bem-Estar usa byWellness)
+  /**
+   * Filtra alunos com base nos filtros ativos.
+   *
+   * Fonte:
+   * - prioriza ranking de bem-estar (byWellness)
+   * - fallback: ranking por pontos
+   *
+   * ⚠️ Não faz nova query → apenas filtra em memória
+   */
   const getFilteredStudents = () => {
     const source = dashboardData?.studentRankings.byWellness ?? dashboardData?.studentRankings.byPoints ?? [];
     return source.filter(student => {
@@ -105,7 +173,11 @@ export default function AnalyticsPage() {
   const filteredStudents = getFilteredStudents();
   const topFilteredStudents = filteredStudents;
 
-  // Média GAD-7 dos alunos filtrados com score disponível
+  /**
+   * Calcula média GAD-7 dos alunos filtrados.
+   *
+   * ⚠️ Ignora alunos sem score
+   */
   const studentsWithGAD7 = filteredStudents.filter(s => s.gad7Score != null);
   const filteredAverage = studentsWithGAD7.length > 0
     ? (studentsWithGAD7.reduce((acc, s) => acc + (s.gad7Score ?? 0), 0) / studentsWithGAD7.length).toFixed(1)
@@ -120,7 +192,11 @@ export default function AnalyticsPage() {
     currentPage * itemsPerPage
   );
 
-  // Loading states
+  /**
+   * Estado de carregamento do dashboard.
+   *
+   * Bloqueia renderização até dados principais carregarem.
+   */
   if (dashboardLoading && !dashboardData) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] p-4">
@@ -137,7 +213,13 @@ export default function AnalyticsPage() {
     );
   }
 
-  // Error states
+  /**
+   * Estado de erro global do dashboard.
+   *
+   * Permite:
+   * - retry manual
+   * - recuperação de falha
+   */
   if (dashboardError) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center p-4">
@@ -162,6 +244,15 @@ export default function AnalyticsPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white">
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Header com Navegação */}
+
+        /**
+         * Header da página de analytics.
+         *
+         * Inclui:
+         * - navegação
+         * - título dinâmico
+         * - tabs
+         */
         <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
@@ -264,6 +355,18 @@ export default function AnalyticsPage() {
         {/* Conteúdo Principal */}
         <div className="mb-8">
           {/* DASHBOARD GERAL */}
+
+          /**
+           * Visão geral do desempenho da turma.
+           *
+           * Exibe:
+           * - métricas globais
+           * - rankings
+           * - distribuição GAD-7
+           * - heatmap semanal
+           *
+           * ⚠️ Representa o estado consolidado do sistema
+           */
           {view === 'dashboard' && dashboardData && (
             <div className="space-y-6">
               {/* Alertas e Insights
@@ -307,6 +410,16 @@ export default function AnalyticsPage() {
               )} */}
 
               {/* Cards de Métricas */}
+
+              /**
+               * Cards de métricas principais.
+               *
+               * Inclui:
+               * - total de alunos
+               * - taxa média de conclusão
+               * - streak médio
+               * - média GAD-7
+               */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
                   <div className="flex items-center justify-between mb-3">
@@ -395,6 +508,15 @@ export default function AnalyticsPage() {
                     </div>
 
                     <div className="divide-y divide-slate-100">
+
+                      /**
+                       * Ranking de alunos por engajamento.
+                       *
+                       * Base:
+                       * - taxa de conclusão
+                       *
+                       * ⚠️ Limita exibição para top 5
+                       */
                       {dashboardData.studentRankings.byEngagement.slice(0, 5).map((student, index) => (
                         <button
                           key={student.studentId}
@@ -433,6 +555,15 @@ export default function AnalyticsPage() {
                         <div>
                           <div className="flex justify-between text-sm mb-1">
                             <span className="text-slate-600">Mínimo</span>
+                            /**
+                             * Distribuição da saúde mental da turma.
+                             *
+                             * Categorias:
+                             * - minimal
+                             * - mild
+                             * - moderate
+                             * - severe
+                             */
                             <span className="font-medium text-slate-700">{metrics.gad7Distribution.minimal.toFixed(1)}%</span>
                           </div>
                           <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -567,6 +698,15 @@ export default function AnalyticsPage() {
                   </div>
 
                   {/* Heatmap Simplificado */}
+
+                  /**
+                   * Heatmap de desempenho por dia da semana.
+                   *
+                   * Mostra:
+                   * - média de conclusão por dia
+                   *
+                   * ⚠️ Baseado em dados agregados
+                   */
                   {dashboardData.classHeatmap && Object.keys(dashboardData.classHeatmap).length > 0 && (
                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                       <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
@@ -615,6 +755,16 @@ export default function AnalyticsPage() {
                   )}
 
                   {/* RANKING DE PONTUAÇÃO COM FILTROS */}
+
+                  /**
+                   * Ranking baseado em bem-estar (GAD-7).
+                   *
+                   * Ordena alunos considerando:
+                   * - saúde mental
+                   * - engajamento
+                   *
+                   * ⚠️ Pode ser usado para identificar alunos em risco
+                   */
                   <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mt-6">
                     {/* Header - Adaptado para mobile */}
                     <div className="flex flex-col gap-3 mb-4">
@@ -841,6 +991,13 @@ export default function AnalyticsPage() {
           )}
 
           {/* LISTA DE ALUNOS PARA RELATÓRIOS INDIVIDUAIS */}
+
+          /**
+           * Lista de alunos para seleção manual.
+           *
+           * Permite:
+           * - acesso direto ao relatório individual
+           */
           {view === 'student-list' && dashboardData && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
               <div className="flex items-center gap-3 mb-6">

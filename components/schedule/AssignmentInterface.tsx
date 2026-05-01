@@ -24,7 +24,25 @@ interface AssignmentInterfaceProps {
   onSuccess?: () => void;
   onCancel?: () => void;
 }
-
+/**
+ * Interface responsável por atribuir um cronograma a múltiplos alunos.
+ *
+ * Responsabilidades:
+ * - Carregar cronograma e lista de alunos
+ * - Filtrar alunos por busca, série e escola
+ * - Controlar seleção de alunos
+ * - Executar atribuição em lote
+ *
+ * ⚠️ IMPORTANTE:
+ * Este componente é a ponte entre:
+ * - UI (seleção do profissional)
+ * - backend (criação de scheduleInstances)
+ *
+ * Qualquer erro aqui impacta diretamente:
+ * - atribuição de cronogramas
+ * - experiência do profissional
+ * - consistência dos dados do aluno
+ */
 export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }: AssignmentInterfaceProps) {
   const { schedule, assigning, loadScheduleData, loadStudents, assignSchedule, students, userRole } = useScheduleAssignment();
   const { user } = useAuth();
@@ -40,7 +58,16 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
   const [grades, setGrades] = useState<string[]>(['all']);
   const [schools, setSchools] = useState<string[]>(['all']);
 
-  // 🔥 LÓGICA AUTOMÁTICA: O estado de atribuição espelha o cronograma pai sem inputs extras
+  /**
+   * Estado base da atribuição.
+   *
+   * Estratégia:
+   * - Datas são herdadas automaticamente do cronograma
+   * - Permite múltiplas atribuições por padrão
+   *
+   * ⚠️ Importante:
+   * Este objeto será enviado diretamente para o backend.
+   */
   const [assignmentData, setAssignmentData] = useState<AssignScheduleDTO>({
     studentIds: [],
     startDate: new Date(),
@@ -49,7 +76,17 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     customizations: {}
   });
 
-  // 🤖 AUTO-SYNC: Sincroniza as datas silenciosamente quando o cronograma carrega
+  /**
+   * Sincroniza automaticamente as datas da atribuição com o cronograma carregado.
+   *
+   * Motivo:
+   * - Evita inconsistência entre cronograma e instância atribuída
+   * - Remove necessidade de input manual do usuário
+   *
+   * ⚠️ Risco:
+   * - Sempre sobrescreve datas locais ao carregar o cronograma
+   * - Alterações manuais (se existirem no futuro) seriam perdidas
+   */
   useEffect(() => {
     if (schedule) {
       console.group('📅 [AUTO-SYNC ATRIBUIÇÃO]');
@@ -67,6 +104,19 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
   }, [schedule]);
 
   useEffect(() => {
+
+    /**
+     * Inicializa o componente carregando:
+     * - dados do cronograma
+     * - lista de alunos
+     *
+     * Ordem importante:
+     * - primeiro cronograma (para validar instâncias ativas)
+     * - depois alunos (dependem do cronograma)
+     *
+     * ⚠️ Risco:
+     * - Se falhar, bloqueia toda a interface
+     */
     const init = async () => {
       try {
         setLoading(true);
@@ -92,6 +142,18 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     }
   }, [students]);
 
+  /**
+   * Aplica filtros e adiciona estado derivado aos alunos.
+   *
+   * Campos derivados:
+   * - hasActiveInstance → já possui cronograma ativo
+   * - canReceiveSchedule → pode receber novo cronograma
+   * - isAssignedToMe → controle de permissão do profissional
+   *
+   * ⚠️ Regra de negócio:
+   * - Profissionais só podem atribuir alunos sob sua responsabilidade
+   * - Coordenadores podem atribuir qualquer aluno
+   */
   const filteredStudents = useMemo((): StudentWithStatus[] => {
     const withStatus: StudentWithStatus[] = students.map(student => ({
       ...student,
@@ -122,6 +184,16 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     );
   };
 
+  /**
+   * Seleciona automaticamente todos os alunos elegíveis.
+   *
+   * Critérios:
+   * - não possuem instância ativa
+   * - pertencem ao profissional (ou usuário é coordenador)
+   *
+   * ⚠️ Impacto:
+   * - Pode selecionar muitos alunos de uma vez
+   */
   const handleSelectAllAvailable = () => {
     const available = filteredStudents
       .filter(s => s.canReceiveSchedule && (isCoordinator || s.isAssignedToMe))
@@ -131,6 +203,24 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
 
   const handleDeselectAll = () => setSelectedStudents([]);
 
+  /**
+   * Executa a atribuição do cronograma.
+   *
+   * Fluxo:
+   * 1. Valida seleção
+   * 2. Monta payload final
+   * 3. Envia para backend
+   * 4. Trata sucesso parcial ou total
+   *
+   * ⚠️ POSSÍVEL CENÁRIO:
+   * - Parte dos alunos pode falhar
+   * - Parte pode ter sucesso
+   *
+   * Isso gera o estado de `partialResult`
+   *
+   * ⚠️ Side effects:
+   * - criação de múltiplas scheduleInstances
+   */
   const handleSubmit = async () => {
     if (selectedStudents.length === 0) {
       setError('Selecione pelo menos um aluno');
@@ -388,6 +478,15 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
                   >
                     <div className="absolute top-4 right-4 z-10">
                       <input
+                      
+                      /**
+                       * Validação de permissão no nível da UI.
+                       *
+                       * ⚠️ IMPORTANTE:
+                       * Isso NÃO substitui validação no backend.
+                       *
+                       * Apenas evita interação indevida na interface.
+                       */
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => {
@@ -414,6 +513,13 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
                       <div className="flex-1 min-w-0 pr-8">
                         <div className="flex items-center gap-2 mb-1">
                           <h4 className="font-bold text-gray-900 truncate">{student.name}</h4>
+                          
+                          /**
+                           * Indica que o aluno já possui um cronograma ativo.
+                           *
+                           * ⚠️ Regra:
+                           * - pode impedir nova atribuição dependendo da lógica do backend
+                           */
                           {student.hasActiveInstance && (
                             <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 text-xs font-medium rounded-full flex-shrink-0">
                               <FaExclamationTriangle className="w-3 h-3" />
@@ -443,7 +549,15 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
                         </div>
                       </div>
                     </div>
-
+                    /**
+                     * Regra de permissão:
+                     *
+                     * - Coordenador → acesso total
+                     * - Profissional → apenas alunos atribuídos
+                     *
+                     * ⚠️ Segurança:
+                     * Deve ser validado também no backend
+                     */
                     {!isCoordinator && !student.isAssignedToMe && (
                       <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                         <p className="text-xs text-amber-800 flex items-start gap-2">
@@ -495,7 +609,18 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
           </button>
         </div>
       </div>
-
+      
+      /**
+       * Exibe resultado parcial da operação.
+       *
+       * Cenário:
+       * - Alguns alunos foram atribuídos com sucesso
+       * - Outros falharam
+       *
+       * ⚠️ Importante:
+       * - Não bloqueia o sucesso total
+       * - Mantém feedback granular para o usuário
+       */
       {partialResult && partialResult.failed.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2">
           <div className="flex items-center gap-2 text-amber-800 font-bold">

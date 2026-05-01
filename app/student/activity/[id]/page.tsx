@@ -23,6 +23,27 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 
+/**
+ * Página de execução de atividade do aluno.
+ *
+ * Responsabilidades:
+ * - Carregar o progresso da atividade (activityProgress)
+ * - Iniciar automaticamente atividades pendentes
+ * - Integrar com o sistema de timer global (ActivityTimer)
+ * - Permitir conclusão manual da atividade
+ * - Sincronizar estado com o backend (ProgressService)
+ *
+ * ⚠️ IMPORTANTE:
+ * Este componente é o ponto central da execução real da atividade.
+ *
+ * Impacta diretamente:
+ * - pontuação do aluno
+ * - tempo registrado
+ * - progresso semanal
+ * - analytics
+ *
+ * ⚠️ Qualquer bug aqui afeta o core do produto.
+ */
 export default function ActivityPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -36,7 +57,16 @@ export default function ActivityPage() {
   const { active, startTimer, stopTimer } = useActivityTimer();
   const [completedByTimer, setCompletedByTimer] = useState(false);
 
-  // Detectar dispositivo
+  /**
+   * Detecta se o dispositivo é mobile para adaptar layout.
+   *
+   * Estratégia:
+   * - usa window.innerWidth
+   * - atualiza dinamicamente no resize
+   *
+   * ⚠️ Risco:
+   * - depende do ambiente cliente (não SSR-safe)
+   */
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -44,6 +74,21 @@ export default function ActivityPage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  /**
+   * Carrega o progresso da atividade e inicia automaticamente quando necessário.
+   *
+   * Fluxo:
+   * 1. Busca activityProgress do backend
+   * 2. Se status = 'pending' → inicia automaticamente
+   * 3. Se status = 'in_progress' → garante que o timer esteja ativo
+   *
+   * ⚠️ Decisão de UX:
+   * O usuário NÃO precisa clicar em "iniciar"
+   *
+   * ⚠️ Risco:
+   * - Pode gerar double-start se backend não for idempotente
+   * - Timer pode iniciar fora de sincronia com o backend
+   */
   useEffect(() => {
     if (!user || !id) return;
 
@@ -59,6 +104,9 @@ export default function ActivityPage() {
         
         setActivityProgress(progress);
         
+        /** 
+         * Auto-start da atividade ao abrir (UX otimizada)
+         */
         if (progress.status === 'pending') {
           try {
             await ProgressService.startActivity(id as string, user.id);
@@ -68,6 +116,18 @@ export default function ActivityPage() {
               executionData: { ...progress.executionData, startedAt: new Date() }
             };
             setActivityProgress(updated);
+
+            /**
+             * Inicializa o timer global da atividade.
+             *
+             * Motivo:
+             * - rastrear tempo real da execução
+             * - permitir conclusão automática via FloatingTimer
+             *
+             * ⚠️ Risco:
+             * - usa Date local → pode divergir do backend
+             * - pode haver desalinhamento se startActivity falhar parcialmente
+             */
             startTimer({
               progressId: updated.id,
               activityId: updated.activityId,
@@ -101,7 +161,18 @@ export default function ActivityPage() {
     loadActivity();
   }, [id, user]);
 
-  // Detecta quando o FloatingTimer concluiu a atividade externamente
+  /**
+   * Detecta conclusão automática via FloatingTimer.
+   *
+   * Cenário:
+   * - Timer global finaliza atividade
+   * - UI precisa refletir isso sem reload
+   *
+   * ⚠️ Importante:
+   * Isso evita inconsistência entre:
+   * - estado visual
+   * - estado real da atividade
+   */
   useEffect(() => {
     if (!active && activityProgress?.status === 'in_progress' && !loading) {
       setCompletedByTimer(true);
@@ -109,11 +180,41 @@ export default function ActivityPage() {
     }
   }, [active]);
 
+  /**
+   * Callback disparado após conclusão da atividade.
+   *
+   * Ações:
+   * - para o timer
+   * - redireciona para dashboard
+   *
+   * ⚠️ UX:
+   * Delay de 1.5s permite feedback visual antes do redirect
+   */
   const handleActivityCompletion = (result: any) => {
     stopTimer();
     setTimeout(() => router.push('/student/dashboard'), 1500);
   };
 
+  /**
+   * Permite conclusão manual da atividade.
+   *
+   * Fluxo:
+   * 1. Verifica se já foi concluída (timer ou estado)
+   * 2. Calcula tempo gasto
+   * 3. Chama ProgressService.completeActivity
+   * 4. Atualiza estado local
+   * 5. Redireciona
+   *
+   * ⚠️ IMPORTANTE:
+   * Esse método é o ponto mais crítico de integração com o backend.
+   *
+   * ⚠️ Riscos:
+   * - pode haver corrida com FloatingTimer
+   * - pode ocorrer double-complete
+   *
+   * ⚠️ Tratamento:
+   * erro "não está em progresso" → tratado como sucesso
+   */
   const handleManualComplete = async () => {
     if (!activityProgress || !user) return;
     // Já foi concluída pelo FloatingTimer
@@ -123,6 +224,14 @@ export default function ActivityPage() {
     }
     try {
       await ProgressService.completeActivity(activityProgress.id, user.id, {
+        
+        /**
+         * Calcula tempo gasto em minutos com base no timer ativo.
+         *
+         * ⚠️ Risco:
+         * - depende do clock do cliente
+         * - pode divergir do backend
+         */
         timeSpent: active ? Math.ceil((Date.now() - active.startedAt.getTime()) / 60000) : 0
       });
       stopTimer();
@@ -140,6 +249,13 @@ export default function ActivityPage() {
     }
   };
 
+  /**
+   * Recarrega estado da atividade após mudanças internas.
+   *
+   * Uso:
+   * - garantir sincronização com backend
+   * - evitar estado stale na UI
+   */
   const handleActivityStatusChange = () => {
     if (user && id) {
       ProgressService.getActivityProgress(id as string, user.id)
@@ -148,7 +264,17 @@ export default function ActivityPage() {
     }
   };
 
-  // Estados de carregamento com design melhorado
+  /**
+   * Tela de carregamento da atividade.
+   *
+   * Objetivo:
+   * - Evitar tela em branco durante fetch inicial
+   * - Melhorar percepção de performance com animação
+   * - Indicar claramente ao usuário que a atividade está sendo preparada
+   *
+   * ⚠️ Importante:
+   * Esse estado bloqueia toda a renderização até os dados estarem prontos
+   */
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex items-center justify-center p-4">
@@ -204,7 +330,21 @@ export default function ActivityPage() {
     );
   }
 
-  // Tela de erro redesenhada
+  /**
+   * Tela de erro com fallback de navegação.
+   *
+   * Cenário:
+   * - Falha ao carregar activityProgress
+   * - Atividade inexistente ou inválida
+   *
+   * Ações disponíveis:
+   * - Voltar para página anterior
+   * - Ir para dashboard
+   *
+   * ⚠️ Importante:
+   * Evita dead-end na navegação do usuário
+   * e garante recuperação mesmo em erro crítico
+   */
   if (error || !activityProgress) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex items-center justify-center p-4">
@@ -274,6 +414,23 @@ export default function ActivityPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-indigo-50/30">
       {/* Floating Header - Mobile & Desktop */}
+
+      /**
+       * Header dinâmico da atividade.
+       *
+       * Exibe:
+       * - título da atividade
+       * - status atual (pending, in_progress, completed, skipped)
+       * - nível de dificuldade
+       *
+       * ⚠️ Importante:
+       * O status exibido é derivado de `activityProgress.status`,
+       * que representa o estado real persistido no backend.
+       *
+       * ⚠️ Impacto:
+       * - guia o usuário visualmente durante a execução
+       * - evita confusão sobre o estado atual da atividade
+       */
       <motion.header 
         initial={{ y: -100 }}
         animate={{ y: 0 }}
@@ -429,6 +586,24 @@ export default function ActivityPage() {
                          activityProgress.status === 'in_progress' ? '50%' : '0%'}
                       </span>
                     </div>
+
+                    /**
+                     * Barra de progresso visual da atividade.
+                     *
+                     * Lógica simplificada:
+                     * - pending → 0%
+                     * - in_progress → 50%
+                     * - completed → 100%
+                     *
+                     * ⚠️ Importante:
+                     * Este progresso NÃO é granular.
+                     * Ele representa apenas o estado geral da atividade,
+                     * não o avanço real dentro dela.
+                     *
+                     * ⚠️ Impacto:
+                     * - serve como feedback visual rápido
+                     * - evita complexidade desnecessária na UI
+                     */
                     <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                       <motion.div 
                         className={`h-full rounded-full ${
@@ -503,6 +678,20 @@ export default function ActivityPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
             >
+
+              /**
+               * Componente responsável pela execução da atividade em si.
+               *
+               * Recebe:
+               * - progress → estado atual
+               * - onStatusChange → callback de sincronização
+               * - onCompletion → callback final
+               *
+               * ⚠️ Este componente encapsula:
+               * - lógica de interação
+               * - envio de dados
+               * - fluxo interno da atividade
+               */
               <ActivityExecutor
                 progress={activityProgress}
                 onStatusChange={handleActivityStatusChange}

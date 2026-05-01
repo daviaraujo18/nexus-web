@@ -42,6 +42,29 @@ import { getGradeLabel, getSchoolLabel } from '@/lib/utils/constants';
 import { collectionGroup, query, where, getDocs } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 
+/**
+ * Página de analytics individual do aluno.
+ *
+ * Responsabilidades:
+ * - Consolidar dados de múltiplas fontes (Firestore + hooks)
+ * - Exibir métricas de desempenho, engajamento e saúde mental
+ * - Permitir navegação entre abas (overview, history, gad7, insights)
+ *
+ * Fontes de dados:
+ * - useStudentAnalytics (dados agregados)
+ * - activityProgress (dados reais de execução)
+ * - scheduleInstances (adesão ao cronograma)
+ *
+ * ⚠️ IMPORTANTE:
+ * Este componente mistura:
+ * - dados calculados (hook)
+ * - dados brutos (Firestore)
+ *
+ * ⚠️ Impacto:
+ * - decisões do profissional
+ * - leitura de desempenho do aluno
+ * - identificação de risco
+ */
 export default function StudentAnalyticsPage() {
   const params = useParams();
   const router = useRouter();
@@ -67,15 +90,37 @@ export default function StudentAnalyticsPage() {
     isAtRisk
   } = useStudentAnalytics(studentId);
 
-  // ============================================
-  // 🔥 BUSCA REAL: MAPEANDO O DOCUMENTO activityProgress
-  // ============================================
+  /**
+   * Busca dados reais diretamente do Firestore para complementar analytics.
+   *
+   * O que busca:
+   * 1. Adesão → scheduleInstances.progressCache
+   * 2. Atividades concluídas → activityProgress
+   *
+   * Motivo:
+   * - snapshots podem estar desatualizados
+   * - dados reais garantem precisão
+   *
+   * ⚠️ Risco:
+   * - múltiplas queries pesadas (collectionGroup)
+   * - pode impactar performance
+   */
   useEffect(() => {
     const fetchNexusData = async () => {
       if (!studentId) return;
       setIsFetching(true);
       try {
-        // 1. Busca Adesão real no scheduleInstances conforme o seu txt
+        
+        /**
+         * Busca instâncias de cronograma do aluno.
+         *
+         * Estratégia:
+         * - usa collectionGroup → busca global
+         * - pega maior completionPercentage como adesão real
+         *
+         * ⚠️ Risco:
+         * - múltiplas instâncias podem distorcer resultado
+         */
         const qInstances = query(
           collectionGroup(firestore, 'scheduleInstances'),
           where('studentId', '==', studentId)
@@ -86,7 +131,18 @@ export default function StudentAnalyticsPage() {
           setDbAdherence(Math.max(...percentages)); 
         }
 
-        // 2. Busca atividades concluídas em múltiplas coleções de progresso para calcular Tempo Total 
+        /**
+         * Busca atividades concluídas para reconstruir dados reais.
+         *
+         * Campos extraídos:
+         * - título
+         * - tipo
+         * - duração estimada
+         * - anexos
+         *
+         * ⚠️ Importante:
+         * duração = estimatedDuration (não tempo real)
+         */
         const activityCollections = ['activityProgress'];
         let allDocs: any[] = [];
 
@@ -97,6 +153,14 @@ export default function StudentAnalyticsPage() {
             where('status', '==', 'completed')
           );
           const snap = await getDocs(q);
+
+          /**
+           * Normaliza estrutura de diferentes formatos de atividade.
+           *
+           * Motivo:
+           * - compatibilidade com versões antigas
+           * - evitar quebra na UI
+           */
           snap.forEach(doc => {
             const d = doc.data();
             const snapshot = d.activitySnapshot || {};
@@ -135,11 +199,22 @@ export default function StudentAnalyticsPage() {
     }
   }, [studentId, loadStudentData]);
 
-  // 🔥 CÁLCULO DE TEMPO REAL (Soma dos minutos das atividades da planilha)
+  /**
+   * Soma total do tempo estimado das atividades concluídas.
+   *
+   * ⚠️ IMPORTANTE:
+   * Não representa tempo real do aluno.
+   * Baseado em metadata.estimatedDuration.
+   */
   const totalRealTime = useMemo(() => {
     return completedActivities.reduce((acc, act) => acc + (act.duration || 0), 0);
   }, [completedActivities]);
 
+  /**
+   * Calcula média de tempo por atividade.
+   *
+   * ⚠️ Depende da qualidade do estimatedDuration
+   */
   const avgTimePerActivity = useMemo(() => {
     return completedActivities.length > 0 ? Math.round(totalRealTime / completedActivities.length) : 0;
   }, [completedActivities, totalRealTime]);
@@ -152,7 +227,17 @@ export default function StudentAnalyticsPage() {
     );
   };
 
-  // 🔥 FORMATAÇÃO DE DATA BLINDADA (PREVINE ERRO .toLocaleDateString)
+  /**
+   * Normaliza datas vindas do Firestore.
+   *
+   * Suporta:
+   * - Timestamp (Firestore)
+   * - Date
+   * - string
+   *
+   * ⚠️ Evita erro comum:
+   * date.toLocaleDateString is not a function
+   */
   const formatDate = (date: any) => {
     if (!date) return '—';
     let d: Date;
@@ -219,6 +304,11 @@ export default function StudentAnalyticsPage() {
     return severity ? labels[severity as keyof typeof labels] : '—';
   };
 
+  /**
+   * Estado de carregamento inicial.
+   *
+   * Bloqueia renderização até dados essenciais carregarem.
+   */
   if (loading && !student) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white flex items-center justify-center p-4">
@@ -234,6 +324,13 @@ export default function StudentAnalyticsPage() {
     );
   }
 
+  /**
+   * Estado de erro com fallback.
+   *
+   * Permite:
+   * - retry
+   * - navegação de volta
+   */
   if (error || !student) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white flex items-center justify-center p-4">
@@ -294,6 +391,18 @@ export default function StudentAnalyticsPage() {
           </div>
 
           {/* Banner do Aluno */}
+
+          /**
+           * Banner principal do aluno.
+           *
+           * Exibe:
+           * - nome
+           * - escola
+           * - série
+           * - status de risco
+           *
+           * ⚠️ isAtRisk impacta visual diretamente
+           */
           <div className={`relative overflow-hidden rounded-2xl ${isAtRisk
               ? 'bg-gradient-to-r from-amber-600 to-orange-600'
               : 'bg-gradient-to-r from-indigo-600 to-purple-600'
@@ -354,6 +463,16 @@ export default function StudentAnalyticsPage() {
         </div>
 
         {/* Tabs de Navegação */}
+
+        /**
+         * Controle de navegação entre abas.
+         *
+         * Tabs:
+         * - overview
+         * - history
+         * - gad7
+         * - insights
+         */
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-1.5 mb-6">
           <div className="flex flex-wrap">
             <button
@@ -415,6 +534,18 @@ export default function StudentAnalyticsPage() {
         </div>
 
         {/* TAB: VISÃO GERAL */}
+
+        /**
+         * Visão geral do desempenho do aluno.
+         *
+         * Dados:
+         * - completionRate
+         * - streak
+         * - pontos
+         * - GAD-7
+         *
+         * ⚠️ Mistura dados reais e agregados
+         */
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Cards de Métricas */}
@@ -704,6 +835,16 @@ export default function StudentAnalyticsPage() {
         )}
 
         {/* TAB: HISTÓRICO DETALHADO */}
+
+        /**
+         * Histórico detalhado por semana.
+         *
+         * Mostra:
+         * - completionRate
+         * - pontos
+         * - GAD-7
+         * - breakdown diário
+         */
         {activeTab === 'history' && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -834,6 +975,15 @@ export default function StudentAnalyticsPage() {
         )}
 
         {/* TAB: SAÚDE MENTAL (GAD-7) */}
+
+        /**
+         * Visualização de saúde mental (GAD-7).
+         *
+         * Mostra:
+         * - histórico de avaliações
+         * - tendência
+         * - severidade
+         */
         {activeTab === 'gad7' && (
           <div className="space-y-6">
             {/* Cards de resumo GAD-7 */}
@@ -971,6 +1121,18 @@ export default function StudentAnalyticsPage() {
         )}
 
         {/* TAB: DADOS DO ALUNO */}
+
+        /**
+         * Lista de atividades concluídas com dados reais.
+         *
+         * Origem:
+         * - activityProgress
+         *
+         * Inclui:
+         * - anexos
+         * - descrição
+         * - metadata (subject, grade)
+         */
         {activeTab === 'insights' && (
           <div className="space-y-4">
             {/* Header com contador */}
