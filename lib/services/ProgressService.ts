@@ -34,45 +34,42 @@ interface CompletionData {
   attachments?: string[];
 }
 
-/**
- * Serviço central responsável por gerenciar o ciclo de vida do progresso das atividades do aluno.
- *
- * Responsabilidades:
- * - Controlar estados da atividade (pending → in_progress → completed / skipped)
- * - Persistir execução (executionData)
- * - Calcular pontuação e tempo gasto
- * - Atualizar métricas derivadas (snapshot semanal, stats do aluno, cache de instância)
- *
- * ⚠️ IMPORTANTE:
- * Este serviço escreve em múltiplas coleções (activityProgress, students, weeklySnapshots),
- * portanto qualquer alteração aqui impacta:
- * - dashboards
- * - analytics
- * - ranking de bem-estar
- * - progressão do aluno
- */
+
+// * Serviço central responsável por gerenciar o ciclo de vida do progresso das atividades do aluno.
+// *
+// * Responsabilidades:
+// * - Controlar estados da atividade (pending → in_progress → completed / skipped)
+// * - Persistir execução (executionData)
+// * - Calcular pontuação e tempo gasto
+// * - Atualizar métricas derivadas (snapshot semanal, stats do aluno, cache de instância)
+// *
+// * ⚠️ IMPORTANTE:
+// * Este serviço escreve em múltiplas coleções (activityProgress, students, weeklySnapshots),
+// * portanto qualquer alteração aqui impacta:
+// * - dashboards
+// * - analytics
+// * - ranking de bem-estar
+// * - progressão do aluno
 export class ProgressService {
   private static readonly COLLECTIONS = {
     PROGRESS: 'activityProgress',
     STUDENTS: 'students'
   };
 
-  /**
-   * Inicia uma atividade marcando como "in_progress".
-   *
-   * Fluxo:
-   * 1. Busca o progresso atual
-   * 2. Valida que ainda está "pending"
-   * 3. Atualiza Firestore
-   * 4. Retorna versão atualizada (otimista)
-   *
-   * Regra de negócio:
-   * - Uma atividade NÃO pode ser iniciada duas vezes
-   *
-   * ⚠️ Risco:
-   * - Não usa transação → se duas chamadas simultâneas ocorrerem,
-   * pode haver corrida de estado (race condition leve)
-   */
+  // * Inicia uma atividade marcando como "in_progress".
+  // *
+  // * Fluxo:
+  // * 1. Busca o progresso atual
+  // * 2. Valida que ainda está "pending"
+  // * 3. Atualiza Firestore
+  // * 4. Retorna versão atualizada (otimista)
+  // *
+  // * Regra de negócio:
+  // * - Uma atividade NÃO pode ser iniciada duas vezes
+  // *
+  // * ⚠️ Risco:
+  // * - Não usa transação → se duas chamadas simultâneas ocorrerem,
+  // * pode haver corrida de estado (race condition leve)
   static async startActivity(
     progressId: string,
     studentId: string
@@ -120,30 +117,28 @@ export class ProgressService {
     }
   }
 
-  /**
-   * Conclui uma atividade e dispara toda a cascata de efeitos do sistema.
-   *
-   * Ordem de execução:
-   * 1. Valida status atual
-   * 2. Calcula pontuação
-   * 3. Calcula tempo gasto
-   * 4. Atualiza documento principal (activityProgress)
-   * 5. Atualiza snapshot semanal
-   * 6. Atualiza cache da instância
-   * 7. Atualiza estatísticas do aluno
-   *
-   * Side effects:
-   * - Escrita em múltiplas coleções
-   * - Atualização indireta de dashboards e analytics
-   *
-   * ⚠️ DECISÃO IMPORTANTE:
-   * A escrita principal (updateDoc do progress) acontece ANTES dos efeitos secundários.
-   * Isso garante que a atividade nunca fique "não concluída" por falha em sistemas auxiliares.
-   *
-   * ⚠️ Risco:
-   * - Falhas em snapshot/cache/stats não são rollbackadas
-   * - Pode haver inconsistência temporária entre coleções
-   */
+  // * Conclui uma atividade e dispara toda a cascata de efeitos do sistema.
+  // *
+  // * Ordem de execução:
+  // * 1. Valida status atual
+  // * 2. Calcula pontuação
+  // * 3. Calcula tempo gasto
+  // * 4. Atualiza documento principal (activityProgress)
+  // * 5. Atualiza snapshot semanal
+  // * 6. Atualiza cache da instância
+  // * 7. Atualiza estatísticas do aluno
+  // *
+  // * Side effects:
+  // * - Escrita em múltiplas coleções
+  // * - Atualização indireta de dashboards e analytics
+  // *
+  // * ⚠️ DECISÃO IMPORTANTE:
+  // * A escrita principal (updateDoc do progress) acontece ANTES dos efeitos secundários.
+  // * Isso garante que a atividade nunca fique "não concluída" por falha em sistemas auxiliares.
+  // *
+  // * ⚠️ Risco:
+  // * - Falhas em snapshot/cache/stats não são rollbackadas
+  // * - Pode haver inconsistência temporária entre coleções
   static async completeActivity(
     progressId: string,
     studentId: string,
@@ -168,17 +163,15 @@ export class ProgressService {
 
       console.log('📊 Pontuação calculada:', scoring);
 
-      /**
-       * Determina o tempo gasto na atividade.
-       *
-       * Prioridade:
-       * 1. Usa valor enviado pelo front (mais confiável)
-       * 2. Se não existir, calcula com base em startedAt
-       * 3. Se falhar, usa fallback (30 minutos)
-       *
-       * ⚠️ Risco:
-       * - Diferença baseada no clock do cliente → pode gerar inconsistência leve
-       */
+      // * Determina o tempo gasto na atividade.
+      // *
+      // * Prioridade:
+      // * 1. Usa valor enviado pelo front (mais confiável)
+      // * 2. Se não existir, calcula com base em startedAt
+      // * 3. Se falhar, usa fallback (30 minutos)
+      // *
+      // * ⚠️ Risco:
+      // * - Diferença baseada no clock do cliente → pode gerar inconsistência leve
       let timeSpentValue = completionData.timeSpent;
 
       // Se não veio no completionData, calcular
@@ -215,17 +208,15 @@ export class ProgressService {
         ...completionData
       };
 
-      /**
-       * Limpeza defensiva do executionData antes de persistir.
-       *
-       * Motivo:
-       * Firestore NÃO aceita Promise como valor.
-       *
-       * ⚠️ Risco:
-       * - Se não fizer isso, o updateDoc pode falhar silenciosamente
-       * - Pode quebrar o fluxo de submissão da atividade
-       * - Pode gerar dados inconsistentes no banco
-       */
+      // * Limpeza defensiva do executionData antes de persistir.
+      // *
+      // * Motivo:
+      // * Firestore NÃO aceita Promise como valor.
+      // *
+      // * ⚠️ Risco:
+      // * - Se não fizer isso, o updateDoc pode falhar silenciosamente
+      // * - Pode quebrar o fluxo de submissão da atividade
+      // * - Pode gerar dados inconsistentes no banco
       Object.keys(executionDataUpdate).forEach(key => {
         if (executionDataUpdate[key] instanceof Promise) {
           console.warn('⚠️ Removendo Promise do executionData:', key);
@@ -384,25 +375,23 @@ export class ProgressService {
     }
   }
 
-  /**
-   * Calcula a pontuação da atividade.
-   *
-   * Estrutura atual:
-   * - Pontos base fixos
-   * - Bônus por tempo
-   * - Bônus emocional
-   *
-   * ⚠️ IMPORTANTE:
-   * Hoje é uma lógica simplificada.
-   * Em produção ideal:
-   * - deve vir do activitySnapshot
-   * - deve ser configurável por tipo de atividade
-   *
-   * Impacto:
-   * - afeta nível do aluno
-   * - afeta ranking
-   * - afeta analytics
-   */
+  // * Calcula a pontuação da atividade.
+  // *
+  // * Estrutura atual:
+  // * - Pontos base fixos
+  // * - Bônus por tempo
+  // * - Bônus emocional
+  // *
+  // * ⚠️ IMPORTANTE:
+  // * Hoje é uma lógica simplificada.
+  // * Em produção ideal:
+  // * - deve vir do activitySnapshot
+  // * - deve ser configurável por tipo de atividade
+  // *
+  // * Impacto:
+  // * - afeta nível do aluno
+  // * - afeta ranking
+  // * - afeta analytics
   private static async calculateScoring(
     progressId: string,
     completionData: CompletionData
@@ -486,25 +475,24 @@ export class ProgressService {
       return 0;
     }
   }
-  /**
-   * Atualiza métricas permanentes do aluno.
-   *
-   * Atualiza:
-   * - totalPoints (incremental)
-   * - level (derivado)
-   * - streak (condicional)
-   * - lastActivityAt
-   *
-   * Regra de streak:
-   * - Só incrementa se ainda não houve atividade hoje
-   *
-   * ⚠️ Risco técnico:
-   * - level é calculado fora de transação
-   * - em caso de concorrência, pode ficar inconsistente momentaneamente
-   *
-   * Melhor abordagem futura:
-   * - usar transaction()
-   */
+
+  // * Atualiza métricas permanentes do aluno.
+  // *
+  // * Atualiza:
+  // * - totalPoints (incremental)
+  // * - level (derivado)
+  // * - streak (condicional)
+  // * - lastActivityAt
+  // *
+  // * Regra de streak:
+  // * - Só incrementa se ainda não houve atividade hoje
+  // *
+  // * ⚠️ Risco técnico:
+  // * - level é calculado fora de transação
+  // * - em caso de concorrência, pode ficar inconsistente momentaneamente
+  // *
+  // * Melhor abordagem futura:
+  // * - usar transaction()
   private static async updateStudentStats(
     studentId: string,
     points: number
@@ -636,23 +624,20 @@ export class ProgressService {
     }
   }
 
-  /**
-   * Busca e normaliza dados de progresso.
-   *
-   * Responsabilidade:
-   * - converter Timestamp → Date
-   * - padronizar estrutura para o front
-   *
-   * ⚠️ CRÍTICO:
-   * A validação de acesso está comentada:
-   *
-   * if (data.studentId !== studentId)
-   *
-   * Isso significa:
-   * - qualquer chamada pode acessar qualquer atividade
-   *
-   * 👉 Isso é um risco de segurança se não for tratado em outro nível
-   */
+  // * Busca e normaliza dados de progresso.
+  // *
+  // * Responsabilidade:
+  // * - converter Timestamp → Date
+  // * - padronizar estrutura para o front
+  // *
+  // * ⚠️ CRÍTICO:
+  // * A validação de acesso está comentada:
+  // * if (data.studentId !== studentId)
+  // *
+  // * Isso significa:
+  // * - qualquer chamada pode acessar qualquer atividade
+  // *
+  // * 👉 Isso é um risco de segurança se não for tratado em outro nível
   static async getActivityProgress(
     progressId: string,
     studentId: string
@@ -797,30 +782,28 @@ export class ProgressService {
     }
   }
 
-  /**
-   * Recalcula métricas do aluno com base no histórico completo.
-   *
-   * Uso:
-   * - correção de dados
-   * - auditoria
-   * - migração de lógica
-   *
-   * Estratégia:
-   * - percorre TODOS os activityProgress
-   * - recalcula pontos e atividades concluídas
-   *
-   * Prioridade de pontuação:
-   * 1. scoring.pointsEarned
-   * 2. snapshot.pointsOnCompletion
-   * 3. fallback = 0
-   *
-   * ⚠️ Risco:
-   * - operação pesada (scan completo)
-   * - não deve ser usada em tempo real
-   *
-   * Segurança:
-   * - dryRun evita escrita
-   */
+  // * Recalcula métricas do aluno com base no histórico completo.
+  // *
+  // * Uso:
+  // * - correção de dados
+  // * - auditoria
+  // * - migração de lógica
+  // *
+  // * Estratégia:
+  // * - percorre TODOS os activityProgress
+  // * - recalcula pontos e atividades concluídas
+  // *
+  // * Prioridade de pontuação:
+  // * 1. scoring.pointsEarned
+  // * 2. snapshot.pointsOnCompletion
+  // * 3. fallback = 0
+  // *
+  // * ⚠️ Risco:
+  // * - operação pesada (scan completo)
+  // * - não deve ser usada em tempo real
+  // *
+  // * Segurança:
+  // * - dryRun evita escrita
   static async recalculateStudentPermanentMetrics(
     studentId: string,
     options: { dryRun?: boolean } = {}

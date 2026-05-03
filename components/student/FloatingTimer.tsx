@@ -206,13 +206,13 @@ export default function FloatingTimer() {
      */
     <div className="fixed bottom-6 right-6 z-50 bg-white rounded-2xl shadow-2xl border border-purple-100 p-4 w-64 select-none">
 
-      /**
+      {/*
        * Header do timer.
        *
        * Exibe:
        * - título da atividade
        * - botão de cancelamento
-       */
+       */}
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0 pr-2">
@@ -231,26 +231,26 @@ export default function FloatingTimer() {
         </button>
       </div>
 
-      /**
+      {/**
        * Renderiza relógio analógico com progresso
-       */
+       */}
       {/* Clock */}
       <div className="flex justify-center mb-3">
         <AnalogClock elapsedSeconds={elapsedSeconds} totalSeconds={totalSeconds} />
       </div>
 
-      /**
+      {/*
        * Exibe tempo restante ou overtime.
        *
        * Comportamento:
        * - antes do fim → mostra countdown
        * - após o fim → mostra tempo excedente
-       */
+       */}
       {/* Time info */}
       <div className="text-center mb-3">
-        /**
+        {/**
          * Indica que o aluno excedeu o tempo estimado
-         */
+         */}
         {overtime ? (
           <p className="text-sm font-bold text-amber-600">
             +{elapsedMins - active.estimatedMinutes} min além do estimado
@@ -263,7 +263,7 @@ export default function FloatingTimer() {
         <p className="text-xs text-gray-400 mt-0.5">{elapsedMins} min decorridos</p>
       </div>
       
-      /**
+      {/*
        * Botão de conclusão manual da atividade.
        *
        * Estado:
@@ -271,7 +271,7 @@ export default function FloatingTimer() {
        * - normal → "Concluir Atividade"
        *
        * ⚠️ Dispara handleComplete
-       */
+       */}
       {/* Complete button */}
       <button
         onClick={handleComplete}

@@ -287,7 +287,7 @@ export default function ScheduleDetailPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50/30">
       {/* Header Superior */}
 
-      /**
+      {/*
        * Header principal do cronograma.
        *
        * Exibe:
@@ -299,7 +299,7 @@ export default function ScheduleDetailPage() {
        * - atribuir
        * - duplicar
        * - editar
-       */
+       */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex items-center justify-between">
@@ -355,7 +355,7 @@ export default function ScheduleDetailPage() {
       {/* Conteúdo Principal */}
       <div className="max-w-7xl mx-auto px-4 py-8">
 
-        /**
+        {/*
          * Resumo geral do cronograma.
          *
          * Inclui:
@@ -363,7 +363,7 @@ export default function ScheduleDetailPage() {
          * - período
          * - carga horária
          * - total de atividades
-         */
+         */} 
         {/* Cartão de Resumo */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm mb-8 overflow-hidden">
           <div className="p-6">
@@ -480,7 +480,7 @@ export default function ScheduleDetailPage() {
           </div>
         </div>
 
-        /**
+        {/*
          * Controle de navegação interna.
          *
          * Tabs:
@@ -489,7 +489,7 @@ export default function ScheduleDetailPage() {
          * - progress
          * - analytics
          * - settings
-         */
+         */}
         {/* Navegação por Tabs */}
         <div className="mb-6">
           <div className="flex border-b border-gray-200">
@@ -568,14 +568,14 @@ export default function ScheduleDetailPage() {
         {/* Conteúdo da Tab Ativa */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
 
-          /**
+          {/*
            * Visão geral do cronograma.
            *
            * Inclui:
            * - distribuição de atividades
            * - tipos de atividades
            * - dados técnicos
-           */
+           */}
           {activeTab === 'overview' && (
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-6">Visão Geral do Cronograma</h2>
@@ -633,14 +633,14 @@ export default function ScheduleDetailPage() {
                 </div>
               )}
 
-              /**
+              {/*
                * Informações internas do cronograma.
                *
                * Inclui:
                * - ID
                * - data de criação
                * - configurações
-               */
+               */}
               {/* Dados Técnicos */}
               <div>
                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Dados Técnicos</h3>
@@ -693,7 +693,7 @@ export default function ScheduleDetailPage() {
             </div>
           )}
 
-          /**
+          {/*
            * Lista completa de atividades do cronograma.
            *
            * Inclui:
@@ -701,7 +701,7 @@ export default function ScheduleDetailPage() {
            * - metadados (duração, pontos, dificuldade)
            *
            * ⚠️ Núcleo estrutural do cronograma
-           */
+           */}
           {activeTab === 'activities' && (
             <div>
               <div className="flex items-center justify-between mb-6">
@@ -820,7 +820,7 @@ export default function ScheduleDetailPage() {
                             </div>
                           </div>
                           
-                          /**
+                          {/*
                            * Seção de upload de arquivos da atividade.
                            *
                            * Condição:
@@ -833,7 +833,7 @@ export default function ScheduleDetailPage() {
                            *
                            * ⚠️ Futuro:
                            * integrar com Firebase Storage
-                           */
+                           */}
                           {/*  NOVA SEÇÃO: ENVIO DE ARQUIVOS (Renderiza se o tipo for upload ou se exigir arquivo na config) */}
                           {(activity.type?.toLowerCase().includes('upload') || (activity.config as any)?.requiresFileUpload || (activity.metadata as any)?.requiresFileUpload) && (
                             <div className="mt-4 pt-4 border-t border-gray-100">
@@ -874,7 +874,7 @@ export default function ScheduleDetailPage() {
             </div>
           )}
 
-          /**
+          {/*
            * Área de visualização do progresso dos alunos neste cronograma.
            *
            * Objetivo:
@@ -887,7 +887,7 @@ export default function ScheduleDetailPage() {
            * ⚠️ Futuro:
            * - Integrar com ScheduleInstanceService
            * - Exibir métricas reais por aluno
-           */
+           */}
           {activeTab === 'progress' && (
             <div className="text-center py-12">
               <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl mb-6">
@@ -909,7 +909,7 @@ export default function ScheduleDetailPage() {
             </div>
           )}
 
-          /**
+          {/*
            * Aba de análises do cronograma.
            *
            * Função:
@@ -923,8 +923,8 @@ export default function ScheduleDetailPage() {
            * ⚠️ Decisão de arquitetura:
            * - evita duplicação de lógica
            * - mantém analytics centralizado em um único fluxo
-           */
-          {activeTab === 'analytics' && (
+           */}
+        {activeTab === 'analytics' && (
             <div className="text-center py-12">
               <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl mb-6">
                 <FiBarChart2 className="w-10 h-10 text-gray-400" />
@@ -945,13 +945,13 @@ export default function ScheduleDetailPage() {
             </div>
           )}
 
-          /**
+          {/*
            * Configurações administrativas do cronograma.
            *
            * Inclui:
            * - dados editáveis (visual)
            * - ações administrativas
-           */
+           */}
           {activeTab === 'settings' && (
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-6">Configurações do Cronograma</h2>
@@ -1048,14 +1048,14 @@ export default function ScheduleDetailPage() {
                     </div>
                   </div>
 
-                  /**
+                  {/*
                    * Ações irreversíveis.
                    *
                    * Inclui:
                    * - exclusão permanente
                    *
                    * ⚠️ Deve ter confirmação no backend
-                   */
+                   */}
                   {/* Zona de Perigo */}
                   <div className="bg-red-50 border border-red-200 rounded-xl p-6">
                     <h3 className="text-lg font-semibold text-red-800 mb-4">Zona de Perigo</h3>
@@ -1075,14 +1075,14 @@ export default function ScheduleDetailPage() {
           )}
         </div>
         
-        /**
+        {/*
          * Ações finais do cronograma.
          *
          * Inclui:
          * - refresh
          * - imprimir
          * - atribuir
-         */
+         */}
         {/* Botões de Ação Footer */}
         <div className="mt-8 flex items-center justify-between">
           <div className="text-sm text-gray-500">

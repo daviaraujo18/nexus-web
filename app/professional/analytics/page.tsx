@@ -245,14 +245,14 @@ export default function AnalyticsPage() {
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Header com Navegação */}
 
-        /**
+        {/*
          * Header da página de analytics.
          *
          * Inclui:
          * - navegação
          * - título dinâmico
          * - tabs
-         */
+         */}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
@@ -356,7 +356,7 @@ export default function AnalyticsPage() {
         <div className="mb-8">
           {/* DASHBOARD GERAL */}
 
-          /**
+          {/*
            * Visão geral do desempenho da turma.
            *
            * Exibe:
@@ -366,7 +366,7 @@ export default function AnalyticsPage() {
            * - heatmap semanal
            *
            * ⚠️ Representa o estado consolidado do sistema
-           */
+           */}
           {view === 'dashboard' && dashboardData && (
             <div className="space-y-6">
               {/* Alertas e Insights
@@ -411,7 +411,7 @@ export default function AnalyticsPage() {
 
               {/* Cards de Métricas */}
 
-              /**
+              {/*
                * Cards de métricas principais.
                *
                * Inclui:
@@ -419,7 +419,7 @@ export default function AnalyticsPage() {
                * - taxa média de conclusão
                * - streak médio
                * - média GAD-7
-               */
+               */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
                   <div className="flex items-center justify-between mb-3">
@@ -509,14 +509,14 @@ export default function AnalyticsPage() {
 
                     <div className="divide-y divide-slate-100">
 
-                      /**
+                      {/*
                        * Ranking de alunos por engajamento.
                        *
                        * Base:
                        * - taxa de conclusão
                        *
                        * ⚠️ Limita exibição para top 5
-                       */
+                       */}
                       {dashboardData.studentRankings.byEngagement.slice(0, 5).map((student, index) => (
                         <button
                           key={student.studentId}
@@ -555,7 +555,7 @@ export default function AnalyticsPage() {
                         <div>
                           <div className="flex justify-between text-sm mb-1">
                             <span className="text-slate-600">Mínimo</span>
-                            /**
+                            {/*
                              * Distribuição da saúde mental da turma.
                              *
                              * Categorias:
@@ -563,7 +563,7 @@ export default function AnalyticsPage() {
                              * - mild
                              * - moderate
                              * - severe
-                             */
+                             */} 
                             <span className="font-medium text-slate-700">{metrics.gad7Distribution.minimal.toFixed(1)}%</span>
                           </div>
                           <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -699,14 +699,14 @@ export default function AnalyticsPage() {
 
                   {/* Heatmap Simplificado */}
 
-                  /**
+                  {/*
                    * Heatmap de desempenho por dia da semana.
                    *
                    * Mostra:
                    * - média de conclusão por dia
                    *
                    * ⚠️ Baseado em dados agregados
-                   */
+                   */}
                   {dashboardData.classHeatmap && Object.keys(dashboardData.classHeatmap).length > 0 && (
                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                       <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
@@ -756,7 +756,7 @@ export default function AnalyticsPage() {
 
                   {/* RANKING DE PONTUAÇÃO COM FILTROS */}
 
-                  /**
+                  {/*
                    * Ranking baseado em bem-estar (GAD-7).
                    *
                    * Ordena alunos considerando:
@@ -764,7 +764,7 @@ export default function AnalyticsPage() {
                    * - engajamento
                    *
                    * ⚠️ Pode ser usado para identificar alunos em risco
-                   */
+                   */}
                   <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mt-6">
                     {/* Header - Adaptado para mobile */}
                     <div className="flex flex-col gap-3 mb-4">
@@ -992,12 +992,12 @@ export default function AnalyticsPage() {
 
           {/* LISTA DE ALUNOS PARA RELATÓRIOS INDIVIDUAIS */}
 
-          /**
+          {/*
            * Lista de alunos para seleção manual.
            *
            * Permite:
            * - acesso direto ao relatório individual
-           */
+           */}
           {view === 'student-list' && dashboardData && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
               <div className="flex items-center gap-3 mb-6">

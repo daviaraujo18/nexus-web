@@ -225,12 +225,11 @@ export default function ActivityPage() {
     try {
       await ProgressService.completeActivity(activityProgress.id, user.id, {
         
-        /**
-         * Calcula tempo gasto em minutos com base no timer ativo.
+        /** Calcula tempo gasto em minutos com base no timer ativo.
          *
          * ⚠️ Risco:
          * - depende do clock do cliente
-         * - pode divergir do backend
+         * - pode divergir do backend 
          */
         timeSpent: active ? Math.ceil((Date.now() - active.startedAt.getTime()) / 60000) : 0
       });
@@ -249,13 +248,13 @@ export default function ActivityPage() {
     }
   };
 
-  /**
+  {/*
    * Recarrega estado da atividade após mudanças internas.
    *
    * Uso:
    * - garantir sincronização com backend
    * - evitar estado stale na UI
-   */
+  */}
   const handleActivityStatusChange = () => {
     if (user && id) {
       ProgressService.getActivityProgress(id as string, user.id)
@@ -264,7 +263,7 @@ export default function ActivityPage() {
     }
   };
 
-  /**
+  {/*
    * Tela de carregamento da atividade.
    *
    * Objetivo:
@@ -274,7 +273,7 @@ export default function ActivityPage() {
    *
    * ⚠️ Importante:
    * Esse estado bloqueia toda a renderização até os dados estarem prontos
-   */
+  */}
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex items-center justify-center p-4">
@@ -330,7 +329,7 @@ export default function ActivityPage() {
     );
   }
 
-  /**
+  {/*
    * Tela de erro com fallback de navegação.
    *
    * Cenário:
@@ -344,7 +343,7 @@ export default function ActivityPage() {
    * ⚠️ Importante:
    * Evita dead-end na navegação do usuário
    * e garante recuperação mesmo em erro crítico
-   */
+  */}
   if (error || !activityProgress) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex items-center justify-center p-4">
@@ -415,7 +414,7 @@ export default function ActivityPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-indigo-50/30">
       {/* Floating Header - Mobile & Desktop */}
 
-      /**
+      {/*
        * Header dinâmico da atividade.
        *
        * Exibe:
@@ -430,7 +429,7 @@ export default function ActivityPage() {
        * ⚠️ Impacto:
        * - guia o usuário visualmente durante a execução
        * - evita confusão sobre o estado atual da atividade
-       */
+      */}
       <motion.header 
         initial={{ y: -100 }}
         animate={{ y: 0 }}
@@ -587,7 +586,7 @@ export default function ActivityPage() {
                       </span>
                     </div>
 
-                    /**
+                    {/*
                      * Barra de progresso visual da atividade.
                      *
                      * Lógica simplificada:
@@ -603,7 +602,7 @@ export default function ActivityPage() {
                      * ⚠️ Impacto:
                      * - serve como feedback visual rápido
                      * - evita complexidade desnecessária na UI
-                     */
+                    */}
                     <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                       <motion.div 
                         className={`h-full rounded-full ${
@@ -679,7 +678,7 @@ export default function ActivityPage() {
               transition={{ delay: 0.3 }}
             >
 
-              /**
+              {/*
                * Componente responsável pela execução da atividade em si.
                *
                * Recebe:
@@ -691,7 +690,7 @@ export default function ActivityPage() {
                * - lógica de interação
                * - envio de dados
                * - fluxo interno da atividade
-               */
+              */}
               <ActivityExecutor
                 progress={activityProgress}
                 onStatusChange={handleActivityStatusChange}

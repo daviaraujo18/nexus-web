@@ -257,7 +257,7 @@ export default function ProfessionalDashboardPage() {
       setChartLoading(true);
       try {
 
-        /**
+        /** 
          * Busca atividades concluídas para gerar gráfico por matéria.
          *
          * Fonte:
@@ -320,14 +320,14 @@ export default function ProfessionalDashboardPage() {
     <div className="p-4 md:p-6 min-h-screen bg-gradient-to-br from-gray-50 to-blue-50/30">
       {/* Header do Dashboard */}
 
-      /**
+      {/*
        * Header principal do dashboard.
        *
        * Exibe:
        * - saudação
        * - nome do profissional
        * - ações principais
-       */
+      */} 
       <div className="mb-8">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
           <div className="flex items-center gap-4">
@@ -357,14 +357,14 @@ export default function ProfessionalDashboardPage() {
         {/* Coluna Principal (2/3) */}
         <div className="lg:col-span-2 space-y-8">
 
-          /**
+          {/*
            * Lista cronogramas recentes do profissional.
            *
            * Limite:
            * - até 5 itens
            *
            * ⚠️ foco em acesso rápido
-           */
+          */}
           {/* Cronogramas Recentes */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-gray-200">
@@ -477,7 +477,7 @@ export default function ProfessionalDashboardPage() {
             )}
           </div>
           
-          /**
+          {/*
            * Gráfico de atividades concluídas por matéria.
            *
            * Filtros:
@@ -485,7 +485,7 @@ export default function ProfessionalDashboardPage() {
            * - aluno
            *
            * ⚠️ Dados baseados em activityProgress
-           */
+          */} 
           {/* Atividades por Matéria */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-gray-200">
@@ -551,13 +551,13 @@ export default function ProfessionalDashboardPage() {
         {/* Coluna Lateral (1/3) */}
         <div className="space-y-8">
 
-          /**
+          {/*
            * Atalhos para ações principais do sistema.
            *
            * Objetivo:
            * - reduzir fricção do usuário
            * - aumentar produtividade
-           */
+          */}
           {/* Ações Rápidas */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
             <div className="flex items-center gap-3 mb-6">
@@ -625,7 +625,7 @@ export default function ProfessionalDashboardPage() {
             </div>
           </div>
           
-          /**
+         {/*}
            * Sistema de alertas baseado em métricas.
            *
            * Exemplos:
@@ -634,7 +634,7 @@ export default function ProfessionalDashboardPage() {
            * - baixa taxa de conclusão
            *
            * ⚠️ Atua como sistema de decisão rápida
-           */
+          */} 
           {/* Alertas e Notificações */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
             <div className="flex items-center gap-3 mb-6">
@@ -725,14 +725,14 @@ export default function ProfessionalDashboardPage() {
             </div>
           </div>
           
-          /**
+          {/*
            * Lista de eventos recentes do sistema.
            *
            * ⚠️ Atualmente mockado (simulação)
            *
            * Em produção:
            * deve vir de logs reais
-           */
+          */} 
           {/* Atividade Recente */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
             <div className="flex items-center gap-3 mb-6">

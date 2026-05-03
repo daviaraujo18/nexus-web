@@ -392,7 +392,7 @@ export default function StudentAnalyticsPage() {
 
           {/* Banner do Aluno */}
 
-          /**
+          {/*
            * Banner principal do aluno.
            *
            * Exibe:
@@ -402,7 +402,7 @@ export default function StudentAnalyticsPage() {
            * - status de risco
            *
            * ⚠️ isAtRisk impacta visual diretamente
-           */
+           */} 
           <div className={`relative overflow-hidden rounded-2xl ${isAtRisk
               ? 'bg-gradient-to-r from-amber-600 to-orange-600'
               : 'bg-gradient-to-r from-indigo-600 to-purple-600'
@@ -464,7 +464,7 @@ export default function StudentAnalyticsPage() {
 
         {/* Tabs de Navegação */}
 
-        /**
+        {/*
          * Controle de navegação entre abas.
          *
          * Tabs:
@@ -472,7 +472,7 @@ export default function StudentAnalyticsPage() {
          * - history
          * - gad7
          * - insights
-         */
+         */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-1.5 mb-6">
           <div className="flex flex-wrap">
             <button
@@ -535,7 +535,7 @@ export default function StudentAnalyticsPage() {
 
         {/* TAB: VISÃO GERAL */}
 
-        /**
+        {/*
          * Visão geral do desempenho do aluno.
          *
          * Dados:
@@ -545,7 +545,7 @@ export default function StudentAnalyticsPage() {
          * - GAD-7
          *
          * ⚠️ Mistura dados reais e agregados
-         */
+         */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Cards de Métricas */}
@@ -836,7 +836,7 @@ export default function StudentAnalyticsPage() {
 
         {/* TAB: HISTÓRICO DETALHADO */}
 
-        /**
+        {/*
          * Histórico detalhado por semana.
          *
          * Mostra:
@@ -844,7 +844,7 @@ export default function StudentAnalyticsPage() {
          * - pontos
          * - GAD-7
          * - breakdown diário
-         */
+         */}
         {activeTab === 'history' && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -976,14 +976,14 @@ export default function StudentAnalyticsPage() {
 
         {/* TAB: SAÚDE MENTAL (GAD-7) */}
 
-        /**
+        {/*
          * Visualização de saúde mental (GAD-7).
          *
          * Mostra:
          * - histórico de avaliações
          * - tendência
          * - severidade
-         */
+         */}
         {activeTab === 'gad7' && (
           <div className="space-y-6">
             {/* Cards de resumo GAD-7 */}
@@ -1122,7 +1122,7 @@ export default function StudentAnalyticsPage() {
 
         {/* TAB: DADOS DO ALUNO */}
 
-        /**
+        {/*
          * Lista de atividades concluídas com dados reais.
          *
          * Origem:
@@ -1132,7 +1132,7 @@ export default function StudentAnalyticsPage() {
          * - anexos
          * - descrição
          * - metadata (subject, grade)
-         */
+         */}
         {activeTab === 'insights' && (
           <div className="space-y-4">
             {/* Header com contador */}

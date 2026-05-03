@@ -23,26 +23,24 @@ import {
 } from '@/types/schedule';
 import { ValidationUtils } from '@/lib/utils/validationUtils';
 
-/**
- * Serviço responsável pela gestão de cronogramas (templates).
- *
- * Responsabilidades:
- * - Criar e editar templates de cronogramas
- * - Gerenciar atividades associadas ao template
- * - Controlar ciclo de vida (ativo, arquivado, deletado)
- * - Preservar integridade dos dados dos alunos ao alterar/remover cronogramas
- *
- * ⚠️ IMPORTANTE:
- * Este serviço impacta diretamente:
- * - criação de atividades
- * - geração de instâncias
- * - dados históricos do aluno (activityProgress)
- *
- * Qualquer alteração aqui pode afetar:
- * - execução de atividades
- * - analytics
- * - progresso do aluno
- */
+// * Serviço responsável pela gestão de cronogramas (templates).
+// *
+// * Responsabilidades:
+// * - Criar e editar templates de cronogramas
+// * - Gerenciar atividades associadas ao template
+// * - Controlar ciclo de vida (ativo, arquivado, deletado)
+// * - Preservar integridade dos dados dos alunos ao alterar/remover cronogramas
+// *
+// * ⚠️ IMPORTANTE:
+// * Este serviço impacta diretamente:
+// * - criação de atividades
+// * - geração de instâncias
+// * - dados históricos do aluno (activityProgress)
+// *
+// * Qualquer alteração aqui pode afetar:
+// * - execução de atividades
+// * - analytics
+// * - progresso do aluno
 export class ScheduleService {
   private static readonly COLLECTIONS = {
     TEMPLATES: 'weeklySchedules',
@@ -51,24 +49,22 @@ export class ScheduleService {
     PROGRESS: 'activityProgress'
   };
 
-  /**
-   * Cria um novo template de cronograma com suas atividades.
-   *
-   * Fluxo:
-   * 1. Valida dados de entrada
-   * 2. Sanitiza dados
-   * 3. Calcula métricas do cronograma
-   * 4. Gera ID único
-   * 5. Persiste template
-   * 6. Cria atividades associadas
-   *
-   * ⚠️ Side effects:
-   * - Escrita em coleção de templates
-   * - Escrita em coleção de atividades
-   *
-   * ⚠️ Risco:
-   * - Não usa transação entre template e activities → possível inconsistência parcial
-   */
+  // * Cria um novo template de cronograma com suas atividades.
+  // *
+  // * Fluxo:
+  // * 1. Valida dados de entrada
+  // * 2. Sanitiza dados
+  // * 3. Calcula métricas do cronograma
+  // * 4. Gera ID único
+  // * 5. Persiste template
+  // * 6. Cria atividades associadas
+  // *
+  // * ⚠️ Side effects:
+  // * - Escrita em coleção de templates
+  // * - Escrita em coleção de atividades
+  // *
+  // * ⚠️ Risco:
+  // * - Não usa transação entre template e activities → possível inconsistência parcial
   static async createScheduleTemplate(
     professionalId: string,
     data: CreateScheduleDTO
@@ -126,28 +122,26 @@ export class ScheduleService {
     }
   }
 
-  /**
-   * Atualiza um template de cronograma e substitui completamente suas atividades.
-   *
-   * Estratégia adotada:
-   * - Atualiza o template principal
-   * - REMOVE todas as atividades antigas
-   * - CRIA novas atividades do zero
-   *
-   * ⚠️ DECISÃO IMPORTANTE:
-   * Não há "diff" entre atividades → sempre recria tudo
-   *
-   * Benefício:
-   * - Simplicidade
-   *
-   * Risco:
-   * - Perda de referência de IDs antigos
-   * - Se usado em conjunto com instâncias já geradas, pode causar inconsistência
-   *
-   * ⚠️ Usa writeBatch:
-   * - Garante atomicidade ENTRE as operações dentro do batch
-   * - Mas não protege contra leitura concorrente externa
-   */
+  // * Atualiza um template de cronograma e substitui completamente suas atividades.
+  // *
+  // * Estratégia adotada:
+  // * - Atualiza o template principal
+  // * - REMOVE todas as atividades antigas
+  // * - CRIA novas atividades do zero
+  // *
+  // * ⚠️ DECISÃO IMPORTANTE:
+  // * Não há "diff" entre atividades → sempre recria tudo
+  // *
+  // * Benefício:
+  // * - Simplicidade
+  // *
+  // * Risco:
+  // * - Perda de referência de IDs antigos
+  // * - Se usado em conjunto com instâncias já geradas, pode causar inconsistência
+  // *
+  // * ⚠️ Usa writeBatch:
+  // * - Garante atomicidade ENTRE as operações dentro do batch
+  // * - Mas não protege contra leitura concorrente externa
   static async updateScheduleTemplate(
     scheduleId: string,
     professionalIdOrData: string | CreateScheduleDTO,
@@ -183,16 +177,14 @@ export class ScheduleService {
         updatedAt: serverTimestamp()
       });
 
-      /**
-       * Remove TODAS as atividades anteriores vinculadas ao template.
-       *
-       * ⚠️ Importante:
-       * - Essa abordagem descarta completamente a versão anterior
-       * - Não mantém histórico de alterações
-       *
-       * ⚠️ Risco:
-       * - Se houver instâncias já geradas, elas continuarão referenciando versões antigas
-       */
+      // * Remove TODAS as atividades anteriores vinculadas ao template.
+      // *
+      // * ⚠️ Importante:
+      // * - Essa abordagem descarta completamente a versão anterior
+      // * - Não mantém histórico de alterações
+      // *
+      // * ⚠️ Risco:
+      // * - Se houver instâncias já geradas, elas continuarão referenciando versões antigas
       console.log(`🧹 Buscando atividades antigas para limpeza...`);
       const oldActivitiesQuery = query(
         collection(firestore, this.COLLECTIONS.ACTIVITIES),
@@ -205,23 +197,21 @@ export class ScheduleService {
       });
       console.log(`🗑️ ${oldActivitiesSnap.docs.length} atividades antigas removidas do lote.`);
 
-      /**
-       * Recria todas as atividades do template.
-       *
-       * Estratégia:
-       * - Todas as atividades antigas já foram removidas
-       * - Novas atividades são criadas do zero
-       * - IDs incluem timestamp para evitar colisão
-       *
-       * ⚠️ Consequência:
-       * - IDs antigos são descartados
-       * - Não há versionamento de atividades
-       * - Qualquer referência externa aos IDs antigos se perde
-       *
-       * ⚠️ Impacto:
-       * - Instâncias já geradas continuam com snapshots antigos
-       * - Alterações não propagam retroativamente para atividades já atribuídas
-       */
+      // * Recria todas as atividades do template.
+      // *
+      // * Estratégia:
+      // * - Todas as atividades antigas já foram removidas
+      // * - Novas atividades são criadas do zero
+      // * - IDs incluem timestamp para evitar colisão
+      // *
+      // * ⚠️ Consequência:
+      // * - IDs antigos são descartados
+      // * - Não há versionamento de atividades
+      // * - Qualquer referência externa aos IDs antigos se perde
+      // *
+      // * ⚠️ Impacto:
+      // * - Instâncias já geradas continuam com snapshots antigos
+      // * - Alterações não propagam retroativamente para atividades já atribuídas
       console.log(`➕ Adicionando ${sanitizedData.activities.length} atividades novas ao lote...`);
       sanitizedData.activities.forEach((a, i) => {
         const actId = `${scheduleId}_act_${i}_${Date.now()}`; // Adiciona timestamp pra garantir ID único
@@ -248,29 +238,27 @@ export class ScheduleService {
     }
   }
 
-  /**
-   * Exclusão segura de cronograma.
-   *
-   * Estratégia:
-   * - NÃO deleta dados
-   * - Apenas desativa e arquiva
-   *
-   * Regra de ouro:
-   * Dados do aluno NUNCA são perdidos.
-   *
-   * Fluxo:
-   * 1. Marca template como deletado
-   * 2. Desativa instâncias
-   * 3. Trata atividades de progresso
-   *
-   * ⚠️ Comportamento crítico:
-   * - Atividades concluídas NÃO são alteradas
-   * - Apenas são ocultadas do cronograma ativo
-   *
-   * Benefício:
-   * - Preserva histórico do aluno
-   * - Mantém integridade para analytics
-   */
+  // * Exclusão segura de cronograma.
+  // *
+  // * Estratégia:
+  // * - NÃO deleta dados
+  // * - Apenas desativa e arquiva
+  // *
+  // * Regra de ouro:
+  // * Dados do aluno NUNCA são perdidos.
+  // *
+  // * Fluxo:
+  // * 1. Marca template como deletado
+  // * 2. Desativa instâncias
+  // * 3. Trata atividades de progresso
+  // *
+  // * ⚠️ Comportamento crítico:
+  // * - Atividades concluídas NÃO são alteradas
+  // * - Apenas são ocultadas do cronograma ativo
+  // *
+  // * Benefício:
+  // * - Preserva histórico do aluno
+  // * - Mantém integridade para analytics
   static async deleteSchedule(scheduleId: string, professionalId: string): Promise<void> {
     try {
       console.log(`🛡️ Iniciando desativação segura do cronograma: ${scheduleId}`);
@@ -309,20 +297,18 @@ export class ScheduleService {
         progressSnap.forEach(pDoc => {
           const pData = pDoc.data();
           
-          /**
-           * ⚠️ REGRA CRÍTICA DE NEGÓCIO:
-           *
-           * Se a atividade já possui dados do aluno:
-           * - NÃO deletar
-           * - NÃO alterar status crítico
-           *
-           * Apenas:
-           * - remover da visualização ativa
-           *
-           * Motivo:
-           * - preservar histórico
-           * - manter consistência de relatórios
-           */
+          // * ⚠️ REGRA CRÍTICA DE NEGÓCIO:
+          // *
+          // * Se a atividade já possui dados do aluno:
+          // * - NÃO deletar
+          // * - NÃO alterar status crítico
+          // *
+          // * Apenas:
+          // * - remover da visualização ativa
+          // *
+          // * Motivo:
+          // * - preservar histórico
+          // * - manter consistência de relatórios
           if (pData.status === 'completed' || pData.executionData) {
              batch.update(pDoc.ref, {
                 isActive: false, // Tira do cronograma ativo
@@ -349,13 +335,11 @@ export class ScheduleService {
     }
   }
 
-  /**
-   * Alterna estado entre ativo e arquivado.
-   *
-   * Diferença para delete:
-   * - archive → reversível
-   * - delete → lógico (não volta pro fluxo normal)
-   */
+  // * Alterna estado entre ativo e arquivado.
+  // *
+  // * Diferença para delete:
+  // * - archive → reversível
+  // * - delete → lógico (não volta pro fluxo normal)
   static async archiveSchedule(scheduleId: string, _professionalId: string): Promise<void> {
     try {
       const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
@@ -376,15 +360,14 @@ export class ScheduleService {
       throw new Error(`Falha ao arquivar cronograma: ${error.message}`);
     }
   }
-  /**
-   * Busca um template de cronograma.
-   *
-   * Opção:
-   * - includeActivities → carrega atividades associadas
-   *
-   * ⚠️ Performance:
-   * - includeActivities = true → gera query adicional
-   */
+
+  // * Busca um template de cronograma.
+  // *
+  // * Opção:
+  // * - includeActivities → carrega atividades associadas
+  // *
+  // * ⚠️ Performance:
+  // * - includeActivities = true → gera query adicional
   static async getScheduleTemplate(scheduleId: string, includeActivities = false): Promise<ScheduleTemplate & { activities?: ScheduleActivity[] }> {
     const docRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
     const snap = await getDoc(docRef);
@@ -398,16 +381,14 @@ export class ScheduleService {
     return schedule;
   }
   
-  /**
-   * Lista cronogramas de um profissional.
-   *
-   * Regras aplicadas:
-   * - Ignora cronogramas deletados
-   * - Ordena por data de criação (mais recente primeiro)
-   *
-   * ⚠️ Observação:
-   * - Filtro de categoria/ativo ainda não está sendo aplicado na query (apenas pós-processamento)
-   */
+  // * Lista cronogramas de um profissional.
+  // *
+  // * Regras aplicadas:
+  // * - Ignora cronogramas deletados
+  // * - Ordena por data de criação (mais recente primeiro)
+  // *
+  // * ⚠️ Observação:
+  // * - Filtro de categoria/ativo ainda não está sendo aplicado na query (apenas pós-processamento)
   static async listProfessionalSchedules(professionalId: string, options: { category?: ScheduleCategory; activeOnly?: boolean; limit?: number; } = {}): Promise<ScheduleTemplate[]> {
     let q = query(collection(firestore, this.COLLECTIONS.TEMPLATES), where('professionalId', '==', professionalId));
     const snap = await getDocs(q);
@@ -421,16 +402,14 @@ export class ScheduleService {
     return options.limit ? schedules.slice(0, options.limit) : schedules;
   }
 
-  /**
-   * Cria atividades em lote usando writeBatch.
-   *
-   * Benefício:
-   * - Escrita eficiente
-   *
-   * ⚠️ Limitação:
-   * - ID determinístico baseado em index
-   * - Pode gerar conflito em edições futuras
-   */
+  // * Cria atividades em lote usando writeBatch.
+  // *
+  // * Benefício:
+  // * - Escrita eficiente
+  // *
+  // * ⚠️ Limitação:
+  // * - ID determinístico baseado em index
+  // * - Pode gerar conflito em edições futuras
   private static async createActivities(scheduleId: string, activities: CreateActivityDTO[]): Promise<string[]> {
     const batch = writeBatch(firestore);
     const ids: string[] = [];
@@ -452,17 +431,15 @@ export class ScheduleService {
     return acts.sort((a, b) => a.dayOfWeek === b.dayOfWeek ? a.orderIndex - b.orderIndex : a.dayOfWeek - b.dayOfWeek);
   }
 
-  /**
-   * Calcula métricas agregadas do cronograma.
-   *
-   * Retorna:
-   * - total de atividades
-   * - horas estimadas por semana
-   * - tags derivadas das atividades
-   *
-   * ⚠️ Importante:
-   * - estimativa baseada em metadata → depende da qualidade dos dados de entrada
-   */
+  // * Calcula métricas agregadas do cronograma.
+  // *
+  // * Retorna:
+  // * - total de atividades
+  // * - horas estimadas por semana
+  // * - tags derivadas das atividades
+  // *
+  // * ⚠️ Importante:
+  // * - estimativa baseada em metadata → depende da qualidade dos dados de entrada
   private static calculateScheduleMetrics(activities: CreateActivityDTO[]) {
     const total = activities.length;
     const hours = activities.reduce((t, a) => t + (a.metadata.estimatedDuration || 30), 0) / 60;
@@ -470,17 +447,15 @@ export class ScheduleService {
     return { totalActivities: total, estimatedWeeklyHours: parseFloat(hours.toFixed(1)), tags };
   }
 
-  /**
-   * Gera ID único do cronograma.
-   *
-   * Estrutura:
-   * - prefixo do profissional
-   * - nome sanitizado
-   * - timestamp
-   *
-   * ⚠️ Risco:
-   * - não garante unicidade absoluta (mas colisão é improvável)
-   */
+  // * Gera ID único do cronograma.
+  // *
+  // * Estrutura:
+  // * - prefixo do profissional
+  // * - nome sanitizado
+  // * - timestamp
+  // *
+  // * ⚠️ Risco:
+  // * - não garante unicidade absoluta (mas colisão é improvável)
   private static generateScheduleId(profId: string, name: string): string {
     return `${profId.substring(0, 8)}_${name.toLowerCase().replace(/[^a-z0-9]/g, '-').substring(0, 20)}_${Date.now()}`;
   }
