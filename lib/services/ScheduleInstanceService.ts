@@ -16,6 +16,59 @@ export class ScheduleInstanceService {
     PROGRESS: 'activityProgress'
   };
 
+  private static toDateSafe(value: any): Date | null {
+    if (!value) return null;
+
+    if (value instanceof Date) {
+      return new Date(value);
+    }
+
+    if (typeof value.toDate === 'function') {
+      return value.toDate();
+    }
+
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  private static async getVisibleTemplateForStudent(
+    templateId: string
+  ): Promise<{ visible: boolean; data: any | null; reason?: string }> {
+    const snap = await getDoc(doc(firestore, this.COLLECTIONS.TEMPLATES, templateId));
+
+    if (!snap.exists()) {
+      return { visible: false, data: null, reason: 'template-not-found' };
+    }
+
+    const t = snap.data();
+
+    if (t.isDeleted === true) {
+      return { visible: false, data: t, reason: 'isDeleted' };
+    }
+    if (t.isActive === false) {
+      return { visible: false, data: t, reason: 'isActive-false' };
+    }
+    if (['archived', 'deleted', 'inactive'].includes(t.status)) {
+      return { visible: false, data: t, reason: `status-${t.status}` };
+    }
+
+    if (t.endDate) {
+      const endDate = this.toDateSafe(t.endDate);
+      if (endDate) {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const normalizedEndDate = new Date(endDate);
+        normalizedEndDate.setHours(0, 0, 0, 0);
+
+        if (normalizedEndDate < todayStart) {
+          return { visible: false, data: t, reason: 'endDate-expired' };
+        }
+      }
+    }
+
+    return { visible: true, data: t };
+  }
+
   /**
    * 🚀 [ATRIBUIÇÃO] Mantida a trava de segurança que estabelecemos
    */
@@ -92,20 +145,43 @@ export class ScheduleInstanceService {
    * 🛠️ [GERAÇÃO ATIVIDADES]
    */
   static async generateWeekActivities(instanceId: string, weekNo: number) {
-    console.log(`⚙️ [SERVICE] Gerando atividades para instância ${instanceId} (Semana ${weekNo})`);
+    console.log(`⚙️ [GENERATE] Gerando atividades para instância ${instanceId} (Semana ${weekNo})`);
     const snap = await getDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
     const inst = snap.data();
     if (!inst) {
-      console.warn(`⚠️ [AVISO] Instância ${instanceId} não encontrada para gerar atividades.`);
+      console.warn(`⚠️ [GENERATE] Instância ${instanceId} não encontrada.`);
       return;
     }
+
+    const { visible, data: templateData, reason } = await this.getVisibleTemplateForStudent(inst.scheduleTemplateId);
+    if (!visible) {
+      console.warn(`⚠️ [GENERATE] Template ${inst.scheduleTemplateId} não visível (${reason}) — geração cancelada.`);
+      return;
+    }
+
+    const templateEndDate: Date | null = (() => {
+      const ed = this.toDateSafe(templateData?.endDate);
+      if (!ed) return null;
+      const d = new Date(ed);
+      d.setHours(23, 59, 59, 999);
+      return d;
+    })();
 
     const activities = await ActivityService.listScheduleActivities(inst.scheduleTemplateId);
     const weekStartDate = inst.currentWeekStartDate.toDate();
     const batch = writeBatch(firestore);
+    let skipped = 0;
+    let added = 0;
 
     for (const act of activities) {
       const activityDate = DateUtils.calculateActivityDate(weekStartDate, act.dayOfWeek);
+
+      if (templateEndDate && activityDate > templateEndDate) {
+        console.log(`📅 [GENERATE] "${act.title}" após endDate (${activityDate.toLocaleDateString()}) — ignorada.`);
+        skipped++;
+        continue;
+      }
+
       const progressId = `${instanceId}_w${weekNo}_${act.id}`;
       batch.set(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
         scheduleInstanceId: instanceId,
@@ -116,19 +192,19 @@ export class ScheduleInstanceService {
         activitySnapshot: act,
         status: 'pending',
         scheduledDate: Timestamp.fromDate(activityDate),
-        scoring: {
-          pointsEarned: 0,
-          bonusPoints: 0,
-          penaltyPoints: 0
-        },
+        scoring: { pointsEarned: 0, bonusPoints: 0, penaltyPoints: 0 },
         isActive: true,
         isDeleted: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+      added++;
     }
-    await batch.commit();
-    console.log(`✨ [SUCESSO] ${activities.length} atividades geradas e salvas no banco.`);
+
+    if (added > 0) {
+      await batch.commit();
+    }
+    console.log(`✨ [GENERATE] ${added} atividades geradas, ${skipped} ignoradas (após endDate).`);
   }
 
   static async getScheduleInstanceById(instanceId: string): Promise<ScheduleInstance> {
@@ -199,17 +275,15 @@ export class ScheduleInstanceService {
       const snap = await getDocs(q);
       console.log(`📦 [SERVICE] ${snap.size} instâncias brutas encontradas. Validando integridade...`);
       
-      // 🔥 OTIMIZAÇÃO: Promise.all para buscar os templates em paralelo em vez de um por um
       const validationPromises = snap.docs.map(async (instDoc) => {
         const inst = { id: instDoc.id, ...instDoc.data() } as any;
-        
+
         try {
-          const templateSnap = await getDoc(doc(firestore, this.COLLECTIONS.TEMPLATES, inst.scheduleTemplateId));
-          
-          // Se o cronograma pai não existe ou foi deletado, ignoramos a instância (órfã)
-          if (!templateSnap.exists() || templateSnap.data()?.isDeleted) {
-            console.log(`🗑️ [BLOQUEIO ÓRFÃO] Instância ignorada (Template deletado/inexistente): ${inst.id.substring(0,12)}...`);
-            return null; 
+          const { visible, reason } = await this.getVisibleTemplateForStudent(inst.scheduleTemplateId);
+
+          if (!visible) {
+            console.log(`🗑️ [BLOQUEIO] Instância ignorada (${reason}): ${inst.id.substring(0, 12)}... template=${inst.scheduleTemplateId}`);
+            return null;
           }
 
           return {
@@ -249,12 +323,10 @@ export class ScheduleInstanceService {
       // Primeiro, pegamos apenas as instâncias que sobreviveram à auditoria de órfãos
       const active = await this.getStudentActiveInstances(studentId);
       const activeIds = active.map(i => i.id);
-      // Quando não há instâncias ativas, bypassa validação — aluno sem cronograma
-      // ainda deve ver suas atividades históricas
-      const hasActiveInstances = activeIds.length > 0;
 
-      if (!hasActiveInstances) {
-        console.warn('⚠️ [SERVICE] Nenhuma instância ativa. Mostrando atividades sem filtro de instância.');
+      if (activeIds.length === 0) {
+        console.log('ℹ️ [SERVICE] Nenhuma instância ativa — retornando grade vazia.');
+        return [];
       }
 
       const now = new Date();
@@ -278,9 +350,7 @@ export class ScheduleInstanceService {
 
         if (!scheduledDate) return;
 
-        // VERIFICAÇÃO 1: A instância pai desta tarefa ainda é válida?
-        // Se não há instâncias ativas, aceita qualquer atividade (sem cronograma = sem filtro de órfão)
-        const isLegit = !hasActiveInstances || activeIds.includes(data.scheduleInstanceId);
+        const isLegit = activeIds.includes(data.scheduleInstanceId);
         // VERIFICAÇÃO 2: A tarefa está dentro da semana civil atual?
         const isWithinRange = scheduledDate >= start && scheduledDate <= end;
 

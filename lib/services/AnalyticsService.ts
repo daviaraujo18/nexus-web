@@ -27,6 +27,23 @@ import { subWeeks } from 'date-fns';
 import { firestore } from '@/firebase/config';
 import { UserRole } from '@/types/auth';
 
+// * Serviço responsável por montar dados analíticos do Nexus.
+// *
+// * Responsabilidades:
+// * - Gerar analytics individuais por aluno
+// * - Gerar rankings comparativos entre alunos
+// * - Consolidar dados vindos de múltiplas fontes do Firestore
+// * - Cruzar progresso, snapshots semanais, atividades concluídas e GAD-7
+// *
+// * ⚠️ IMPORTANTE:
+// * Este serviço não é apenas leitura simples.
+// * Ele faz agregações, fallbacks e normalizações para alimentar dashboards.
+// *
+// * Qualquer alteração aqui pode impactar:
+// * - dashboard do profissional
+// * - ranking de bem-estar
+// * - métricas individuais do aluno
+// * - relatórios de progresso
 export class AnalyticsService {
   private snapshotAggregator: SnapshotAggregator;
   private userRole: UserRole;
@@ -40,6 +57,8 @@ export class AnalyticsService {
   // 1. DASHBOARD INDIVIDUAL (ALUNO ESPECÍFICO)
   // ============================================
 
+  // * Busca dados reais diretamente do Firestore para corrigir possíveis divergências
+  // * entre snapshots antigos, caches parciais e o estado atual do aluno.
   async getStudentAnalytics(studentId: string, _userId: string, weeks: number = 12): Promise<StudentAnalyticsSummary> {
     console.group(`🔍 [SERVICE] Auditoria Individual: ${studentId}`);
     try {
@@ -58,7 +77,17 @@ export class AnalyticsService {
       let dbTotalActivities = 0;
       const completedActivitiesList: any[] = [];
 
-      // 1. Busca Adesão e Streak REAIS no scheduleInstances
+      // * Lê as instâncias de cronograma do aluno para recuperar métricas consolidadas.
+      // *
+      // * Motivo:
+      // * `progressCache` representa o estado mais próximo da execução real do cronograma.
+      // *
+      // * Uso:
+      // * - maior adesão encontrada
+      // * - maior streak registrado
+      // *
+      // * ⚠️ Risco:
+      // * Se houver instâncias antigas duplicadas, o maior valor pode mascarar inconsistências.
       try {
         const qInstances = query(collectionGroup(firestore, 'scheduleInstances'), where('studentId', '==', studentId));
         const snapInstances = await getDocs(qInstances);
@@ -69,7 +98,16 @@ export class AnalyticsService {
         });
       } catch (e) { console.warn("Erro ao buscar Instâncias:", e); }
 
-      // 2. Busca Atividades Concluídas e Tempo (estimatedDuration)
+      // * Busca atividades concluídas para reconstruir dados reais de execução.
+      // *
+      // * Esses dados alimentam:
+      // * - tempo total investido
+      // * - lista de atividades enviadas
+      // * - aba de dados enviados na UI
+      // *
+      // * ⚠️ Observação:
+      // * O tempo usado vem de `metadata.estimatedDuration`.
+      // * Isso representa tempo estimado, não necessariamente tempo real gasto.
       try {
         const activityCollections = ['activityProgress'];
         for (const col of activityCollections) {
@@ -100,8 +138,14 @@ export class AnalyticsService {
 
       console.log(`🎯 [DB-PULL] Tempo: ${dbTotalTime}min | Ativ: ${dbTotalActivities} | Adesão: ${dbAdherence}% | Streak: ${dbStreak}`);
 
-      // 🔥 CONVERSÃO MÁGICA PARA A INTERFACE NATIVA
-      // Transforma as atividades em "Insights" para que a sua UI renderize na aba "Dados Enviados" sem alterar o JSX!
+      // * Converte atividades concluídas em objetos do tipo Insight.
+      // *
+      // * Decisão de compatibilidade:
+      // * A UI já renderiza a lista de `insights`, então reaproveitamos esse contrato
+      // * para exibir atividades concluídas sem alterar o JSX da página.
+      // *
+      // * ⚠️ Importante:
+      // * Apesar do tipo ser `Insight`, aqui ele representa dados de atividade enviada.
       const activityInsights: Insight[] = completedActivitiesList.map((act, i) => ({
         id: `act-${act.id || i}`,
         type: 'success',
@@ -115,7 +159,16 @@ export class AnalyticsService {
       // Ajusta o Profile
       studentData.streak = dbStreak > 0 ? dbStreak : studentData.streak;
 
-      // Gera o histórico base
+      // * Injeta métricas reais do banco na semana mais recente.
+      // *
+      // * Motivo:
+      // * Alguns snapshots podem conter dados antigos, incompletos ou inflados.
+      // * Para evitar duplicidade, os valores antigos de tempo/atividades/streak
+      // * são zerados antes da injeção dos dados reais.
+      // *
+      // * ⚠️ Risco:
+      // * Essa estratégia concentra os dados na semana mais recente.
+      // * Para histórico fiel por semana, o ideal seria distribuir por completedAt.
       const weeklyHistory = this.generateWeeklyHistory(snapshots, allGad7);
 
       // 🔥 INJEÇÃO PARA A INTERFACE FAZER O REDUCE CORRETO
@@ -134,7 +187,17 @@ export class AnalyticsService {
         } as any);
       }
 
-      // Calcula as métricas atuais
+      // * Calcula as métricas atuais exibidas no dashboard individual.
+      // *
+      // * Estratégia:
+      // * - usa dados do snapshot quando existem;
+      // * - calcula adesão a partir de atividades quando necessário;
+      // * - usa perfil do aluno como fonte canônica para pontos, nível e streak;
+      // * - usa GAD-7 mais recente quando disponível.
+      // *
+      // * ⚠️ Risco:
+      // * Como há múltiplos formatos históricos de snapshot, este método possui fallbacks.
+      // * Alterações devem preservar compatibilidade com dados antigos.
       const lastActive = snapshots.find((s: any) => (s.metrics?.completionRate || 0) > 0) || snapshots[0] || {};
       const currentMetrics = this.calculateCurrentMetrics(lastActive, allGad7, studentData, dbTotalTime);
 
@@ -214,6 +277,16 @@ export class AnalyticsService {
     };
   }
 
+  // * Gera histórico semanal normalizado a partir de snapshots e GAD-7.
+  // *
+  // * Responsabilidades:
+  // * - converter formatos antigos e novos de snapshot para um modelo comum;
+  // * - calcular tempo, atividades e adesão com fallback;
+  // * - anexar GAD-7 correspondente à semana;
+  // * - deduplicar semanas repetidas.
+  // *
+  // * ⚠️ Importante:
+  // * Quando há múltiplos snapshots para a mesma semana, os dados são mesclados.
   private generateWeeklyHistory(snaps: any[], gad: any[]): any[] {
     const gad7Map = new Map(gad.map(a => [a.weekNumber, a]));
 
@@ -255,8 +328,11 @@ export class AnalyticsService {
         gad7: gad7Map.get(weekNum) ? { score: gad7Map.get(weekNum)!.totalScore, severity: gad7Map.get(weekNum)!.severity } : undefined
       };
     });
-
-    // Deduplicate by weekNumber: aggregate multiple instances for the same week
+    
+    /**
+     * Consolida múltiplos snapshots da mesma semana para evitar duplicidade visual
+     * e somas incorretas no histórico do aluno.
+     */
     const weekMap = new Map<number, any>();
     for (const entry of rawEntries) {
       const wn = entry.weekNumber;
@@ -301,6 +377,18 @@ export class AnalyticsService {
   // 2. DASHBOARD GERAL (COMPARATIVO / RANKING)
   // ============================================
 
+  // * Gera análise comparativa global para o dashboard profissional.
+  // *
+  // * Fluxo:
+  // * 1. Define o período analisado
+  // * 2. Busca alunos acessíveis conforme o papel do usuário
+  // * 3. Busca snapshots e avaliações GAD-7
+  // * 4. Agrega métricas gerais
+  // * 5. Gera rankings comparativos
+  // *
+  // * Regra de acesso:
+  // * Coordenador vê todos os alunos ativos.
+  // * Psicólogo/terapeuta vê apenas alunos atribuídos.
   async getComparativeAnalysis(userId: string, _filters: AnalyticsFilters): Promise<ComparativeAnalysis> {
     console.group('📊 [SERVICE] getComparativeAnalysis (Global)');
     try {
@@ -335,6 +423,11 @@ export class AnalyticsService {
     }
   }
 
+  // * Busca snapshots semanais em lotes de até 10 alunos.
+  // *
+  // * Motivo:
+  // * Firestore limita consultas com operador `in`.
+  // * Por isso, a lista de alunos é quebrada em batches.
   private async fetchSnapshots(range: any, ids: string[]): Promise<WeeklySnapshot[]> {
     const snapshots: WeeklySnapshot[] = [];
     const ref = collection(firestore, 'weeklySnapshots');
@@ -385,7 +478,18 @@ export class AnalyticsService {
       return 0;
     }
   }
-
+  
+  //* Gera rankings do dashboard comparativo.
+  // *
+  // * Usa múltiplas fontes:
+  // * - snapshots semanais para engajamento;
+  // * - perfil do aluno para pontos;
+  // * - GAD-7 para bem-estar;
+  // * - activityProgress para total de atividades concluídas.
+  // *
+  // * ⚠️ Atenção:
+  // * O ranking de bem-estar considera principalmente GAD-7.
+  // * Quanto menor o GAD-7, melhor a posição.
   private async generateRankings(snapshots: WeeklySnapshot[], studentIds: string[]): Promise<ComparativeAnalysis['studentRankings']> {
     const items: any[] = [];
     const studentMap = new Map<string, WeeklySnapshot[]>();
@@ -402,9 +506,11 @@ export class AnalyticsService {
         const avg = snaps.length > 0 ? snaps.reduce((acc, s) => acc + (s.metrics?.completionRate || 0), 0) / snaps.length : 0;
         const latestGAD7 = gad7List[0] || null;
         const gad7Score: number | null = latestGAD7?.totalScore ?? null;
-
-        // Score combinado para byWellness: normaliza GAD-7 invertido (0-21) + atividades
-        // Quanto menor o GAD-7 e mais atividades, maior o wellnessScore
+        
+        /**
+         * Calcula um score auxiliar de bem-estar combinando GAD-7 invertido e volume de atividades.
+         * Quanto menor o GAD-7 e maior o engajamento, maior o wellnessScore.
+         */
         const gadNorm = gad7Score != null ? (21 - gad7Score) / 21 : 0; // 0..1 (maior = melhor)
         const actNorm = Math.min(completedCount / 100, 1);              // 0..1 cap em 100
         const wellnessScore = gadNorm * 0.6 + actNorm * 0.4;           // peso 60/40
@@ -432,7 +538,12 @@ export class AnalyticsService {
       .sort((a, b) => (a.gad7Score ?? Infinity) - (b.gad7Score ?? Infinity));
     return { byEngagement: [...items].sort((a, b) => b.value - a.value), byPoints: [...items].sort((a, b) => b.studentTotalPoints - a.studentTotalPoints), byImprovement: items, byGAD7Improvement: [], byWellness, atRisk: items.filter(i => i.isAtRisk) };
   }
-
+  
+  // * Retorna os alunos que o usuário atual pode visualizar.
+  // *
+  // * Regra:
+  // * - coordinator: todos os alunos ativos
+  // * - demais profissionais: apenas alunos atribuídos ao userId
   private async getAccessibleStudentIds(userId: string): Promise<string[]> {
     const ref = collection(firestore, 'students');
     const q = (this.userRole === 'coordinator') ? query(ref, where('isActive', '==', true)) : query(ref, where('profile.assignedProfessionals', 'array-contains', userId), where('isActive', '==', true));

@@ -38,13 +38,57 @@ import { firestore } from '@/firebase/config';
 import SubjectBarChart, { computeSubjectStats, SubjectStat } from '@/components/charts/SubjectBarChart';
 import { GRADE_OPTIONS, getGradeLabel } from '@/lib/utils/constants';
 
+/**
+ * Dashboard operacional do profissional.
+ *
+ * Responsabilidades:
+ * - Exibir visão geral rápida (stats básicas)
+ * - Mostrar cronogramas recentes
+ * - Exibir alertas acionáveis
+ * - Fornecer atalhos para ações principais
+ *
+ * Fontes de dados:
+ * - Firestore (students, activityProgress)
+ * - ScheduleInstanceService
+ * - hooks locais (useSchedules)
+ *
+ * ⚠️ IMPORTANTE:
+ * Diferente do AnalyticsPage, este dashboard usa:
+ * - dados semi-brutos
+ * - agregações locais simples
+ *
+ * ⚠️ Impacto:
+ * - produtividade do profissional
+ * - tomada de decisão rápida
+ */
 export default function ProfessionalDashboardPage() {
   const { user } = useAuth();
+
+  /**
+   * Hook para carregar cronogramas ativos do profissional.
+   *
+   * Configuração:
+   * - apenas ativos
+   * - limite de 5 (dashboard)
+   *
+   * ⚠️ Otimizado para exibição rápida
+   */
   const { schedules, loading: schedulesLoading, refresh: refreshSchedules } = useSchedules({ 
     activeOnly: true,
     limit: 5 
   });
   
+  /**
+   * Estado consolidado de métricas rápidas do dashboard.
+   *
+   * Inclui:
+   * - alunos totais
+   * - alunos ativos
+   * - cronogramas ativos
+   * - taxa de conclusão
+   *
+   * ⚠️ Esses dados são calculados localmente
+   */
   const [stats, setStats] = useState({
     totalStudents: 0,
     activeStudents: 0,
@@ -63,13 +107,38 @@ export default function ProfessionalDashboardPage() {
   const [chartLoading, setChartLoading] = useState(false);
 
   useEffect(() => {
+
+    /**
+     * Carrega todos os dados do dashboard.
+     *
+     * Fluxo:
+     * 1. Busca alunos atribuídos
+     * 2. Busca instâncias de cronograma
+     * 3. Calcula métricas agregadas
+     * 4. Monta ranking básico
+     *
+     * ⚠️ IMPORTANTE:
+     * - mistura múltiplas queries
+     * - faz agregação no cliente
+     *
+     * ⚠️ Risco:
+     * - pode escalar mal com muitos alunos
+     */
     const loadDashboardData = async () => {
       if (!user) return;
       
       try {
         setLoadingStats(true);
         
-        // Buscar alunos atribuídos diretamente pela coleção students
+        /**
+         * Busca alunos atribuídos ao profissional.
+         *
+         * Filtros:
+         * - assignedProfessionals contém user.id
+         * - isActive = true
+         *
+         * ⚠️ Fonte primária de dados do dashboard
+         */
         const studentsSnap = await getDocs(
           query(
             collection(firestore, 'students'),
@@ -86,6 +155,16 @@ export default function ProfessionalDashboardPage() {
         let totalInstances = 0;
         const studentEngagement: any[] = [];
         
+        /**
+         * Calcula engajamento por aluno.
+         *
+         * Estratégia:
+         * - limita para 10 alunos (performance)
+         * - usa apenas a instância mais recente
+         *
+         * ⚠️ Trade-off:
+         * precisão vs performance
+         */
         for (const student of students.slice(0, 10)) {
           const instances = await ScheduleInstanceService.getStudentActiveInstances(
             student.id,
@@ -108,7 +187,14 @@ export default function ProfessionalDashboardPage() {
           }
         }
         
-        // Ordenar alunos por engajamento
+        /**
+         * Ordena alunos por engajamento.
+         *
+         * Critério:
+         * - completionPercentage
+         *
+         * ⚠️ Limitado ao top 3 para dashboard
+         */
         const sortedStudents = studentEngagement
           .sort((a, b) => b.engagement - a.engagement)
           .slice(0, 3);
@@ -120,9 +206,23 @@ export default function ProfessionalDashboardPage() {
           ? (sortedStudents.reduce((sum, s) => sum + s.engagement, 0) / sortedStudents.length) 
           : 0;
         
+          /**
+           * Consolida métricas do dashboard.
+           *
+           * Inclui:
+           * - taxa média de conclusão
+           * - engajamento médio
+           * - alunos ativos
+           *
+           * ⚠️ Algumas métricas são heurísticas (ex: atividade recente)
+           */
         setStats({
           totalStudents: students.length,
           activeStudents: students.filter(s => {
+
+            /**
+             * Considera aluno ativo se teve atividade nos últimos 7 dias
+             */
             const lastActivity = s.lastLoginAt || s.updatedAt;
             const daysSinceLastActivity = (Date.now() - lastActivity.getTime()) / (1000 * 60 * 60 * 24);
             return daysSinceLastActivity < 7;
@@ -156,6 +256,15 @@ export default function ProfessionalDashboardPage() {
     const load = async () => {
       setChartLoading(true);
       try {
+
+        /** 
+         * Busca atividades concluídas para gerar gráfico por matéria.
+         *
+         * Fonte:
+         * - collectionGroup(activityProgress)
+         *
+         * ⚠️ Pode ser pesado dependendo do volume
+         */
         const q = query(
           collectionGroup(firestore, 'activityProgress'),
           where('studentId', '==', chartStudentId),
@@ -170,6 +279,11 @@ export default function ProfessionalDashboardPage() {
     load();
   }, [chartStudentId]);
 
+  /**
+   * Atualiza dados do dashboard manualmente.
+   *
+   * ⚠️ Atualmente usa delay artificial (setTimeout)
+   */
   const refreshData = () => {
     setLoadingStats(true);
     refreshSchedules();
@@ -205,6 +319,15 @@ export default function ProfessionalDashboardPage() {
   return (
     <div className="p-4 md:p-6 min-h-screen bg-gradient-to-br from-gray-50 to-blue-50/30">
       {/* Header do Dashboard */}
+
+      {/*
+       * Header principal do dashboard.
+       *
+       * Exibe:
+       * - saudação
+       * - nome do profissional
+       * - ações principais
+      */} 
       <div className="mb-8">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
           <div className="flex items-center gap-4">
@@ -233,6 +356,15 @@ export default function ProfessionalDashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Coluna Principal (2/3) */}
         <div className="lg:col-span-2 space-y-8">
+
+          {/*
+           * Lista cronogramas recentes do profissional.
+           *
+           * Limite:
+           * - até 5 itens
+           *
+           * ⚠️ foco em acesso rápido
+          */}
           {/* Cronogramas Recentes */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-gray-200">
@@ -344,7 +476,16 @@ export default function ProfessionalDashboardPage() {
               </div>
             )}
           </div>
-
+          
+          {/*
+           * Gráfico de atividades concluídas por matéria.
+           *
+           * Filtros:
+           * - série
+           * - aluno
+           *
+           * ⚠️ Dados baseados em activityProgress
+          */} 
           {/* Atividades por Matéria */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-gray-200">
@@ -409,6 +550,14 @@ export default function ProfessionalDashboardPage() {
 
         {/* Coluna Lateral (1/3) */}
         <div className="space-y-8">
+
+          {/*
+           * Atalhos para ações principais do sistema.
+           *
+           * Objetivo:
+           * - reduzir fricção do usuário
+           * - aumentar produtividade
+          */}
           {/* Ações Rápidas */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
             <div className="flex items-center gap-3 mb-6">
@@ -475,7 +624,17 @@ export default function ProfessionalDashboardPage() {
               </Link>
             </div>
           </div>
-
+          
+         {/*}
+           * Sistema de alertas baseado em métricas.
+           *
+           * Exemplos:
+           * - cronogramas pendentes
+           * - baixo engajamento
+           * - baixa taxa de conclusão
+           *
+           * ⚠️ Atua como sistema de decisão rápida
+          */} 
           {/* Alertas e Notificações */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
             <div className="flex items-center gap-3 mb-6">
@@ -565,7 +724,15 @@ export default function ProfessionalDashboardPage() {
               )}
             </div>
           </div>
-
+          
+          {/*
+           * Lista de eventos recentes do sistema.
+           *
+           * ⚠️ Atualmente mockado (simulação)
+           *
+           * Em produção:
+           * deve vir de logs reais
+          */} 
           {/* Atividade Recente */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
             <div className="flex items-center gap-3 mb-6">

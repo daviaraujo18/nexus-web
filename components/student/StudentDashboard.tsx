@@ -105,11 +105,11 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     return 'Boa noite';
   };
 
-  // Usa a mesma referência de dia da tela /student/schedules:
-  // JS getDay(): 0=Domingo, 1=Segunda, ..., 6=Sábado.
-  // Não usa scheduledDate aqui porque os dados antigos podem ter offset de data.
+  // Schedule dayOfWeek: 0=Seg, 1=Ter ... 6=Dom
+  // JS getDay():        0=Dom, 1=Seg ... 6=Sab
+  // Conversão: (jsDay + 6) % 7
   const dashboardTodayActivities = useMemo(() => {
-    const selectedDay = new Date().getDay();
+    const selectedDay = (new Date().getDay() + 6) % 7;
     const seen = new Set<string>();
 
     return weekActivities.filter(activity => {
