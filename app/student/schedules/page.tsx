@@ -23,7 +23,8 @@ export default function MySchedulesPage() {
 
   // Estados para visualização
   const [activeView, setActiveView] = useState<'calendar' | 'week' | 'list'>('week');
-  const [selectedDay, setSelectedDay] = useState<number>(new Date().getDay());
+  // Schedule dayOfWeek: 0=Seg...6=Dom. Converter de JS getDay() (0=Dom).
+  const [selectedDay, setSelectedDay] = useState<number>((new Date().getDay() + 6) % 7);
   const [selectedWeek, setSelectedWeek] = useState<number>(0);
   
   // Estado para controlar qual cronograma está em foco

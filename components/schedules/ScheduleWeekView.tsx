@@ -16,10 +16,10 @@ import ActivityExecutor from '@/components/activities/ActivityExecutor';
 import { ActivityProgress } from '@/types/schedule';
 import { FaListCheck } from 'react-icons/fa6';
 
-// Dias da semana em português
-const DAYS_OF_WEEK = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-const FULL_DAYS_OF_WEEK = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+// Padrão interno: 0=Seg, 1=Ter, 2=Qua, 3=Qui, 4=Sex, 5=Sáb, 6=Dom
+const DAYS_OF_WEEK = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+const FULL_DAYS_OF_WEEK = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
+const WEEK_ORDER = [0, 1, 2, 3, 4, 5, 6];
 
 interface ScheduleWeekViewProps {
   selectedDay: number;
@@ -42,30 +42,20 @@ export default function ScheduleWeekView({
 }: ScheduleWeekViewProps) {
   const currentDate = new Date();
 
-  // Calcular datas da semana selecionada (semana começa na Segunda)
-  const getWeekDates = (weekOffset: number) => {
+  // Retorna weekDates[0]=Seg, [1]=Ter, ..., [6]=Dom (padrão interno do cronograma)
+  const getWeekDates = (weekOffset: number): Date[] => {
     const now = new Date();
-    const currentDay = now.getDay(); // 0=Dom, 1=Seg, ...
-
-    // Calcular a Segunda-feira da semana atual
-    const daysToMonday = currentDay === 0 ? -6 : 1 - currentDay;
+    const jsDay = now.getDay(); // 0=Dom, 1=Seg...
+    const daysToMonday = jsDay === 0 ? -6 : 1 - jsDay;
     const monday = new Date(now);
     monday.setDate(now.getDate() + daysToMonday + weekOffset * 7);
     monday.setHours(0, 0, 0, 0);
 
-    // weekDates indexado por getDay(): 1=Seg, 2=Ter, ..., 6=Sáb, 0=Dom (fim da semana)
-    const weekDates: Date[] = new Array(7);
-    for (let i = 1; i <= 6; i++) {
-      const date = new Date(monday);
-      date.setDate(monday.getDate() + (i - 1));
-      weekDates[i] = date;
-    }
-    // Domingo = Segunda + 6 dias (fim da semana)
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    weekDates[0] = sunday;
-
-    return weekDates;
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      return d;
+    });
   };
 
   const weekDates = getWeekDates(selectedWeek);

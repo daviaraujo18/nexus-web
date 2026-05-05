@@ -77,10 +77,16 @@ export function useStudentSchedule() {
     });
     
     const validInstanceIds = new Set(instances.map(i => i.id));
-    // Quando não há instâncias ativas, bypassa a validação de órfão — aluno sem cronograma
-    // ainda deve ver suas atividades históricas
     const hasActiveInstances = validInstanceIds.size > 0;
-    console.log(`🛡️ O Firebase vai validar as atividades contra ${validInstanceIds.size} instâncias mães.`);
+    console.log(`🛡️ [REAL-TIME] Validando atividades contra ${validInstanceIds.size} instâncias ativas.`);
+
+    if (!hasActiveInstances) {
+      console.log('ℹ️ [REAL-TIME] Sem instâncias ativas — weekActivities será vazio.');
+      setWeekActivities([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
 
     const q = query(
       collection(firestore, 'activityProgress'),
@@ -100,8 +106,7 @@ export function useStudentSchedule() {
 
         if (!scheduledDate) return;
 
-        // Se não há instâncias ativas, aceita qualquer atividade do aluno (sem cronograma = sem filtro de órfão)
-        const isLegit = !hasActiveInstances || validInstanceIds.has(data.scheduleInstanceId);
+        const isLegit = hasActiveInstances && validInstanceIds.has(data.scheduleInstanceId);
         let isWithinWindow = false;
         
         if (isLegit) {

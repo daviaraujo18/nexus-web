@@ -335,29 +335,143 @@ export class ScheduleService {
     }
   }
 
-  // * Alterna estado entre ativo e arquivado.
+  // * Alterna estado entre ativo e arquivado com propagação completa.
   // *
-  // * Diferença para delete:
-  // * - archive → reversível
-  // * - delete → lógico (não volta pro fluxo normal)
-  static async archiveSchedule(scheduleId: string, _professionalId: string): Promise<void> {
+  // * Ao ARQUIVAR: desativa instâncias + oculta activityProgress.
+  // * Ao RESTAURAR: apenas reativa o template — histórico não é reativado.
+    // * Alterna estado entre ativo e arquivado com propagação completa.
+  // *
+  // * Ao ARQUIVAR: desativa instâncias + oculta activityProgress.
+  // * Ao RESTAURAR: apenas reativa o template — histórico não é reativado.
+  static async archiveSchedule(scheduleId: string, professionalId: string): Promise<void> {
     try {
       const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
       const snap = await getDoc(templateRef);
-      if (!snap.exists()) throw new Error('Cronograma não encontrado');
 
-      const isCurrentlyActive = snap.data().isActive !== false;
+      if (!snap.exists()) {
+        throw new Error('Cronograma não encontrado');
+      }
 
-      await updateDoc(templateRef, {
-        isActive: !isCurrentlyActive,
-        status: isCurrentlyActive ? 'archived' : 'active',
-        updatedAt: serverTimestamp()
-      });
+      const templateData = snap.data();
 
-      console.log(`✅ Cronograma ${scheduleId} ${isCurrentlyActive ? 'arquivado' : 'restaurado'}.`);
+      if (templateData.professionalId !== professionalId) {
+        throw new Error('Você não tem permissão para arquivar este cronograma');
+      }
+
+      const isCurrentlyActive = templateData.isActive !== false;
+
+      if (!isCurrentlyActive) {
+        // --- RESTAURAR: apenas o template ---
+        await updateDoc(templateRef, {
+          isActive: true,
+          status: 'active',
+          updatedAt: serverTimestamp()
+        });
+
+        console.log(
+          `✅ [ARCHIVE] Cronograma ${scheduleId} restaurado. Instâncias/progress históricos não reativados.`
+        );
+        return;
+      }
+
+      // --- ARQUIVAR: propagar para instâncias e activityProgress ---
+      console.log(`🗄️ [ARCHIVE] Arquivando cronograma ${scheduleId} com propagação...`);
+
+      const CHUNK = 490;
+      let ops: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+
+      const flush = async () => {
+        if (ops.length === 0) return;
+
+        const chunks: Array<typeof ops> = [];
+
+        for (let i = 0; i < ops.length; i += CHUNK) {
+          chunks.push(ops.slice(i, i + CHUNK));
+        }
+
+        await Promise.all(
+          chunks.map(chunk => {
+            const batch = writeBatch(firestore);
+            chunk.forEach(operation => operation(batch));
+            return batch.commit();
+          })
+        );
+
+        ops = [];
+      };
+
+      ops.push(batch =>
+        batch.update(templateRef, {
+          isActive: false,
+          status: 'archived',
+          archivedAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        })
+      );
+
+      const instancesSnap = await getDocs(
+        query(
+          collection(firestore, this.COLLECTIONS.INSTANCES),
+          where('scheduleTemplateId', '==', scheduleId)
+        )
+      );
+
+      console.log(`📦 [ARCHIVE] ${instancesSnap.size} instâncias encontradas.`);
+
+      for (const instanceDoc of instancesSnap.docs) {
+        ops.push(batch =>
+          batch.update(instanceDoc.ref, {
+            isActive: false,
+            status: 'archived',
+            archivedAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          })
+        );
+
+        const progressSnap = await getDocs(
+          query(
+            collection(firestore, this.COLLECTIONS.PROGRESS),
+            where('scheduleInstanceId', '==', instanceDoc.id)
+          )
+        );
+
+        for (const pDoc of progressSnap.docs) {
+          const pData = pDoc.data();
+          const hasStudentData = pData.status === 'completed' || Boolean(pData.executionData);
+
+          if (hasStudentData) {
+            ops.push(batch =>
+              batch.update(pDoc.ref, {
+                isActive: false,
+                hiddenFromSchedule: true,
+                archivedWithSchedule: true,
+                updatedAt: serverTimestamp()
+              })
+            );
+          } else {
+            ops.push(batch =>
+              batch.update(pDoc.ref, {
+                isActive: false,
+                status: 'cancelled',
+                hiddenFromSchedule: true,
+                archivedWithSchedule: true,
+                updatedAt: serverTimestamp()
+              })
+            );
+          }
+
+          if (ops.length >= CHUNK * 4) {
+            await flush();
+          }
+        }
+      }
+
+      await flush();
+
+      console.log(`✅ [ARCHIVE] Cronograma ${scheduleId} arquivado. Dados históricos preservados.`);
     } catch (error: any) {
-      console.error('❌ Erro ao arquivar/restaurar cronograma:', error);
-      throw new Error(`Falha ao arquivar cronograma: ${error.message}`);
+      console.error('❌ [ARCHIVE] Erro ao arquivar/restaurar cronograma:', error);
+      throw new Error(`Falha ao arquivar/restaurar cronograma: ${error.message}`);
     }
   }
 
