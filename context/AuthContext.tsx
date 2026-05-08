@@ -36,21 +36,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'User profile not found or inactive') {
         console.log('⏳ Profile ainda não criado, aguardando...');
-        setProfileReady(false);
+        setProfileReady(true);
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 800));
 
         try {
           const retryData = await getFullData();
           setProfileReady(true);
           return retryData;
         } catch {
-          setProfileReady(false);
+          setProfileReady(true);
           return null;
         }
       }
 
-      setProfileReady(false);
+      setProfileReady(true);
       return null;
     }
   };
@@ -79,11 +79,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         try {
           // Aguardar um pouco para garantir que o usuário está carregado
           setTimeout(async () => {
-            if (user && user.id) {
+            if (userData && userData.id) {
               console.log('🔄 Registrando token FCM para notificações...');
 
               // Solicitar permissão e token FCM
-              const token = await NotificationService.requestFCMToken(user.id);
+              const token = await NotificationService.requestFCMToken(userData.id);
 
               if (token) {
                 console.log('✅ Token FCM registrado com sucesso');
@@ -170,8 +170,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Redirecionamento baseado em autenticação - LÓGICA SIMPLIFICADA
   useEffect(() => {
     if (loading) return;
-
-    // 🚨 NOVA TRAVA
     if (!profileReady) return;
 
     const publicPaths = ['/login', '/register', '/', '/forgot-password'];

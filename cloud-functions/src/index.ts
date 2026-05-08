@@ -4,13 +4,15 @@ import * as functions from 'firebase-functions/v1';
 export * from './notifications/dailyReminderScheduler';
 export * from './notifications/sendPushNotification';
 export * from './notifications/manageUserTokens';
+export * from './weeklyReset';
 
 // Função de health check
 export const healthCheck = functions
   .region('southamerica-east1')
   .https.onRequest((req, res) => {
     // Adicionar todos os headers necessários
-    res.set('Access-Control-Allow-Origin', 'http://localhost:3000');
+    // Em produção: firebase functions:config:set app.allowed_origin="https://seu-dominio.com" e expor via ALLOWED_ORIGIN
+    res.set('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN || '*');
     res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, firebase-instance-id-token');
     

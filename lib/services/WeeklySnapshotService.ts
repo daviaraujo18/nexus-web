@@ -84,8 +84,12 @@ export class WeeklySnapshotService {
         scheduleInstanceId: dto.scheduleInstanceId,
         studentId: instance.studentId,
         weekNumber: dto.weekNumber,
-        weekStartDate: DateUtils.addWeeks(instance.currentWeekStartDate, dto.weekNumber - 1),
-        weekEndDate: DateUtils.addWeeks(instance.currentWeekEndDate, dto.weekNumber - 1),
+        weekStartDate: dto.weekNumber === instance.currentWeekNumber
+          ? instance.currentWeekStartDate
+          : DateUtils.addWeeks(instance.currentWeekStartDate, dto.weekNumber - instance.currentWeekNumber),
+        weekEndDate: dto.weekNumber === instance.currentWeekNumber
+          ? instance.currentWeekEndDate
+          : DateUtils.addWeeks(instance.currentWeekEndDate, dto.weekNumber - instance.currentWeekNumber),
         metrics,
         dailyBreakdown,
         activityTypeBreakdown,
@@ -102,13 +106,18 @@ export class WeeklySnapshotService {
       };
 
       // 7. Salvar no Firestore
-      await setDoc(doc(firestore, this.COLLECTIONS.SNAPSHOTS, snapshotId), {
+      const snapshotPayload = {
         ...snapshotData,
         weekStartDate: Timestamp.fromDate(snapshotData.weekStartDate),
         weekEndDate: Timestamp.fromDate(snapshotData.weekEndDate),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
+      };
+      await setDoc(
+        doc(firestore, this.COLLECTIONS.SNAPSHOTS, snapshotId),
+        snapshotPayload,
+        dto.forceRegenerate ? {} : { merge: true }
+      );
 
       console.log(`✅ [SNAPSHOT] Gerado com sucesso: ${snapshotId}`);
       console.log(`📈 Métricas: ${metrics.completionRate}% completado, ${metrics.totalPointsEarned} pontos`);
@@ -388,7 +397,6 @@ export class WeeklySnapshotService {
     scheduleInstanceId: string,
     weekNumber: number
   ): string {
-    const timestamp = Date.now();
-    return `snapshot_${scheduleInstanceId}_week${weekNumber}_${timestamp}`;
+    return `snapshot_${scheduleInstanceId}_week${weekNumber}`;
   }
 }

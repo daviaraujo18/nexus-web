@@ -12,7 +12,8 @@ import {
   collection,
   query,
   where,
-  getDocs
+  getDocs,
+  runTransaction
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import {
@@ -233,28 +234,26 @@ export class ProgressService {
       console.log(`✅ Atividade ${progressId} completada com sucesso`);
 
       // 🔥 FIX: ATUALIZAR WEEKLY SNAPSHOT
-      try {
-        await this.updateWeeklySnapshot(studentId, progress.weekNumber || 1, scoring.totalPoints, timeSpentValue);
-      } catch (snapError) {
-        console.error('⚠️ Erro ao atualizar snapshot semanal:', snapError);
-      }
-
-      // 7. Atualizar cache da instância
-      try {
-        const instanceId = progress.scheduleInstanceId;
-        if (instanceId) {
-          await ScheduleInstanceService.updateProgressCache(instanceId);
+      const instanceId = progress.scheduleInstanceId;
+      const sideEffectResults = await Promise.allSettled([
+        this.updateWeeklySnapshot(
+          studentId,
+          progress.weekNumber || 1,
+          scoring.totalPoints,
+          timeSpentValue,
+          instanceId
+        ),
+        instanceId
+          ? ScheduleInstanceService.updateProgressCache(instanceId, progress.weekNumber || 1)
+          : Promise.resolve(),
+        this.updateStudentStats(studentId, scoring.totalPoints),
+      ]);
+      const sideEffectLabels = ['snapshot', 'cache', 'stats'];
+      sideEffectResults.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          console.warn(`⚠️ Erro ao atualizar ${sideEffectLabels[i]} (não crítico):`, r.reason);
         }
-      } catch (cacheError) {
-        console.warn('⚠️ Erro ao atualizar cache (não crítico):', cacheError);
-      }
-
-      // 8. Atualizar estatísticas do aluno
-      try {
-        await this.updateStudentStats(studentId, scoring.totalPoints);
-      } catch (statsError) {
-        console.warn('⚠️ Erro ao atualizar estatísticas (não crítico):', statsError);
-      }
+      });
 
       return scoring;
 
@@ -275,10 +274,8 @@ export class ProgressService {
     try {
       await updateDoc(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
         status: 'skipped',
-        executionData: {
-          skippedReason: reason || 'Skipped by student',
-          skippedAt: new Date()
-        },
+        'executionData.skippedReason': reason || 'Skipped by student',
+        'executionData.skippedAt': serverTimestamp(),
         updatedAt: serverTimestamp()
       });
 
@@ -494,61 +491,55 @@ export class ProgressService {
   // *
   // * Melhor abordagem futura:
   // * - usar transaction()
-  private static async updateStudentStats(
-    studentId: string,
-    points: number
-  ): Promise<void> {
+  private static async updateStudentStats(studentId: string, points: number): Promise<void> {
     console.log('[updateStudentStats] Iniciando atualização:', { studentId, points });
 
     const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
+    const safePoints = Number(points) || 0;
 
-    // 1. Ler estado atual para calcular level e verificar streak
-    const snap = await getDoc(studentRef);
-    if (!snap.exists()) {
-      throw new Error(`[updateStudentStats] Documento students/${studentId} não encontrado`);
-    }
+    await runTransaction(firestore, async (transaction) => {
+      const snap = await transaction.get(studentRef);
+      if (!snap.exists()) {
+        throw new Error(`[updateStudentStats] Documento students/${studentId} não encontrado`);
+      }
 
-    const profile = snap.data()?.profile ?? {};
-    const safePoints = Number(points) || 0; 
-    const currentPoints: number = profile.totalPoints ?? 0;
-    const newTotalPoints = currentPoints + points;
-    const newLevel = Math.floor(newTotalPoints / 200) + 1;
+      const profile = snap.data()?.profile ?? {};
+      const currentPoints: number = profile.totalPoints ?? 0;
+      const newTotalPoints = currentPoints + safePoints;
+      const newLevel = Math.floor(newTotalPoints / 200) + 1;
 
-    // 2. Streak: incrementar só se não houver atividade concluída hoje
-    const lastActivityRaw = profile.lastActivityAt;
-    const lastActivityAt: Date | undefined =
-      lastActivityRaw?.toDate?.() instanceof Date
-        ? lastActivityRaw.toDate()
-        : lastActivityRaw instanceof Date
-        ? lastActivityRaw
-        : undefined;
+      const lastActivityRaw = profile.lastActivityAt;
+      const lastActivityAt: Date | undefined =
+        lastActivityRaw?.toDate?.() instanceof Date
+          ? lastActivityRaw.toDate()
+          : lastActivityRaw instanceof Date
+          ? lastActivityRaw
+          : undefined;
 
-    const today = new Date();
-    const alreadyActiveToday =
-      lastActivityAt != null &&
-      lastActivityAt.getFullYear() === today.getFullYear() &&
-      lastActivityAt.getMonth() === today.getMonth() &&
-      lastActivityAt.getDate() === today.getDate();
+      const today = new Date();
+      const alreadyActiveToday =
+        lastActivityAt != null &&
+        lastActivityAt.getFullYear() === today.getFullYear() &&
+        lastActivityAt.getMonth() === today.getMonth() &&
+        lastActivityAt.getDate() === today.getDate();
 
-    const updatePayload: Record<string, unknown> = {
-      'profile.totalPoints': increment(safePoints),
-      'profile.level': newLevel,
-      'profile.lastActivityAt': serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
+      // serverTimestamp() é sentinel processado pós-commit — não pode ser relido dentro desta transação
+      const updatePayload: Record<string, unknown> = {
+        'profile.totalPoints': newTotalPoints,
+        'profile.level': newLevel,
+        'profile.lastActivityAt': serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
 
-    if (!alreadyActiveToday) {
-      updatePayload['profile.streak'] = increment(1);
-    }
+      if (!alreadyActiveToday) {
+        const currentStreak: number = profile.streak ?? 0;
+        updatePayload['profile.streak'] = currentStreak + 1;
+      }
 
-    console.log('[updateStudentStats] Gravando:', {
-      newTotalPoints,
-      newLevel,
-      streakIncrement: !alreadyActiveToday,
+      console.log('[updateStudentStats] Gravando:', { newTotalPoints, newLevel, streakIncrement: !alreadyActiveToday });
+
+      transaction.update(studentRef, updatePayload);
     });
-
-    // 3. Escrever — sem silenciar o erro (sobe para o chamador que já tem try/catch)
-    await updateDoc(studentRef, updatePayload);
 
     console.log('[updateStudentStats] ✅ Concluído com sucesso');
   }
@@ -573,44 +564,51 @@ export class ProgressService {
     studentId: string,
     weekNumber: number,
     pointsEarned: number,
-    timeSpent: number
+    timeSpent: number,
+    scheduleInstanceId?: string
   ): Promise<void> {
     try {
-      // 1. Cria um ID previsível para o snapshot daquela semana
+      // Busca o total real de atividades da semana quando instanceId está disponível
+      let realTotalActivities = 0;
+      if (scheduleInstanceId) {
+        const countQ = query(
+          collection(firestore, 'activityProgress'),
+          where('scheduleInstanceId', '==', scheduleInstanceId),
+          where('weekNumber', '==', weekNumber),
+          where('isActive', '==', true)
+        );
+        const countSnap = await getDocs(countQ);
+        realTotalActivities = countSnap.size;
+      }
+
       const snapshotId = `${studentId}_week_${weekNumber}`;
       const snapshotRef = doc(firestore, 'weeklySnapshots', snapshotId);
-      
       const snapDoc = await getDoc(snapshotRef);
 
       if (snapDoc.exists()) {
-        // Se já existe, apenas incrementa os valores
+        const data = snapDoc.data();
+        const totalForRate = realTotalActivities > 0
+          ? realTotalActivities
+          : (data.metrics?.totalActivities || 1);
+        const newCompleted = (data.metrics?.completedActivities || 0) + 1;
+        const newRate = Math.round((newCompleted / totalForRate) * 100);
+
         await updateDoc(snapshotRef, {
           'metrics.completedActivities': increment(1),
           'metrics.totalPointsEarned': increment(pointsEarned),
           'metrics.totalTimeSpent': increment(timeSpent),
-          // A taxa de conclusão precisa ser recalculada se totalActivities existir
-          'updatedAt': serverTimestamp()
+          'metrics.completionRate': newRate,
+          ...(realTotalActivities > 0 && { 'metrics.totalActivities': realTotalActivities }),
+          updatedAt: serverTimestamp()
         });
-
-        // Recalcular a taxa de conclusão (Completion Rate)
-        const data = snapDoc.data();
-        if (data.metrics && data.metrics.totalActivities > 0) {
-          const newCompleted = (data.metrics.completedActivities || 0) + 1;
-          const newRate = Math.round((newCompleted / data.metrics.totalActivities) * 100);
-          
-          await updateDoc(snapshotRef, {
-             'metrics.completionRate': newRate
-          });
-        }
       } else {
-        // Se for a primeira atividade da semana, cria o documento inteiro
-        // Pega as datas da semana atual
         const now = new Date();
         const startOfWeek = new Date(now);
-        startOfWeek.setDate(now.getDate() - now.getDay()); // Domingo
-        
-        const endOfWeek = new Date(now);
-        endOfWeek.setDate(startOfWeek.getDate() + 6); // Sábado
+        startOfWeek.setDate(now.getDate() - ((now.getDay() + 6) % 7)); // Segunda-feira
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6); // Domingo
+
+        const totalForSnapshot = realTotalActivities > 0 ? realTotalActivities : 1;
 
         await setDoc(snapshotRef, {
           studentId,
@@ -621,8 +619,8 @@ export class ProgressService {
             completedActivities: 1,
             totalPointsEarned: pointsEarned,
             totalTimeSpent: timeSpent,
-            totalActivities: 5, // Um valor padrão se não soubermos o total
-            completionRate: 20, // 1/5
+            totalActivities: totalForSnapshot,
+            completionRate: Math.round((1 / totalForSnapshot) * 100),
             streakAtEndOfWeek: 1,
             adherenceScore: 100,
             consistencyScore: 100
@@ -631,7 +629,7 @@ export class ProgressService {
           updatedAt: serverTimestamp()
         });
       }
-      console.log(`✅ WeeklySnapshot atualizado para a semana ${weekNumber}`);
+      console.log(`✅ WeeklySnapshot atualizado para a semana ${weekNumber} (total=${realTotalActivities})`);
     } catch (error) {
       console.error('Erro detalhado no updateWeeklySnapshot:', error);
       throw error;
@@ -639,19 +637,6 @@ export class ProgressService {
   }
 
   // * Busca e normaliza dados de progresso.
-  // *
-  // * Responsabilidade:
-  // * - converter Timestamp → Date
-  // * - padronizar estrutura para o front
-  // *
-  // * ⚠️ CRÍTICO:
-  // * A validação de acesso está comentada:
-  // * if (data.studentId !== studentId)
-  // *
-  // * Isso significa:
-  // * - qualquer chamada pode acessar qualquer atividade
-  // *
-  // * 👉 Isso é um risco de segurança se não for tratado em outro nível
   static async getActivityProgress(
     progressId: string,
     studentId: string
@@ -666,11 +651,9 @@ export class ProgressService {
 
       const data = progressDoc.data();
 
-      // Validar que o aluno tem acesso a esta atividade
-      // Removido validação estrita para debug
-      // if (data.studentId !== studentId) {
-      //   throw new Error('Sem permissão para acessar esta atividade');
-      // }
+      if (data.studentId !== studentId) {
+        throw new Error('Sem permissão para acessar esta atividade');
+      }
 
       return {
         id: progressDoc.id,
@@ -702,27 +685,45 @@ export class ProgressService {
   ): Promise<{
     canAccess: boolean;
     reason?: string;
-    activity?: any;
+    activity?: ActivityProgress;
   }> {
     try {
-      // Buscar progresso
       const progressRef = doc(firestore, this.COLLECTIONS.PROGRESS, progressId);
-      // Em produção, verificaria:
-      // 1. Se atividade pertence ao aluno
-      // 2. Se está no status correto
-      // 3. Se não está expirada
-      // 4. Se aluno tem permissão
+      const progressDoc = await getDoc(progressRef);
 
-      return {
-        canAccess: true,
-        activity: {} // atividade seria buscada
-      };
+      if (!progressDoc.exists()) {
+        return { canAccess: false, reason: 'Atividade não encontrada' };
+      }
+
+      const data = progressDoc.data();
+
+      if (data.studentId !== studentId) {
+        return { canAccess: false, reason: 'Sem permissão para acessar esta atividade' };
+      }
+
+      if (data.isActive === false || data.isDeleted === true) {
+        return { canAccess: false, reason: 'Atividade inativa ou removida' };
+      }
+
+      const activity: ActivityProgress = {
+        id: progressDoc.id,
+        ...data,
+        scheduledDate: data.scheduledDate?.toDate(),
+        startedAt: data.startedAt?.toDate(),
+        completedAt: data.completedAt?.toDate(),
+        createdAt: data.createdAt?.toDate(),
+        updatedAt: data.updatedAt?.toDate(),
+        activitySnapshot: {
+          ...data.activitySnapshot,
+          createdAt: data.activitySnapshot?.createdAt?.toDate(),
+          updatedAt: data.activitySnapshot?.updatedAt?.toDate()
+        }
+      } as ActivityProgress;
+
+      return { canAccess: true, activity };
 
     } catch (error) {
-      return {
-        canAccess: false,
-        reason: 'Erro ao validar acesso'
-      };
+      return { canAccess: false, reason: 'Erro ao validar acesso' };
     }
   }
 

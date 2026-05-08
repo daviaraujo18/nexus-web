@@ -1,11 +1,13 @@
 // cloud-functions/weeklyReset.ts
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
-import { RepetitionService } from '@/lib/services/RepetitionService';
+import { RepetitionService } from '../lib/services/RepetitionService';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onRequest } from 'firebase-functions/v2/https';
 
-admin.initializeApp();
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
 
 /**
  * Cloud Function que roda toda segunda-feira às 00:01

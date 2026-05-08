@@ -9,9 +9,8 @@ import {
   Timestamp, 
   DocumentData, 
   QuerySnapshot, 
-  doc, 
-  getDoc,
-  collectionGroup // 🔥 IMPORT INJETADO PARA BUSCA NUCLEAR
+  doc,
+  getDoc
 } from 'firebase/firestore';
 import { 
   AnalyticsFilters,
@@ -89,7 +88,7 @@ export class AnalyticsService {
       // * ⚠️ Risco:
       // * Se houver instâncias antigas duplicadas, o maior valor pode mascarar inconsistências.
       try {
-        const qInstances = query(collectionGroup(firestore, 'scheduleInstances'), where('studentId', '==', studentId));
+        const qInstances = query(collection(firestore, 'scheduleInstances'), where('studentId', '==', studentId));
         const snapInstances = await getDocs(qInstances);
         snapInstances.forEach(d => {
           const cache = d.data().progressCache || {};
@@ -111,7 +110,7 @@ export class AnalyticsService {
       try {
         const activityCollections = ['activityProgress'];
         for (const col of activityCollections) {
-          const qAct = query(collectionGroup(firestore, col), where('studentId', '==', studentId), where('status', '==', 'completed'));
+          const qAct = query(collection(firestore, col), where('studentId', '==', studentId), where('status', '==', 'completed'));
           const snapAct = await getDocs(qAct);
           
           snapAct.forEach(d => {
@@ -171,16 +170,7 @@ export class AnalyticsService {
       // * Para histórico fiel por semana, o ideal seria distribuir por completedAt.
       const weeklyHistory = this.generateWeeklyHistory(snapshots, allGad7);
 
-      // 🔥 INJEÇÃO PARA A INTERFACE FAZER O REDUCE CORRETO
-      if (weeklyHistory.length > 0) {
-        // Limpa os tempos fantasmas para não duplicar
-        weeklyHistory.forEach(w => { w.timeSpent = 0; w.activitiesCompleted = 0; w.streakAtEnd = 0; });
-        // Injeta os valores reais do banco na semana mais recente
-        weeklyHistory[0].timeSpent = dbTotalTime;
-        weeklyHistory[0].activitiesCompleted = dbTotalActivities;
-        weeklyHistory[0].streakAtEnd = dbStreak; // Para o Maior Streak renderizar certo
-      } else {
-        // Fallback caso não haja snapshots
+      if (weeklyHistory.length === 0) {
         weeklyHistory.push({
           weekNumber: 1, timeSpent: dbTotalTime, activitiesCompleted: dbTotalActivities, streakAtEnd: dbStreak,
           completionRate: 0, consistencyScore: 0, adherenceScore: dbAdherence, pointsEarned: 0, dailyBreakdown: {}
@@ -468,7 +458,7 @@ export class AnalyticsService {
   private async countCompletedActivities(studentId: string): Promise<number> {
     try {
       const q = query(
-        collectionGroup(firestore, 'activityProgress'),
+        collection(firestore, 'activityProgress'),
         where('studentId', '==', studentId),
         where('status', '==', 'completed')
       );

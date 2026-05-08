@@ -9,7 +9,8 @@ import {
   serverTimestamp,
   Timestamp,
   DocumentData,
-  getDoc
+  getDoc,
+  runTransaction
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import {
@@ -124,19 +125,6 @@ export class WeeklyResetService {
 
     try {
       console.log(`🔄 [RESET] Processando instância ${instanceId}, semana atual: ${oldWeekNumber}`);
-
-      // 1. Verificar se realmente precisa de reset
-      const needsReset = await this.needsWeeklyReset(instance);
-      if (!needsReset) {
-        return {
-          instanceId,
-          oldWeekNumber,
-          newWeekNumber: oldWeekNumber,
-          newActivitiesCount: 0,
-          status: 'skipped',
-          error: 'Não precisa de reset (semana ainda não terminou)'
-        };
-      }
 
       if (dryRun) {
         console.log(`🔍 [DRY RUN] Simulando reset para ${instanceId}`);
@@ -571,6 +559,7 @@ export class WeeklyResetService {
       // Usar transaction para garantir atomicidade
       await this.runTransaction(async (transaction) => {
         const instanceRef = doc(firestore, this.COLLECTIONS.INSTANCES, instanceId);
+        const _snap = await transaction.get(instanceRef);
 
         // 🔥 FORÇAR ZERAMENTO DO PROGRESSCACHE
         transaction.update(instanceRef, {
@@ -602,32 +591,6 @@ export class WeeklyResetService {
         console.warn(`⚠️ [FULL RESET] Erro ao gerar atividades:`, activityError.message);
       }
 
-      // 6. 🔥 VERIFICAÇÃO PÓS-RESET (IMPORTANTE!)
-      // Aguardar 2 segundos e verificar se realmente foi zerado
-      setTimeout(async () => {
-        try {
-          const updatedInstance = await ScheduleInstanceService.getScheduleInstanceById(instanceId);
-          const actualCompleted = updatedInstance.progressCache?.completedActivities || 0;
-
-          if (actualCompleted > 0) {
-            console.error(`🚨 [VERIFICAÇÃO] ERRO CRÍTICO: ${instanceId} ainda tem ${actualCompleted} atividades completadas após reset!`);
-            console.error(`   Algo está SOBRESCREVENDO o progressCache!`);
-
-            // Tentar corrigir forçadamente
-            await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
-              'progressCache.completedActivities': 0,
-              'progressCache.totalPointsEarned': 0,
-              'progressCache.completionPercentage': 0,
-              'progressCache.lastUpdatedAt': serverTimestamp()
-            });
-          } else {
-            console.log(`✅ [VERIFICAÇÃO] ${instanceId} realmente zerado: ${actualCompleted} atividades`);
-          }
-        } catch (checkError) {
-          console.warn(`⚠️ Erro na verificação pós-reset:`, checkError);
-        }
-      }, 2000);
-
       return {
         instanceId,
         oldWeekNumber,
@@ -651,9 +614,8 @@ export class WeeklyResetService {
   }
 
   private static async runTransaction(updateFunction: (transaction: any) => Promise<void>) {
-  // Implementação específica para Firestore
-  // Em produção, usar firestore.runTransaction
-}
+    await runTransaction(firestore, updateFunction);
+  }
 
   /**
    * Verifica se cronograma deve continuar (baseado em endDate)
@@ -695,11 +657,12 @@ export class WeeklyResetService {
     weekNumber: number
   ): Promise<number> {
     try {
-      // Reutilizar método existente do ScheduleInstanceService
       await ScheduleInstanceService.generateWeekActivities(instanceId, weekNumber);
-
-      return 0;
-
+      const weekProgress = await ScheduleInstanceService.getWeekProgress(instanceId, weekNumber);
+      if (weekProgress.length === 0) {
+        console.warn(`⚠️ Nenhuma atividade gerada para instância ${instanceId} semana ${weekNumber} — verifique visibilidade do template`);
+      }
+      return weekProgress.length;
     } catch (error) {
       console.error('Erro ao gerar novas atividades:', error);
       return 0;

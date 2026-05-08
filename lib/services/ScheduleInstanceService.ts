@@ -235,8 +235,8 @@ export class ScheduleInstanceService {
     })) as ActivityProgress[];
   }
 
-  static async updateProgressCache(instanceId: string): Promise<void> {
-    const progress = await this.getWeekProgress(instanceId, 1);
+  static async updateProgressCache(instanceId: string, weekNumber: number): Promise<void> {
+    const progress = await this.getWeekProgress(instanceId, weekNumber);
     const total = progress.length;
     const completed = progress.filter(p => p.status === 'completed').length;
     const points = progress.reduce((sum, p) => sum + (p.scoring?.pointsEarned || 0), 0);
