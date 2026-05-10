@@ -141,10 +141,16 @@ export default function MySchedulesPage() {
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
             <h3 className="font-bold mb-4">Programas Ativos</h3>
             <div className="space-y-4">
-              {instances.map(inst => (
+              {instances
+                .filter(inst => {
+                  if (!searchTerm) return true;
+                  const term = searchTerm.toLowerCase();
+                  return inst.id.toLowerCase().includes(term) || (inst.scheduleName || '').toLowerCase().includes(term);
+                })
+                .map(inst => (
                 <div key={inst.id} className="p-4 border rounded-xl flex justify-between items-center">
                   <div>
-                    <div className="font-bold">Programa de Desenvolvimento</div>
+                    <div className="font-bold">{inst.scheduleName || 'Cronograma'}</div>
                     <div className="text-xs text-gray-500">ID: {inst.id}</div>
                   </div>
                   <Link href={`/student/schedules/${inst.id}`} className="text-purple-600 text-sm font-medium">Ver Detalhes</Link>

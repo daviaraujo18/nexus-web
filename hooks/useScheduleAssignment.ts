@@ -33,7 +33,7 @@ export function useScheduleAssignment() {
     search?: string;
     grade?: string;
     school?: string;
-  }) => {
+  }, overrideScheduleId?: string) => {
     if (!user || user.role === 'student') {
       throw new Error('Apenas profissionais podem acessar esta função');
     }
@@ -51,15 +51,16 @@ export function useScheduleAssignment() {
           }
         }
       );
-      
+
       // Verificar quais alunos já têm cronograma ativo
+      const effectiveScheduleId = overrideScheduleId ?? schedule?.id;
       const studentsWithStatus = await Promise.all(
         studentsData.map(async (student) => {
           let hasActiveInstance = false;
-          if (schedule?.id) {
+          if (effectiveScheduleId) {
             hasActiveInstance = await StudentService.hasActiveSchedule(
               student.id,
-              schedule.id
+              effectiveScheduleId
             );
           }
           
@@ -79,7 +80,7 @@ export function useScheduleAssignment() {
     } finally {
       setLoadingStudents(false);
     }
-  }, [user, schedule?.id]);
+  }, [user]);
 
   /**
    * Carrega dados do cronograma
@@ -89,15 +90,11 @@ export function useScheduleAssignment() {
       const scheduleData = await ScheduleService.getScheduleTemplate(scheduleId, true);
       setSchedule(scheduleData);
       
-      if (scheduleData.activities) {
-        setActivities(scheduleData.activities);
-      } else {
-        // Buscar atividades separadamente se não vierem com o template
-        const activitiesData = await ActivityService.listScheduleActivities(scheduleId);
-        setActivities(activitiesData);
-      }
-      
-      return { schedule: scheduleData, activities: scheduleData.activities || [] };
+      const resolvedActivities = (scheduleData as any).activities
+        ?? await ActivityService.listScheduleActivities(scheduleId);
+      setActivities(resolvedActivities);
+
+      return { schedule: scheduleData, activities: resolvedActivities };
     } catch (error: any) {
       console.error('Erro ao carregar dados do cronograma:', error);
       throw error;
@@ -120,8 +117,9 @@ export function useScheduleAssignment() {
       // Para não-coordenadores, verificar se todos os alunos estão atribuídos a ele
       const allAssigned = await Promise.all(
         assignData.studentIds.map(async (studentId) => {
-          const student = students.find(s => s.id === studentId);
-          return student?.profile.assignedProfessionals?.includes(user.id) || false;
+          const student = students.find(s => s.id === studentId)
+            ?? await StudentService.getStudentById(studentId, user.id).catch(() => null);
+          return student?.profile?.assignedProfessionals?.includes(user.id) ?? false;
         })
       );
 
@@ -152,6 +150,10 @@ export function useScheduleAssignment() {
     setResult(null);
   }, []);
 
+  const refreshStudents = useCallback(() => {
+    return loadStudents(undefined, schedule?.id);
+  }, [loadStudents, schedule?.id]);
+
   return {
     // Estados
     assigning,
@@ -160,13 +162,13 @@ export function useScheduleAssignment() {
     schedule,
     activities,
     result,
-    
+
     // Ações
     loadStudents,
     loadScheduleData,
     assignSchedule,
     clearResult,
-    refreshStudents: () => loadStudents(),
+    refreshStudents,
     
     // Utilitários
     hasResult: result !== null,

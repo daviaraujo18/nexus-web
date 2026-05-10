@@ -231,7 +231,7 @@ export default function ActivityPage() {
          * - depende do clock do cliente
          * - pode divergir do backend 
          */
-        timeSpent: active ? Math.ceil((Date.now() - active.startedAt.getTime()) / 60000) : 0
+        timeSpent: (active && active.startedAt) ? Math.ceil((Date.now() - active.startedAt.getTime()) / 60000) : 0
       });
       stopTimer();
       setActivityProgress(prev => prev ? { ...prev, status: 'completed' } : null);

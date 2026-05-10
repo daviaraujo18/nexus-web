@@ -115,7 +115,7 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
         setLoading(true);
         // Carrega cronograma primeiro para que loadStudents possa verificar instâncias ativas
         await loadScheduleData(scheduleId);
-        await loadStudents();
+        await loadStudents(undefined, scheduleId);
       } catch (err: any) {
         console.error('❌ Erro ao inicializar Assignment:', err);
         setError('Falha ao carregar dados do cronograma.');
@@ -124,7 +124,8 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
       }
     };
     init();
-  }, [scheduleId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleId, loadScheduleData, loadStudents]);
 
   useEffect(() => {
     if (students.length > 0) {

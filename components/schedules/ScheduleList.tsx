@@ -31,7 +31,12 @@ export default function ScheduleList({
   // Filtrar cronogramas
   const filteredSchedules = schedules.filter(schedule => {
     if (filterStatus !== 'all' && schedule.status !== filterStatus) return false;
-    if (searchTerm && !schedule.id.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      const matchId = schedule.id.toLowerCase().includes(term);
+      const matchName = (schedule.scheduleName || '').toLowerCase().includes(term);
+      if (!matchId && !matchName) return false;
+    }
     return true;
   });
 
@@ -85,12 +90,12 @@ export default function ScheduleList({
                     <div className="flex items-center gap-3">
                       {getStatusIcon(schedule.status)}
                       <div>
-                        <h4 className="font-medium text-gray-900">Programa de Desenvolvimento</h4>
+                        <h4 className="font-medium text-gray-900">{schedule.scheduleName || 'Cronograma'}</h4>
                         <div className="flex items-center gap-2 text-xs text-gray-500">
                           <FaClock className="w-3 h-3" />
                           <span>Semana {schedule.currentWeekNumber}</span>
                           <span>•</span>
-                          <span>Iniciado em {schedule.startedAt.toLocaleDateString('pt-BR')}</span>
+                          <span>Iniciado em {schedule.startedAt?.toLocaleDateString('pt-BR') ?? '—'}</span>
                         </div>
                       </div>
                     </div>
@@ -143,7 +148,7 @@ export default function ScheduleList({
                       
                       <div className="text-center p-3 bg-white rounded-lg">
                         <div className="text-lg font-bold text-gray-900 mb-1">
-                          {schedule.progressCache.streakDays}
+                          {schedule.progressCache?.streakDays ?? 0}
                         </div>
                         <div className="text-xs text-gray-600">Dias seguidos</div>
                       </div>

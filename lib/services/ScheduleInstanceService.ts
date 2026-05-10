@@ -91,12 +91,12 @@ export class ScheduleInstanceService {
           today.setHours(0, 0, 0, 0);
 
           let startDate: Date;
-          // 🔥 TRAVA DE SEGURANÇA: Prioriza a data futura do template se houver
-          if (dateFromTemplate && dateFromTemplate > today) {
-            console.warn(`⚠️ [TRAVA] Forçando data do template: ${dateFromTemplate.toLocaleDateString()}`);
+          if (dateFromForm && dateFromForm >= today) {
+            startDate = dateFromForm;
+          } else if (dateFromTemplate && dateFromTemplate > today) {
             startDate = dateFromTemplate;
           } else {
-            startDate = dateFromForm || dateFromTemplate || today;
+            startDate = today;
           }
           
           startDate.setHours(0, 0, 0, 0);
@@ -106,6 +106,7 @@ export class ScheduleInstanceService {
 
           const instanceData = {
             scheduleTemplateId,
+            scheduleName: schedule.name,
             studentId,
             professionalId,
             currentWeekNumber: 1,
@@ -126,6 +127,17 @@ export class ScheduleInstanceService {
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           };
+
+          const existingSnap = await getDocs(query(
+            collection(firestore, this.COLLECTIONS.INSTANCES),
+            where('studentId', '==', studentId),
+            where('scheduleTemplateId', '==', scheduleTemplateId),
+            where('status', 'in', ['active', 'paused'])
+          ));
+          if (!existingSnap.empty) {
+            failed.push({ studentId, error: 'Aluno já possui uma instância ativa deste cronograma.' });
+            continue;
+          }
 
           await setDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), instanceData);
           console.log(`✅ [SUCESSO] Instância criada: ${instanceId}`);
@@ -162,13 +174,23 @@ export class ScheduleInstanceService {
     const templateEndDate: Date | null = (() => {
       const ed = this.toDateSafe(templateData?.endDate);
       if (!ed) return null;
-      const d = new Date(ed);
-      d.setHours(23, 59, 59, 999);
-      return d;
+      const isUTCMidnight = ed.getUTCHours() === 0 && ed.getUTCMinutes() === 0;
+      const year = isUTCMidnight ? ed.getUTCFullYear() : ed.getFullYear();
+      const month = isUTCMidnight ? ed.getUTCMonth() : ed.getMonth();
+      const date = isUTCMidnight ? ed.getUTCDate() : ed.getDate();
+      return new Date(Date.UTC(year, month, date, 23, 59, 59, 999));
     })();
 
     const activities = await ActivityService.listScheduleActivities(inst.scheduleTemplateId);
     const weekStartDate = inst.currentWeekStartDate.toDate();
+
+    const existingSnap = await getDocs(query(
+      collection(firestore, this.COLLECTIONS.PROGRESS),
+      where('scheduleInstanceId', '==', instanceId),
+      where('weekNumber', '==', weekNo)
+    ));
+    const existingIds = new Set(existingSnap.docs.map(d => d.id));
+
     const batch = writeBatch(firestore);
     let skipped = 0;
     let added = 0;
@@ -183,6 +205,10 @@ export class ScheduleInstanceService {
       }
 
       const progressId = `${instanceId}_w${weekNo}_${act.id}`;
+      if (existingIds.has(progressId)) {
+        skipped++;
+        continue;
+      }
       batch.set(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
         scheduleInstanceId: instanceId,
         activityId: act.id,
@@ -204,7 +230,7 @@ export class ScheduleInstanceService {
     if (added > 0) {
       await batch.commit();
     }
-    console.log(`✨ [GENERATE] ${added} atividades geradas, ${skipped} ignoradas (após endDate).`);
+    console.log(`✨ [GENERATE] ${added} atividades geradas, ${skipped} ignoradas (endDate ou já existentes).`);
   }
 
   static async getScheduleInstanceById(instanceId: string): Promise<ScheduleInstance> {
@@ -235,8 +261,19 @@ export class ScheduleInstanceService {
     })) as ActivityProgress[];
   }
 
+<<<<<<< HEAD
   static async updateProgressCache(instanceId: string, weekNumber: number): Promise<void> {
     const progress = await this.getWeekProgress(instanceId, weekNumber);
+=======
+  static async updateProgressCache(instanceId: string, weekNumber?: number): Promise<void> {
+    let resolvedWeek = weekNumber;
+    if (resolvedWeek === undefined) {
+      const instSnap = await getDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
+      if (!instSnap.exists()) return;
+      resolvedWeek = instSnap.data().currentWeekNumber ?? 1;
+    }
+    const progress = await this.getWeekProgress(instanceId, resolvedWeek);
+>>>>>>> 98fd75d (fixes)
     const total = progress.length;
     const completed = progress.filter(p => p.status === 'completed').length;
     const points = progress.reduce((sum, p) => sum + (p.scoring?.pointsEarned || 0), 0);

@@ -4,14 +4,14 @@ import {
   query,
   where,
   getDocs,
-  orderBy,
   limit,
   DocumentData,
   doc,
   getDoc,
   updateDoc,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  documentId
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import { Student, StudentProfile, UserRole } from '@/types/auth';
@@ -415,7 +415,7 @@ export class StudentService {
 
         let q = query(
           collection(firestore, this.COLLECTIONS.STUDENTS),
-          where('id', 'in', batchIds)
+          where(documentId(), 'in', batchIds)
         );
 
         if (options.activeOnly) {
@@ -429,8 +429,6 @@ export class StudentService {
         if (options.filters?.school) {
           q = query(q, where('profile.school', '==', options.filters.school));
         }
-
-        q = query(q, orderBy('name'));
 
         if (options.limit && students.length + batchSize > options.limit) {
           const remaining = options.limit - students.length;
@@ -459,7 +457,10 @@ export class StudentService {
         }
       }
 
-      // 3. Aplicar filtro de busca se necessário
+      // 3. Ordenar em memória (documentId() impede orderBy no Firestore)
+      students.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+
+      // 4. Aplicar filtro de busca se necessário
       if (options.search) {
         const searchLower = options.search.toLowerCase();
         return students.filter(student =>

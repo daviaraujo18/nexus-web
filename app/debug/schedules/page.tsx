@@ -460,7 +460,7 @@ export default function DebugSchedulesPage() {
                                         <div>Completadas: {instance.progressCache.completedActivities}/{instance.progressCache.totalActivities}</div>
                                         <div>Progresso: {instance.progressCache.completionPercentage?.toFixed(1)}%</div>
                                         <div>Pontos: {instance.progressCache.totalPointsEarned}</div>
-                                        <div>Streak: {instance.progressCache.streakDays} dias</div>
+                                        <div>Streak: {instance.progressCache?.streakDays ?? 0} dias</div>
                                         <div className="col-span-4 text-gray-500">
                                           Última atualização: {formatDate(instance.progressCache.lastUpdatedAt)}
                                         </div>

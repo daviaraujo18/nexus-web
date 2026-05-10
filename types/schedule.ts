@@ -149,6 +149,7 @@ export interface ScheduleActivity extends BaseModel {
 
 export interface ScheduleInstance extends BaseModel {
   scheduleTemplateId: string;
+  scheduleName?: string;
   studentId: string;
   professionalId: string;
 
@@ -159,7 +160,7 @@ export interface ScheduleInstance extends BaseModel {
 
   // Estado
   status: InstanceStatus;
-  startedAt: Date;
+  startedAt?: Date;
   completedAt?: Date;
 
   // Personalizações
@@ -321,8 +322,6 @@ export interface CreateActivityDTO {
     gradeLevel?: string | null;
     subject?: string | null;
   };
-  estimatedDuration: number; // ADICIONADO, COMENTADO - DEVE SER RETIRADO
-  pointsOnCompletion: number; // ADICIONADO, COMENTADO - DEVE SER RETIRADO
 }
 
 export interface AssignScheduleDTO {
