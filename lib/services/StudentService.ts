@@ -228,24 +228,21 @@ export class StudentService {
     studentIds: string[],
     professionalId: string
   ): Promise<{ success: string[]; failed: Array<{ studentId: string; error: string }> }> {
-    const results = {
-      success: [] as string[],
-      failed: [] as Array<{ studentId: string; error: string }>
-    };
+    const settled = await Promise.allSettled(
+      studentIds.map(studentId => this.assignStudentToProfessional(studentId, professionalId).then(() => studentId))
+    );
 
-    for (const studentId of studentIds) {
-      try {
-        await this.assignStudentToProfessional(studentId, professionalId);
-        results.success.push(studentId);
-      } catch (error: any) {
-        results.failed.push({
-          studentId,
-          error: error.message || 'Erro desconhecido'
-        });
-      }
-    }
-
-    return results;
+    return settled.reduce<{ success: string[]; failed: Array<{ studentId: string; error: string }> }>(
+      (acc, result, i) => {
+        if (result.status === 'fulfilled') {
+          acc.success.push(result.value);
+        } else {
+          acc.failed.push({ studentId: studentIds[i], error: (result.reason as any)?.message || 'Erro desconhecido' });
+        }
+        return acc;
+      },
+      { success: [], failed: [] }
+    );
   }
 
   /**
@@ -255,24 +252,21 @@ export class StudentService {
     studentIds: string[],
     professionalId: string
   ): Promise<{ success: string[]; failed: Array<{ studentId: string; error: string }> }> {
-    const results = {
-      success: [] as string[],
-      failed: [] as Array<{ studentId: string; error: string }>
-    };
+    const settled = await Promise.allSettled(
+      studentIds.map(studentId => this.removeStudentFromProfessional(studentId, professionalId).then(() => studentId))
+    );
 
-    for (const studentId of studentIds) {
-      try {
-        await this.removeStudentFromProfessional(studentId, professionalId);
-        results.success.push(studentId);
-      } catch (error: any) {
-        results.failed.push({
-          studentId,
-          error: error.message || 'Erro desconhecido'
-        });
-      }
-    }
-
-    return results;
+    return settled.reduce<{ success: string[]; failed: Array<{ studentId: string; error: string }> }>(
+      (acc, result, i) => {
+        if (result.status === 'fulfilled') {
+          acc.success.push(result.value);
+        } else {
+          acc.failed.push({ studentId: studentIds[i], error: (result.reason as any)?.message || 'Erro desconhecido' });
+        }
+        return acc;
+      },
+      { success: [], failed: [] }
+    );
   }
 
   /**
@@ -430,8 +424,9 @@ export class StudentService {
           q = query(q, where('profile.school', '==', options.filters.school));
         }
 
-        if (options.limit && students.length + batchSize > options.limit) {
+        if (options.limit) {
           const remaining = options.limit - students.length;
+          if (remaining <= 0) break;
           q = query(q, limit(remaining));
         }
 

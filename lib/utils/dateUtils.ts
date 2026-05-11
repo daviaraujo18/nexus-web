@@ -9,13 +9,11 @@ export class DateUtils {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
     const day = d.getDay(); // 0 = Domingo, 1 = Segunda...
-    
     // Ajuste: Se for domingo (0), volta 6 dias. Se não, volta (dia - 1)
     const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(d.setDate(diff));
-    
-    console.log(`📏 [DateUtils] Calculando Início da Semana para ${date.toLocaleDateString()}:`, monday.toLocaleDateString());
-    return monday;
+    d.setDate(diff);
+    d.setHours(0, 0, 0, 0); // Re-normaliza após setDate (proteção DST)
+    return new Date(d);
   }
 
   /**
@@ -38,9 +36,8 @@ export class DateUtils {
     const result = new Date(weekStartDate);
     // Se weekStartDate é Segunda, somar dayOfWeek (0 = Segunda, 1 = Terça...)
     result.setDate(weekStartDate.getDate() + dayOfWeek);
-    result.setHours(0, 0, 0, 0);
-    
-    return result;
+    // Usa local noon para evitar edge case de DST onde meia-noite pode não existir
+    return new Date(result.getFullYear(), result.getMonth(), result.getDate(), 12, 0, 0);
   }
 
   /**

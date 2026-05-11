@@ -57,8 +57,11 @@ export class ScheduleInstanceService {
       if (endDate) {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
-        const normalizedEndDate = new Date(endDate);
-        normalizedEndDate.setHours(0, 0, 0, 0);
+        const isUTCMidnight = endDate.getUTCHours() === 0 && endDate.getUTCMinutes() === 0;
+        const year = isUTCMidnight ? endDate.getUTCFullYear() : endDate.getFullYear();
+        const month = isUTCMidnight ? endDate.getUTCMonth() : endDate.getMonth();
+        const date = isUTCMidnight ? endDate.getUTCDate() : endDate.getDate();
+        const normalizedEndDate = new Date(year, month, date, 0, 0, 0, 0);
 
         if (normalizedEndDate < todayStart) {
           return { visible: false, data: t, reason: 'endDate-expired' };
@@ -93,7 +96,7 @@ export class ScheduleInstanceService {
           let startDate: Date;
           if (dateFromForm && dateFromForm >= today) {
             startDate = dateFromForm;
-          } else if (dateFromTemplate && dateFromTemplate > today) {
+          } else if (dateFromTemplate && dateFromTemplate >= today) {
             startDate = dateFromTemplate;
           } else {
             startDate = today;
@@ -178,8 +181,13 @@ export class ScheduleInstanceService {
       const year = isUTCMidnight ? ed.getUTCFullYear() : ed.getFullYear();
       const month = isUTCMidnight ? ed.getUTCMonth() : ed.getMonth();
       const date = isUTCMidnight ? ed.getUTCDate() : ed.getDate();
-      return new Date(Date.UTC(year, month, date, 23, 59, 59, 999));
+      return new Date(year, month, date, 23, 59, 59, 999);
     })();
+
+    if (!inst.currentWeekStartDate) {
+      console.warn(`⚠️ [GENERATE] Instância ${instanceId} sem currentWeekStartDate — geração cancelada.`);
+      return;
+    }
 
     const activities = await ActivityService.listScheduleActivities(inst.scheduleTemplateId);
     const weekStartDate = inst.currentWeekStartDate.toDate();
@@ -191,6 +199,16 @@ export class ScheduleInstanceService {
     ));
     const existingIds = new Set(existingSnap.docs.map(d => d.id));
 
+    const instanceStartDate: Date | null = (() => {
+      const sd = this.toDateSafe(inst.startedAt);
+      if (!sd) return null;
+      const isUTCMidnight = sd.getUTCHours() === 0 && sd.getUTCMinutes() === 0;
+      const year = isUTCMidnight ? sd.getUTCFullYear() : sd.getFullYear();
+      const month = isUTCMidnight ? sd.getUTCMonth() : sd.getMonth();
+      const date = isUTCMidnight ? sd.getUTCDate() : sd.getDate();
+      return new Date(year, month, date, 0, 0, 0, 0);
+    })();
+
     const batch = writeBatch(firestore);
     let skipped = 0;
     let added = 0;
@@ -200,6 +218,12 @@ export class ScheduleInstanceService {
 
       if (templateEndDate && activityDate > templateEndDate) {
         console.log(`📅 [GENERATE] "${act.title}" após endDate (${activityDate.toLocaleDateString()}) — ignorada.`);
+        skipped++;
+        continue;
+      }
+
+      if (weekNo === 1 && instanceStartDate && activityDate < instanceStartDate) {
+        console.log(`⏩ [GENERATE] "${act.title}" antes do início da instância (${activityDate.toLocaleDateString()}) — ignorada.`);
         skipped++;
         continue;
       }
@@ -261,10 +285,6 @@ export class ScheduleInstanceService {
     })) as ActivityProgress[];
   }
 
-<<<<<<< HEAD
-  static async updateProgressCache(instanceId: string, weekNumber: number): Promise<void> {
-    const progress = await this.getWeekProgress(instanceId, weekNumber);
-=======
   static async updateProgressCache(instanceId: string, weekNumber?: number): Promise<void> {
     let resolvedWeek = weekNumber;
     if (resolvedWeek === undefined) {
@@ -273,7 +293,6 @@ export class ScheduleInstanceService {
       resolvedWeek = instSnap.data().currentWeekNumber ?? 1;
     }
     const progress = await this.getWeekProgress(instanceId, resolvedWeek);
->>>>>>> 98fd75d (fixes)
     const total = progress.length;
     const completed = progress.filter(p => p.status === 'completed').length;
     const points = progress.reduce((sum, p) => sum + (p.scoring?.pointsEarned || 0), 0);
@@ -359,12 +378,20 @@ export class ScheduleInstanceService {
     try {
       // Primeiro, pegamos apenas as instâncias que sobreviveram à auditoria de órfãos
       const active = await this.getStudentActiveInstances(studentId);
-      const activeIds = active.map(i => i.id);
+      const validInstanceIds = new Set(active.map(i => i.id));
 
-      if (activeIds.length === 0) {
+      if (validInstanceIds.size === 0) {
         console.log('ℹ️ [SERVICE] Nenhuma instância ativa — retornando grade vazia.');
         return [];
       }
+
+      // Mapa instanceId → currentWeekNumber para filtro prioritário por número de semana
+      const instanceWeekNumbers = new Map<string, number>();
+      active.forEach(i => {
+        if (i.currentWeekNumber !== undefined) {
+          instanceWeekNumbers.set(i.id, i.currentWeekNumber);
+        }
+      });
 
       const now = new Date();
       const start = DateUtils.getWeekStartDate(now);
@@ -375,7 +402,8 @@ export class ScheduleInstanceService {
       const q = query(
         collection(firestore, this.COLLECTIONS.PROGRESS),
         where('studentId', '==', studentId),
-        where('isActive', '==', true)
+        where('isActive', '==', true),
+        where('isDeleted', '==', false)
       );
 
       const snap = await getDocs(q);
@@ -387,19 +415,30 @@ export class ScheduleInstanceService {
 
         if (!scheduledDate) return;
 
-        const isLegit = activeIds.includes(data.scheduleInstanceId);
-        // VERIFICAÇÃO 2: A tarefa está dentro da semana civil atual?
-        const isWithinRange = scheduledDate >= start && scheduledDate <= end;
+        const isLegit = validInstanceIds.has(data.scheduleInstanceId);
+        if (!isLegit) {
+          console.log(`🚫 [BLOQUEIO ÓRFÃO] Tarefa bloqueada: [${data.activitySnapshot?.title || 'Sem título'}] | Instância: ${data.scheduleInstanceId.substring(0,8)}...`);
+          return;
+        }
 
-        if (isLegit && isWithinRange && !data.isDeleted) {
-          activities.push({ id: dDoc.id, ...data, scheduledDate } as ActivityProgress);
+        // Preferência por weekNumber; fallback para range de datas (dados legados sem weekNumber)
+        let isWithinRange = false;
+        const instanceWeekNumber = instanceWeekNumbers.get(data.scheduleInstanceId);
+        if (data.weekNumber !== undefined && instanceWeekNumber !== undefined) {
+          isWithinRange = data.weekNumber === instanceWeekNumber;
         } else {
-          // Log para sabermos por que a tarefa sumiu (ou por que não sumiu)
-          if (!isLegit) {
-            console.log(`🚫 [BLOQUEIO ÓRFÃO] Tarefa bloqueada: [${data.activitySnapshot?.title || 'Sem título'}] | Instância: ${data.scheduleInstanceId.substring(0,8)}...`);
-          } else if (!isWithinRange) {
-            console.log(`⏭️ [BLOQUEIO DATA] Fora da semana: [${data.activitySnapshot?.title || 'Sem título'}] | Data: ${scheduledDate.toLocaleDateString('pt-BR')}`);
-          }
+          const isUTCMidnight = scheduledDate.getUTCHours() === 0 && scheduledDate.getUTCMinutes() === 0;
+          const intendedYear = isUTCMidnight ? scheduledDate.getUTCFullYear() : scheduledDate.getFullYear();
+          const intendedMonth = isUTCMidnight ? scheduledDate.getUTCMonth() : scheduledDate.getMonth();
+          const intendedDate = isUTCMidnight ? scheduledDate.getUTCDate() : scheduledDate.getDate();
+          const safeScheduledDate = new Date(intendedYear, intendedMonth, intendedDate, 12, 0, 0);
+          isWithinRange = safeScheduledDate >= start && safeScheduledDate <= end;
+        }
+
+        if (isWithinRange) {
+          activities.push({ id: dDoc.id, ...data, scheduledDate } as ActivityProgress);
+        } else if (!isWithinRange) {
+          console.log(`⏭️ [BLOQUEIO DATA] Fora da semana: [${data.activitySnapshot?.title || 'Sem título'}] | Data: ${scheduledDate.toLocaleDateString('pt-BR')}`);
         }
       });
 

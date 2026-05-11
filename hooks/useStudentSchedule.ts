@@ -15,6 +15,7 @@ export function useStudentSchedule() {
   const instancesRef = useRef<ScheduleInstance[]>([]);
   const [instancesLoaded, setInstancesLoaded] = useState(false);
   const instancesLoadedRef = useRef(false);
+  const effectIdRef = useRef(0);
   const [weekActivities, setWeekActivities] = useState<ActivityProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export function useStudentSchedule() {
     setLoading(true);
     setError(null);
 
+    const myEffectId = ++effectIdRef.current;
     const userId = user.id;
 
     // Variáveis de closure locais a esta invocação do effect — completamente isoladas
@@ -61,11 +63,14 @@ export function useStudentSchedule() {
         setError('Erro ao carregar instâncias ativas.');
         setWeekActivities([]);
         setLoading(false);
-        pending = false;
       } finally {
         validating = false;
-        instancesLoadedRef.current = true;
-        setInstancesLoaded(true);
+        // Só sinaliza "loaded" se esta invocação ainda é a ativa E não foi cancelada —
+        // impede que validate() de componente desmontado contamine o ref para a próxima montagem
+        if (!cancelled && myEffectId === effectIdRef.current) {
+          instancesLoadedRef.current = true;
+          setInstancesLoaded(true);
+        }
         if (cancelled) return;
         if (pending) {
           pending = false;

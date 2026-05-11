@@ -33,7 +33,7 @@ interface TemplateWithData extends ScheduleTemplate {
 }
 
 export default function DebugSchedulesPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateWithData[]>([]);
@@ -48,10 +48,12 @@ export default function DebugSchedulesPage() {
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [professionals, setProfessionals] = useState<Record<string, string>>({});
 
-  // Carregar dados
+  // Carregar dados — apenas para profissionais e admins
   useEffect(() => {
+    if (!user) return;
+    if (user.role !== 'professional' && user.role !== 'admin') return;
     loadAllData();
-  }, []);
+  }, [user]);
 
   const loadAllData = async () => {
     try {
@@ -66,6 +68,7 @@ export default function DebugSchedulesPage() {
       const templatesSnapshot = await getDocs(templatesQuery);
 
       const templatesData: TemplateWithData[] = [];
+      const professionalIdsToFetch = new Set<string>();
 
       // 2. Para cada template, buscar instâncias relacionadas
       for (const templateDoc of templatesSnapshot.docs) {
@@ -140,9 +143,8 @@ export default function DebugSchedulesPage() {
             snapshots
           });
 
-          // Coletar IDs de profissionais para buscar nomes depois
-          if (instance.professionalId && !professionals[instance.professionalId]) {
-            professionals[instance.professionalId] = 'Carregando...';
+          if (instance.professionalId) {
+            professionalIdsToFetch.add(instance.professionalId);
           }
         }
 
@@ -155,7 +157,7 @@ export default function DebugSchedulesPage() {
       setTemplates(templatesData);
 
       // Buscar nomes dos profissionais
-      const professionalIds = Object.keys(professionals);
+      const professionalIds = Array.from(professionalIdsToFetch);
       if (professionalIds.length > 0) {
         const professionalNames: Record<string, string> = {};
 
@@ -249,11 +251,49 @@ export default function DebugSchedulesPage() {
 
   const filteredTemplates = templates.filter(template => {
     if (searchTerm) {
-      return template.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        template.id?.toLowerCase().includes(searchTerm.toLowerCase());
+      const term = searchTerm.toLowerCase();
+      if (!template.name.toLowerCase().includes(term) && !template.id?.toLowerCase().includes(term)) {
+        return false;
+      }
+    }
+    if (filterProfessional) {
+      const term = filterProfessional.toLowerCase();
+      const hasMatch = template.instances.some(i => {
+        const name = professionals[i.professionalId] ?? '';
+        return (i.professionalId?.toLowerCase().includes(term) ?? false) || name.toLowerCase().includes(term);
+      });
+      if (!hasMatch) return false;
     }
     return true;
   });
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-white rounded-lg shadow-lg p-8">
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <span className="ml-3 text-lg text-gray-700">Verificando acesso...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || (user.role !== 'professional' && user.role !== 'admin')) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+            <h2 className="text-xl font-semibold text-red-800 mb-2">Acesso restrito</h2>
+            <p className="text-red-600">Esta página é exclusiva para profissionais e administradores.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -336,6 +376,13 @@ export default function DebugSchedulesPage() {
                 placeholder="Buscar por nome ou ID..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="text"
+                placeholder="Filtrar por profissional..."
+                value={filterProfessional}
+                onChange={(e) => setFilterProfessional(e.target.value)}
                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
@@ -440,7 +487,7 @@ export default function DebugSchedulesPage() {
                                     <div className="text-xs text-gray-600 mt-1">
                                       Semana {instance.currentWeekNumber} |
                                       Aluno: {instance.studentId.slice(0, 8)}... |
-                                      Prof: {professionals[instance.professionalId] || instance.professionalId.slice(0, 8)}...
+                                      Prof: {professionals[instance.professionalId] || instance.professionalId?.slice(0, 8) || '—'}...
                                     </div>
                                   </div>
                                 </div>
