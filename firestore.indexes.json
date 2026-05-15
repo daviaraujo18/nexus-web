@@ -30,6 +30,15 @@
       ]
     },
     {
+      "collectionGroup": "scheduleInstances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "currentWeekEndDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "weeklySnapshots",
       "queryScope": "COLLECTION",
       "fields": [

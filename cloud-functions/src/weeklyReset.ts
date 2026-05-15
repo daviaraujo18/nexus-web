@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onRequest } from 'firebase-functions/v2/https';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
+import { ActivityData, calculateWeeklyMetrics as computeMetrics } from './shared/weeklyMetrics';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -18,19 +19,38 @@ export async function runWeeklyReset(): Promise<{
   let processedInstances = 0;
   let generatedSnapshots = 0;
   const now = new Date();
+  const PAGE_SIZE = 100;
 
-  const snapshot = await db
-    .collection('scheduleInstances')
-    .where('status', 'in', ['active', 'paused'])
-    .where('isActive', '==', true)
-    .get();
+  // Busca paginada para evitar full-scan de milhões de documentos
+  const instancesToReset: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+  let lastDoc: FirebaseFirestore.DocumentSnapshot | null = null;
+  let hasMore = true;
 
-  const instancesToReset = snapshot.docs.filter(doc => {
-    const weekEnd = doc.data().currentWeekEndDate?.toDate();
-    return weekEnd && weekEnd < now;
-  });
+  while (hasMore) {
+    let query = db
+      .collection('scheduleInstances')
+      .where('status', 'in', ['active', 'paused'])
+      .where('isActive', '==', true)
+      .orderBy('currentWeekEndDate')
+      .where('currentWeekEndDate', '<', now)
+      .limit(PAGE_SIZE);
 
-  console.log(`📊 ${instancesToReset.length}/${snapshot.size} instâncias precisam de reset`);
+    if (lastDoc) {
+      query = query.startAfter(lastDoc);
+    }
+
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      hasMore = false;
+      break;
+    }
+
+    snapshot.docs.forEach(doc => instancesToReset.push(doc));
+    lastDoc = snapshot.docs[snapshot.docs.length - 1];
+    hasMore = snapshot.docs.length === PAGE_SIZE;
+  }
+
+  console.log(`📊 ${instancesToReset.length} instâncias precisam de reset`);
 
   const CONCURRENCY = 5;
 
@@ -51,14 +71,14 @@ export async function runWeeklyReset(): Promise<{
     if (studentId) {
       const snapshotId = `${studentId}_${instanceDoc.id}_week_${currentWeekNumber}`;
 
-      // Calcular métricas reais a partir dos activityProgress da semana
+      // Calcular métricas usando shared utils
       const weekActivitiesSnap = await db
         .collection('activityProgress')
         .where('scheduleInstanceId', '==', instanceDoc.id)
         .where('weekNumber', '==', currentWeekNumber)
         .get();
 
-      const weekActivities = weekActivitiesSnap.docs.map(d => {
+      const weekActivities: ActivityData[] = weekActivitiesSnap.docs.map(d => {
         const a = d.data();
         return {
           status: a.status,
@@ -70,64 +90,7 @@ export async function runWeeklyReset(): Promise<{
         };
       });
 
-      const totalActivities = weekActivities.length;
-      const completedActivities = weekActivities.filter(a => a.status === 'completed').length;
-      const skippedActivities = weekActivities.filter(a => a.status === 'skipped').length;
-      const totalPoints = weekActivities
-        .filter(a => a.status === 'completed')
-        .reduce((sum, a) => sum + (a.scoring?.pointsEarned || 0), 0);
-      const completionRate = totalActivities > 0
-        ? Math.round((completedActivities / totalActivities) * 100)
-        : 0;
-      const totalTimeSpent = weekActivities
-        .filter(a => a.status === 'completed' && a.executionData?.timeSpent)
-        .reduce((sum, a) => sum + (a.executionData?.timeSpent || 0), 0);
-
-      // Consistência: dias únicos (0-6) com ao menos 1 atividade completada
-      const uniqueDays = new Set(
-        weekActivities.filter(a => a.status === 'completed').map(a => a.dayOfWeek)
-      ).size;
-      const consistencyScore = totalActivities > 0
-        ? Math.round((uniqueDays / 7) * 100)
-        : 0;
-
-      // Adesão: atividades completadas no mesmo dia do agendamento
-      const onTimeActivities = weekActivities.filter(a => {
-        if (a.status !== 'completed' || !a.completedAt || !a.scheduledDate) return false;
-        return a.completedAt.getFullYear() === a.scheduledDate.getFullYear()
-          && a.completedAt.getMonth() === a.scheduledDate.getMonth()
-          && a.completedAt.getDate() === a.scheduledDate.getDate();
-      }).length;
-      const adherenceScore = completedActivities > 0
-        ? Math.round((onTimeActivities / completedActivities) * 100)
-        : 0;
-
-      // Streak: dias consecutivos com atividade até o fim da semana
-      const completedDates = [
-        ...new Set(
-          weekActivities
-            .filter(a => a.status === 'completed' && a.completedAt)
-            .map(a => a.completedAt!.toISOString().split('T')[0])
-        ),
-      ].sort().reverse();
-      let streakAtEndOfWeek = 0;
-      if (completedDates.length > 0) {
-        streakAtEndOfWeek = 1;
-        for (let i = 1; i < completedDates.length; i++) {
-          const prev = new Date(completedDates[i - 1]);
-          const curr = new Date(completedDates[i]);
-          const diff = Math.round((prev.getTime() - curr.getTime()) / 86400000);
-          if (diff === 1) streakAtEndOfWeek++;
-          else break;
-        }
-      }
-
-      const avgPoints = completedActivities > 0
-        ? Math.round(totalPoints / completedActivities)
-        : 0;
-      const avgTime = completedActivities > 0
-        ? Math.round(totalTimeSpent / completedActivities)
-        : 0;
+      const metrics = computeMetrics(weekActivities);
 
       // Resolver scheduleName: se a instância não tiver, buscar do template
       let scheduleName = data.scheduleName;
@@ -135,7 +98,8 @@ export async function runWeeklyReset(): Promise<{
         try {
           const templateDoc = await db.collection('weeklySchedules').doc(data.scheduleTemplateId).get();
           scheduleName = templateDoc.data()?.name || '';
-        } catch {
+        } catch (e) {
+          console.warn(`⚠️ Erro ao buscar scheduleName do template ${data.scheduleTemplateId}:`, e);
           scheduleName = '';
         }
       }
@@ -149,24 +113,12 @@ export async function runWeeklyReset(): Promise<{
           weekStartDate: Timestamp.fromDate(currentWeekStartDate),
           weekEndDate: Timestamp.fromDate(currentWeekEndDate),
           isActive: true,
-          metrics: {
-            totalActivities,
-            completedActivities,
-            skippedActivities,
-            completionRate,
-            totalPointsEarned: totalPoints,
-            averagePointsPerActivity: avgPoints,
-            totalTimeSpent,
-            averageTimePerActivity: avgTime,
-            consistencyScore,
-            adherenceScore,
-            streakAtEndOfWeek,
-          },
+          metrics,
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
         generatedSnapshots++;
-        console.log(`📸 Snapshot ${snapshotId}: ${completedActivities}/${totalActivities} concluídas, consistência=${consistencyScore}%, adesão=${adherenceScore}%`);
+        console.log(`📸 Snapshot ${snapshotId}: ${metrics.completedActivities}/${metrics.totalActivities} concluídas, consistência=${metrics.consistencyScore}%, adesão=${metrics.adherenceScore}%`);
       } catch (snapshotErr: any) {
         console.error(`⚠️ Erro ao gerar snapshot para ${studentId}:`, snapshotErr.message);
       }
@@ -237,10 +189,13 @@ export async function runWeeklyReset(): Promise<{
 
     activitiesSnap.docs.forEach(actDoc => {
       const act = actDoc.data();
-      const activityDate = new Date(weekStartDate);
       const scheduleDay = ((act.dayOfWeek ?? 0) + 6) % 7;
-      activityDate.setDate(weekStartDate.getDate() + scheduleDay);
-      activityDate.setHours(12, 0, 0, 0);
+      const activityDate = new Date(
+        weekStartDate.getFullYear(),
+        weekStartDate.getMonth(),
+        weekStartDate.getDate() + scheduleDay,
+        12, 0, 0, 0
+      );
 
       const progressId = `${instanceDoc.id}_w${weekNo}_${actDoc.id}`;
       if (existingIds.has(progressId)) {
@@ -500,25 +455,22 @@ export const backfillSnapshots = onRequest(
         }
 
         try {
-          // 1. Buscar instância para scheduleName + templateId
           const instSnap = await db.collection('scheduleInstances').doc(instanceId).get();
           const instData = instSnap.exists ? instSnap.data()! : null;
 
-          // 2. Resolver scheduleName
           let scheduleName = instData?.scheduleName || '';
           if (!scheduleName && instData?.scheduleTemplateId) {
             const templateSnap = await db.collection('weeklySchedules').doc(instData.scheduleTemplateId).get();
             scheduleName = templateSnap.data()?.name || '';
           }
 
-          // 3. Buscar activityProgress da semana
           const weekSnap = await db
             .collection('activityProgress')
             .where('scheduleInstanceId', '==', instanceId)
             .where('weekNumber', '==', weekNumber)
             .get();
 
-          const weekActivities = weekSnap.docs.map(d => {
+          const weekActivities: ActivityData[] = weekSnap.docs.map(d => {
             const a = d.data();
             return {
               status: a.status,
@@ -530,9 +482,9 @@ export const backfillSnapshots = onRequest(
             };
           });
 
-          // 4. Calcular métricas
-          const total = weekActivities.length;
-          if (total === 0) {
+          const metrics = computeMetrics(weekActivities);
+
+          if (weekActivities.length === 0) {
             await snapDoc.ref.update({
               scheduleName: scheduleName || '',
               updatedAt: FieldValue.serverTimestamp(),
@@ -541,72 +493,14 @@ export const backfillSnapshots = onRequest(
             continue;
           }
 
-          const completed = weekActivities.filter(a => a.status === 'completed').length;
-          const skipped = weekActivities.filter(a => a.status === 'skipped').length;
-          const totalPoints = weekActivities
-            .filter(a => a.status === 'completed')
-            .reduce((sum, a) => sum + (a.scoring?.pointsEarned || 0), 0);
-          const completionRate = Math.round((completed / total) * 100);
-          const totalTimeSpent = weekActivities
-            .filter(a => a.status === 'completed' && a.executionData?.timeSpent)
-            .reduce((sum, a) => sum + (a.executionData?.timeSpent || 0), 0);
-
-          // Consistência
-          const uniqueDays = new Set(
-            weekActivities.filter(a => a.status === 'completed').map(a => a.dayOfWeek)
-          ).size;
-          const consistencyScore = Math.round((uniqueDays / 7) * 100);
-
-          // Adesão
-          const onTime = weekActivities.filter(a => {
-            if (a.status !== 'completed' || !a.completedAt || !a.scheduledDate) return false;
-            return a.completedAt.getFullYear() === a.scheduledDate.getFullYear()
-              && a.completedAt.getMonth() === a.scheduledDate.getMonth()
-              && a.completedAt.getDate() === a.scheduledDate.getDate();
-          }).length;
-          const adherenceScore = completed > 0 ? Math.round((onTime / completed) * 100) : 0;
-
-          // Streak
-          const completedDates = [
-            ...new Set(
-              weekActivities
-                .filter(a => a.status === 'completed' && a.completedAt)
-                .map(a => a.completedAt!.toISOString().split('T')[0])
-            ),
-          ].sort().reverse();
-          let streak = 0;
-          if (completedDates.length > 0) {
-            streak = 1;
-            for (let i = 1; i < completedDates.length; i++) {
-              const diff = Math.round(
-                (new Date(completedDates[i - 1]).getTime() - new Date(completedDates[i]).getTime()) / 86400000
-              );
-              if (diff === 1) streak++;
-              else break;
-            }
-          }
-
-          // 5. Atualizar snapshot
           await snapDoc.ref.set({
             scheduleName: scheduleName || '',
-            metrics: {
-              totalActivities: total,
-              completedActivities: completed,
-              skippedActivities: skipped,
-              completionRate,
-              totalPointsEarned: totalPoints,
-              averagePointsPerActivity: completed > 0 ? Math.round(totalPoints / completed) : 0,
-              totalTimeSpent,
-              averageTimePerActivity: completed > 0 ? Math.round(totalTimeSpent / completed) : 0,
-              consistencyScore,
-              adherenceScore,
-              streakAtEndOfWeek: streak,
-            },
+            metrics,
             updatedAt: FieldValue.serverTimestamp(),
           }, { merge: true });
 
           recalculated++;
-          console.log(`✅ ${snapDoc.id}: ${completed}/${total} concluídas, consistência=${consistencyScore}%, adesão=${adherenceScore}%`);
+          console.log(`✅ ${snapDoc.id}: ${metrics.completedActivities}/${metrics.totalActivities} concluídas, consistência=${metrics.consistencyScore}%, adesão=${metrics.adherenceScore}%`);
         } catch (err: any) {
           errors++;
           console.error(`⚠️ Erro em ${snapDoc.id}:`, err.message);
@@ -629,4 +523,3 @@ export const backfillSnapshots = onRequest(
     }
   }
 );
-

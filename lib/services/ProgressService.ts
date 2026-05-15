@@ -246,6 +246,17 @@ export class ProgressService {
         } as TxExtractedData;
       });
 
+      // Passo 1: recalcular progressCache da instância (com métricas reais de consistência/adesão)
+      // Executa ANTES do snapshot para que a transaction do updateWeeklySnapshot leia dados frescos
+      if (txData.instanceId) {
+        try {
+          await ScheduleInstanceService.updateProgressCache(txData.instanceId, txData.weekNumber);
+        } catch (err) {
+          console.warn('⚠️ Erro ao recalcular progressCache (não crítico):', err);
+        }
+      }
+
+      // Passo 2: atualizar snapshot e stats do aluno
       const sideEffectResults = await Promise.allSettled([
         this.updateWeeklySnapshot(
           studentId,
@@ -254,12 +265,9 @@ export class ProgressService {
           timeSpentValue,
           txData.instanceId
         ),
-        txData.instanceId
-          ? this.incrementProgressCache(txData.instanceId, scoring.totalPoints)
-          : Promise.resolve(),
         this.updateStudentStats(studentId, scoring.totalPoints),
       ]);
-      const sideEffectLabels = ['snapshot', 'cache', 'stats'];
+      const sideEffectLabels = ['snapshot', 'stats'];
       sideEffectResults.forEach((r, i) => {
         if (r.status === 'rejected') {
           console.warn(`⚠️ Erro ao atualizar ${sideEffectLabels[i]} (não crítico):`, r.reason);
@@ -586,11 +594,25 @@ export class ProgressService {
             : (totalActivities > 0 ? totalActivities : 0);
           const newCompleted = (data.metrics?.completedActivities || 0) + 1;
           const newRate = totalForRate > 0 ? Math.round((newCompleted / totalForRate) * 100) : 0;
+
+          // Métricas de engajamento: ler do progressCache da instância (recalculado pelo
+          // updateProgressCache que executa antes desta função) ou manter valor existente
+          const cacheConsistency = instData?.progressCache?.consistencyScore;
+          const cacheAdherence = instData?.progressCache?.adherenceScore;
+          const consistencyScore = typeof cacheConsistency === 'number'
+            ? cacheConsistency
+            : (data.metrics?.consistencyScore ?? Math.round((1 / 7) * 100));
+          const adherenceScore = typeof cacheAdherence === 'number'
+            ? cacheAdherence
+            : (data.metrics?.adherenceScore ?? 100);
+
           tx.update(snapshotRef, {
             'metrics.completedActivities': increment(1),
             'metrics.totalPointsEarned': increment(pointsEarned),
             'metrics.totalTimeSpent': increment(timeSpent),
             'metrics.completionRate': newRate,
+            'metrics.consistencyScore': consistencyScore,
+            'metrics.adherenceScore': adherenceScore,
             updatedAt: serverTimestamp()
           });
         } else {

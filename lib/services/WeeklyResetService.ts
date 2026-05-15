@@ -13,7 +13,8 @@ import {
   getDoc,
   runTransaction,
   limit,
-  orderBy
+  orderBy,
+  startAfter,
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import {
@@ -24,6 +25,7 @@ import {
 import { ScheduleInstanceService } from './ScheduleInstanceService';
 import { WeeklySnapshotService } from './WeeklySnapshotService';
 import { DateUtils } from '@/lib/utils/dateUtils';
+import { ConcurrentResetError, formatErrorMessage } from '@/lib/utils/errors';
 
 export class WeeklyResetService {
   private static readonly COLLECTIONS = {
@@ -146,33 +148,55 @@ export class WeeklyResetService {
   }
 
   /**
-   * Busca instâncias que precisam de reset
+   * Busca instâncias que precisam de reset (com paginação)
    */
-  private static async findInstancesForReset(): Promise<ScheduleInstance[]> {
+  private static async findInstancesForReset(pageSize: number = 100): Promise<ScheduleInstance[]> {
     try {
-      // Buscar todas as instâncias ativas
-      const q = query(
-        collection(firestore, this.COLLECTIONS.INSTANCES),
-        where('status', 'in', ['active', 'paused']),
-        where('isActive', '==', true)
-      );
-
-      const snapshot = await getDocs(q);
       const instances: ScheduleInstance[] = [];
+      const now = new Date();
+      let lastDoc: DocumentData | null = null;
+      let hasMore = true;
 
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        instances.push({
-          id: doc.id,
-          ...data,
-          currentWeekStartDate: data.currentWeekStartDate?.toDate(),
-          currentWeekEndDate: data.currentWeekEndDate?.toDate(),
-          startedAt: data.startedAt?.toDate(),
-          completedAt: data.completedAt?.toDate(),
-          createdAt: data.createdAt?.toDate(),
-          updatedAt: data.updatedAt?.toDate()
-        } as ScheduleInstance);
-      });
+      while (hasMore) {
+        const constraints: any[] = [
+          where('isActive', '==', true),
+          where('status', 'in', ['active', 'paused']),
+          orderBy('currentWeekEndDate'),
+          where('currentWeekEndDate', '<', now),
+          limit(pageSize),
+        ];
+        if (lastDoc) {
+          constraints.push(startAfter(lastDoc));
+        }
+
+        const q = query(
+          collection(firestore, this.COLLECTIONS.INSTANCES),
+          ...constraints
+        );
+
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) {
+          hasMore = false;
+          break;
+        }
+
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          instances.push({
+            id: doc.id,
+            ...data,
+            currentWeekStartDate: data.currentWeekStartDate?.toDate(),
+            currentWeekEndDate: data.currentWeekEndDate?.toDate(),
+            startedAt: data.startedAt?.toDate(),
+            completedAt: data.completedAt?.toDate(),
+            createdAt: data.createdAt?.toDate(),
+            updatedAt: data.updatedAt?.toDate()
+          } as ScheduleInstance);
+        });
+
+        lastDoc = snapshot.docs[snapshot.docs.length - 1];
+        hasMore = snapshot.docs.length === pageSize;
+      }
 
       // Filtrar apenas as que precisam de reset (em paralelo)
       const needsResetResults = await Promise.allSettled(
@@ -419,31 +443,52 @@ export class WeeklyResetService {
   }
 
   /**
-   * Método auxiliar: Busca TODAS as instâncias ativas
+   * Método auxiliar: Busca TODAS as instâncias ativas (com paginação)
    */
-  private static async getAllActiveInstances(): Promise<ScheduleInstance[]> {
-    const q = query(
-      collection(firestore, this.COLLECTIONS.INSTANCES),
-      where('status', 'in', ['active', 'paused']),
-      where('isActive', '==', true)
-    );
-
-    const snapshot = await getDocs(q);
+  private static async getAllActiveInstances(pageSize: number = 100): Promise<ScheduleInstance[]> {
     const instances: ScheduleInstance[] = [];
+    let lastDoc: DocumentData | null = null;
+    let hasMore = true;
 
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      instances.push({
-        id: doc.id,
-        ...data,
-        currentWeekStartDate: data.currentWeekStartDate?.toDate(),
-        currentWeekEndDate: data.currentWeekEndDate?.toDate(),
-        startedAt: data.startedAt?.toDate(),
-        completedAt: data.completedAt?.toDate(),
-        createdAt: data.createdAt?.toDate(),
-        updatedAt: data.updatedAt?.toDate()
-      } as ScheduleInstance);
-    });
+    while (hasMore) {
+      const constraints: any[] = [
+        where('status', 'in', ['active', 'paused']),
+        where('isActive', '==', true),
+        orderBy('currentWeekEndDate'),
+        limit(pageSize),
+      ];
+      if (lastDoc) {
+        constraints.push(startAfter(lastDoc));
+      }
+
+      const q = query(
+        collection(firestore, this.COLLECTIONS.INSTANCES),
+        ...constraints
+      );
+
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) {
+        hasMore = false;
+        break;
+      }
+
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        instances.push({
+          id: doc.id,
+          ...data,
+          currentWeekStartDate: data.currentWeekStartDate?.toDate(),
+          currentWeekEndDate: data.currentWeekEndDate?.toDate(),
+          startedAt: data.startedAt?.toDate(),
+          completedAt: data.completedAt?.toDate(),
+          createdAt: data.createdAt?.toDate(),
+          updatedAt: data.updatedAt?.toDate()
+        } as ScheduleInstance);
+      });
+
+      lastDoc = snapshot.docs[snapshot.docs.length - 1];
+      hasMore = snapshot.docs.length === pageSize;
+    }
 
     return instances;
   }
@@ -523,10 +568,7 @@ export class WeeklyResetService {
         const currentData = snap.data();
         const currentWeek = currentData.currentWeekNumber;
         if (currentWeek !== oldWeekNumber) {
-          // Outra instância já avançou a semana — sair silenciosamente sem erro
-          // (não lançar exceção para não ativar o rollback e não deixar activitiesReady=false)
-          const alreadyAdvanced = new Error(`__ALREADY_RESET__:${currentWeek}`);
-          throw alreadyAdvanced;
+          throw new ConcurrentResetError(currentWeek);
         }
 
         // 🔥 FORÇAR ZERAMENTO DO PROGRESSCACHE (totalActivities será atualizado após geração)
@@ -630,15 +672,12 @@ export class WeeklyResetService {
       };
 
     } catch (error: any) {
-      // Reset concorrente detectado: outra execução paralela já avançou a semana.
-      // Tratar como skipped (não como erro) para não incrementar contadores de falha.
-      if (typeof (error as any)?.message === 'string' && (error as any).message.startsWith('__ALREADY_RESET__')) {
-        const advancedWeek = parseInt(error.message.split(':')[1], 10) || oldWeekNumber + 1;
-        console.log(`⏭️ [FULL RESET] ${instanceId} já foi resetado por execução paralela — semana atual: ${advancedWeek}`);
+      if (error instanceof ConcurrentResetError) {
+        console.log(`⏭️ [FULL RESET] ${instanceId} já foi resetado por execução paralela — semana atual: ${error.currentWeekNumber}`);
         return {
           instanceId,
           oldWeekNumber,
-          newWeekNumber: advancedWeek,
+          newWeekNumber: error.currentWeekNumber,
           newActivitiesCount: 0,
           status: 'skipped',
           error: 'Reset já executado por execução paralela'
@@ -652,7 +691,7 @@ export class WeeklyResetService {
         newWeekNumber: oldWeekNumber,
         newActivitiesCount: 0,
         status: 'error',
-        error: String(error?.message ?? error)
+        error: formatErrorMessage(error)
       };
     }
   }

@@ -6,6 +6,12 @@ import {
 import { firestore } from '@/firebase/config';
 import { ScheduleInstance, ActivityProgress, AssignScheduleDTO } from '@/types/schedule';
 import { DateUtils } from '@/lib/utils/dateUtils';
+import {
+  ActivityData,
+  calculateConsistencyScore,
+  calculateAdherenceScore,
+  calculateTotalTimeSpent,
+} from '@/lib/utils/weeklyMetrics';
 import { ScheduleService } from './ScheduleService';
 import { ActivityService } from './ActivityService';
 
@@ -355,28 +361,23 @@ export class ScheduleInstanceService {
       resolvedWeek = instSnap.data().currentWeekNumber ?? 1;
     }
     const progress = await this.getWeekProgress(instanceId, resolvedWeek!);
-    const total = progress.length;
-    const completed = progress.filter(p => p.status === 'completed').length;
-    const skipped = progress.filter(p => p.status === 'skipped').length;
-    const points = progress.reduce((sum, p) => sum + (p.scoring?.pointsEarned || 0), 0);
-    const timeSpent = progress
-      .filter(p => p.status === 'completed' && p.executionData?.timeSpent)
-      .reduce((sum, p) => sum + (p.executionData!.timeSpent || 0), 0);
-
-    // Consistência: dias únicos com atividades completadas
-    const uniqueDays = new Set(
-      progress.filter(p => p.status === 'completed').map(p => p.dayOfWeek)
-    ).size;
-    const consistencyScore = total > 0 ? Math.round((uniqueDays / 7) * 100) : 0;
-
-    // Adesão: completou no dia agendado
-    const onTimeActivities = progress.filter(p => {
-      if (p.status !== 'completed' || !p.completedAt || !p.scheduledDate) return false;
-      return p.completedAt.getFullYear() === p.scheduledDate.getFullYear()
-        && p.completedAt.getMonth() === p.scheduledDate.getMonth()
-        && p.completedAt.getDate() === p.scheduledDate.getDate();
-    }).length;
-    const adherenceScore = completed > 0 ? Math.round((onTimeActivities / completed) * 100) : 0;
+    const adapted: ActivityData[] = progress.map(p => ({
+      status: p.status,
+      dayOfWeek: p.dayOfWeek,
+      scoring: p.scoring,
+      executionData: p.executionData,
+      scheduledDate: p.scheduledDate,
+      completedAt: p.completedAt,
+    }));
+    const total = adapted.length;
+    const completed = adapted.filter(a => a.status === 'completed').length;
+    const skipped = adapted.filter(a => a.status === 'skipped').length;
+    const points = adapted
+      .filter(a => a.status === 'completed')
+      .reduce((sum, a) => sum + (a.scoring?.pointsEarned || 0), 0);
+    const timeSpent = calculateTotalTimeSpent(adapted);
+    const consistencyScore = calculateConsistencyScore(adapted);
+    const adherenceScore = calculateAdherenceScore(adapted);
 
     await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
       'progressCache.totalActivities': total,

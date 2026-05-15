@@ -21,6 +21,7 @@ import {
 } from '@/types/schedule';
 import { ScheduleInstanceService } from './ScheduleInstanceService';
 import { DateUtils } from '@/lib/utils/dateUtils';
+import { ActivityData, calculateWeeklyMetrics as computeMetrics } from '@/lib/utils/weeklyMetrics';
 
 export class WeeklySnapshotService {
   private static readonly COLLECTIONS = {
@@ -139,82 +140,18 @@ export class WeeklySnapshotService {
   }
 
   /**
-   * Calcula métricas básicas da semana
+   * Calcula métricas básicas da semana usando shared utils
    */
   private static calculateWeeklyMetrics(progress: ActivityProgress[]) {
-    const total = progress.length;
-    const completed = progress.filter(p => p.status === 'completed').length;
-    const skipped = progress.filter(p => p.status === 'skipped').length;
-
-    const completionRate = total > 0 ? (completed / total) * 100 : 0;
-
-    // Pontuação total
-    const totalPoints = progress
-      .filter(p => p.status === 'completed')
-      .reduce((sum, p) => sum + (p.scoring?.pointsEarned || 0), 0);
-
-    const averagePoints = completed > 0 ? totalPoints / completed : 0;
-
-    // Tempo total
-    const totalTime = progress
-      .filter(p => p.status === 'completed' && p.executionData?.timeSpent)
-      .reduce((sum, p) => sum + (p.executionData!.timeSpent || 0), 0);
-
-    const averageTime = completed > 0 ? totalTime / completed : 0;
-
-    // Consistência (dias únicos com atividades completadas)
-    const uniqueDays = new Set(
-      progress
-        .filter(p => p.status === 'completed')
-        .map(p => p.dayOfWeek)
-    ).size;
-
-    const consistencyScore = (uniqueDays / 7) * 100;
-
-    // Aderência (completou no dia correto)
-    const onTimeActivities = progress.filter(p => {
-      if (p.status !== 'completed' || !p.completedAt || !p.scheduledDate) return false;
-      return DateUtils.isSameDay(p.completedAt, p.scheduledDate);
-    }).length;
-
-    const adherenceScore = completed > 0 ? (onTimeActivities / completed) * 100 : 0;
-
-    // Streak no final da semana (dias consecutivos até o último dia com atividade)
-    let streak = 0;
-    const completedDates = progress
-      .filter(p => p.status === 'completed' && p.completedAt)
-      .map(p => p.completedAt!.toISOString().split('T')[0])
-      .filter((v, i, a) => a.indexOf(v) === i)
-      .sort()
-      .reverse();
-
-    if (completedDates.length > 0) {
-      streak = 1;
-      for (let i = 1; i < completedDates.length; i++) {
-        const prev = new Date(completedDates[i - 1]);
-        const curr = new Date(completedDates[i]);
-        const diff = Math.round((prev.getTime() - curr.getTime()) / (1000 * 60 * 60 * 24));
-        if (diff === 1) {
-          streak++;
-        } else {
-          break;
-        }
-      }
-    }
-
-    return {
-      totalActivities: total,
-      completedActivities: completed,
-      skippedActivities: skipped,
-      completionRate: Math.round(completionRate),
-      totalPointsEarned: totalPoints,
-      averagePointsPerActivity: parseFloat(averagePoints.toFixed(1)),
-      totalTimeSpent: totalTime,
-      averageTimePerActivity: parseFloat(averageTime.toFixed(1)),
-      consistencyScore: Math.round(consistencyScore),
-      adherenceScore: Math.round(adherenceScore),
-      streakAtEndOfWeek: streak
-    };
+    const adapted: ActivityData[] = progress.map(p => ({
+      status: p.status,
+      dayOfWeek: p.dayOfWeek,
+      scoring: p.scoring,
+      executionData: p.executionData,
+      scheduledDate: p.scheduledDate,
+      completedAt: p.completedAt,
+    }));
+    return computeMetrics(adapted);
   }
 
   /**
