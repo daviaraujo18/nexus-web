@@ -1,7 +1,7 @@
 // hooks/useActivity.ts
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { ActivityProgress, ProgressStatus } from '@/types/schedule';
 import { ProgressService } from '@/lib/services/ProgressService';
 
@@ -9,6 +9,7 @@ export function useActivity(progress: ActivityProgress) {
   const [currentProgress, setCurrentProgress] = useState<ActivityProgress>(progress);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const startingRef = useRef(false);
 
   const updateProgress = useCallback((updates: Partial<ActivityProgress>) => {
     setCurrentProgress(prev => ({ ...prev, ...updates }));
@@ -21,8 +22,8 @@ export function useActivity(progress: ActivityProgress) {
       hasStudentId: !!currentProgress.studentId
     });
 
-    if (currentProgress.status !== 'pending') return;
-
+    if (currentProgress.status !== 'pending' || startingRef.current) return;
+    startingRef.current = true;
     setIsLoading(true);
     setError(null);
 
@@ -35,6 +36,7 @@ export function useActivity(progress: ActivityProgress) {
       return false;
     } finally {
       setIsLoading(false);
+      startingRef.current = false;
     }
   }, [currentProgress.id, currentProgress.studentId, currentProgress.status, updateProgress]);
 
@@ -51,13 +53,11 @@ export function useActivity(progress: ActivityProgress) {
         completionData
       );
 
-      updateProgress({
+      setCurrentProgress(prev => ({
+        ...prev,
         status: 'completed',
-        executionData: {
-          ...currentProgress.executionData,
-          ...completionData
-        }
-      });
+        executionData: { ...prev.executionData, ...completionData }
+      }));
 
       return result;
     } catch (err: any) {
@@ -66,7 +66,7 @@ export function useActivity(progress: ActivityProgress) {
     } finally {
       setIsLoading(false);
     }
-  }, [currentProgress, updateProgress]);
+  }, [currentProgress.id, currentProgress.studentId, currentProgress.status]);
 
   const skipActivity = useCallback(async (reason?: string) => {
     if (currentProgress.status !== 'in_progress' && currentProgress.status !== 'pending') return;
@@ -87,20 +87,20 @@ export function useActivity(progress: ActivityProgress) {
   }, [currentProgress.id, currentProgress.studentId, currentProgress.status, updateProgress]);
 
   const saveDraft = useCallback(async (draftData: any) => {
+    setError(null);
     try {
-      await ProgressService.saveDraft(currentProgress.id, draftData);
-      updateProgress({
-        executionData: {
-          ...currentProgress.executionData,
-          ...draftData
-        }
-      });
+      await ProgressService.saveDraft(currentProgress.id, currentProgress.studentId, draftData);
+      setCurrentProgress(prev => ({
+        ...prev,
+        executionData: { ...prev.executionData, ...draftData }
+      }));
       return true;
-    } catch (err: any) {
-      setError(err.message || 'Erro ao salvar rascunho');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Erro ao salvar rascunho';
+      setError(message);
       return false;
     }
-  }, [currentProgress.id, currentProgress.executionData, updateProgress]);
+  }, [currentProgress.id, currentProgress.studentId, updateProgress]);
 
   return {
     progress: currentProgress,

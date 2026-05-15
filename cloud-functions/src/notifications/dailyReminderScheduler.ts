@@ -1,6 +1,6 @@
-import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 
 // Inicializar Firebase Admin se não estiver inicializado
 if (!admin.apps.length) {
@@ -20,11 +20,9 @@ const messaging = admin.messaging();
  * 3. Envia notificação personalizada via FCM
  * 4. Registra no histórico e trata erros
  */
-export const dailyReminderScheduler = functions
-  .region('southamerica-east1')
-  .pubsub.schedule('0 8 * * *') // 8h00 UTC (5h00 BRT)
-  .timeZone('America/Sao_Paulo')
-  .onRun(async () => {
+export const dailyReminderScheduler = onSchedule(
+  { schedule: '0 8 * * *', timeZone: 'America/Sao_Paulo' },
+  async () => {
     try {
       console.log('🚀 Iniciando envio de lembretes diários...');
       const today = new Date();
@@ -164,8 +162,6 @@ export const dailyReminderScheduler = functions
         errors: errorCount,
         timestamp: Timestamp.now()
       });
-
-      return null;
 
     } catch (error) {
       console.error('❌ Erro crítico no scheduler:', error);

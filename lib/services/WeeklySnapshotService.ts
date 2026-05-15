@@ -75,6 +75,7 @@ export class WeeklySnapshotService {
 
       // 5. Criar ID único
       const snapshotId = this.generateSnapshotId(
+        instance.studentId,
         dto.scheduleInstanceId,
         dto.weekNumber
       );
@@ -94,7 +95,7 @@ export class WeeklySnapshotService {
         dailyBreakdown,
         activityTypeBreakdown,
         metadata: {
-          scheduleTemplateName: 'Não disponível', // Seria buscado do template
+          scheduleTemplateName: instance.scheduleName || 'Cronograma',
           scheduleTemplateId: instance.scheduleTemplateId,
           professionalId: instance.professionalId,
           generatedBy: 'system',
@@ -178,17 +179,27 @@ export class WeeklySnapshotService {
 
     const adherenceScore = completed > 0 ? (onTimeActivities / completed) * 100 : 0;
 
-    // Streak no final da semana (último dia com atividade)
+    // Streak no final da semana (dias consecutivos até o último dia com atividade)
     let streak = 0;
     const completedDates = progress
       .filter(p => p.status === 'completed' && p.completedAt)
       .map(p => p.completedAt!.toISOString().split('T')[0])
-      .sort();
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .sort()
+      .reverse();
 
     if (completedDates.length > 0) {
-      const lastDate = new Date(completedDates[completedDates.length - 1]);
-      const today = new Date();
-      streak = DateUtils.getDaysBetween(lastDate, today) + 1;
+      streak = 1;
+      for (let i = 1; i < completedDates.length; i++) {
+        const prev = new Date(completedDates[i - 1]);
+        const curr = new Date(completedDates[i]);
+        const diff = Math.round((prev.getTime() - curr.getTime()) / (1000 * 60 * 60 * 24));
+        if (diff === 1) {
+          streak++;
+        } else {
+          break;
+        }
+      }
     }
 
     return {
@@ -367,6 +378,9 @@ export class WeeklySnapshotService {
         where('weekNumber', '==', weekNumber),
         where('isActive', '==', true)
       );
+      // Nota: a query usa scheduleInstanceId+weekNumber (sem studentId)
+      // porque GenerateSnapshotDTO não carrega studentId.
+      // O ID do documento inclui studentId, mas a query busca por campos.
 
       const snapshot = await getDocs(q);
 
@@ -394,9 +408,10 @@ export class WeeklySnapshotService {
    * Gera ID único para snapshot
    */
   private static generateSnapshotId(
+    studentId: string,
     scheduleInstanceId: string,
     weekNumber: number
   ): string {
-    return `snapshot_${scheduleInstanceId}_week${weekNumber}`;
+    return `${studentId}_${scheduleInstanceId}_week_${weekNumber}`;
   }
 }

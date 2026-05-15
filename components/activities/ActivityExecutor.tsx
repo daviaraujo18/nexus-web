@@ -38,17 +38,20 @@ export default function ActivityExecutor({
   }>(progress.executionData?.emotionalState || {});
   const [isLoading, setIsLoading] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
+  const [isCompleting, setIsCompleting] = useState(false);
 
   const [activityProgress, setActivityProgress] = useState(progress);
   const { startTimer, stopTimer, elapsedSeconds } = useActivityTimer();
 
   useEffect(() => {
-    // Atualizar progresso quando prop mudar
+    if (isCompleting) return;
     setActivityProgress(progress);
     setCurrentStatus(progress.status);
-    setTimeSpent(progress.executionData?.timeSpent || 0);
+    if (progress.status !== 'in_progress') {
+      setTimeSpent(progress.executionData?.timeSpent || 0);
+    }
     setEmotionalState(progress.executionData?.emotionalState || {});
-  }, [progress]);
+  }, [progress, isCompleting]);
 
 
   // Sincroniza timeSpent local com o timer global (em minutos)
@@ -115,31 +118,33 @@ export default function ActivityExecutor({
   const handleCompleteActivity = async (completionData: any = {}) => {
     if (readOnly) return;
 
+    setIsCompleting(true);
     setIsLoading(true);
     try {
       const finalCompletionData = {
         ...completionData,
-        timeSpent, // ← JÁ TEMOS timeSpent como estado, use este!
+        timeSpent,
         emotionalState: {
           ...emotionalState,
-          after: emotionalState.after || emotionalState.before || 3
+          after: emotionalState.after ?? emotionalState.before ?? 3
         }
       };
 
       const result = await ProgressService.completeActivity(
-        progress.id,
-        progress.studentId,
+        activityProgress.id,
+        activityProgress.studentId,
         finalCompletionData
       );
 
       setCurrentStatus('completed');
       stopTimer();
-      onCompletion?.(progress.id, result);
-      onStatusChange?.(progress.id, 'completed');
+      onCompletion?.(activityProgress.id, result);
+      onStatusChange?.(activityProgress.id, 'completed');
     } catch (error) {
       console.error('Erro ao completar atividade:', error);
     } finally {
       setIsLoading(false);
+      setIsCompleting(false);
     }
   };
 
@@ -148,9 +153,9 @@ export default function ActivityExecutor({
 
     setIsLoading(true);
     try {
-      await ProgressService.skipActivity(progress.id, progress.studentId, reason);
+      await ProgressService.skipActivity(activityProgress.id, activityProgress.studentId, reason);
       setCurrentStatus('skipped');
-      onStatusChange?.(progress.id, 'skipped');
+      onStatusChange?.(activityProgress.id, 'skipped');
     } catch (error) {
       console.error('Erro ao pular atividade:', error);
     } finally {
@@ -162,8 +167,7 @@ export default function ActivityExecutor({
     if (readOnly) return;
 
     try {
-      await ProgressService.saveDraft(progress.id, draftData);
-      // Feedback visual opcional
+      await ProgressService.saveDraft(activityProgress.id, activityProgress.studentId, draftData);
     } catch (error) {
       console.error('Erro ao salvar rascunho:', error);
     }
@@ -211,6 +215,30 @@ export default function ActivityExecutor({
         return <AppActivity
           {...commonProps}
           activity={activity as ScheduleActivity & { config: AppActivityConfig }}
+        />;
+
+      case 'text':
+        return <TextActivity
+          {...commonProps}
+          activity={activity as ScheduleActivity & { config: TextActivityConfig }}
+        />;
+
+      case 'quiz':
+        return <QuizActivity
+          {...commonProps}
+          activity={activity as ScheduleActivity & { config: QuizActivityConfig }}
+        />;
+
+      case 'video':
+        return <VideoActivity
+          {...commonProps}
+          activity={activity as ScheduleActivity & { config: VideoActivityConfig }}
+        />;
+
+      case 'checklist':
+        return <ChecklistActivity
+          {...commonProps}
+          activity={activity as ScheduleActivity & { config: ChecklistActivityConfig }}
         />;
 
       default:
@@ -309,7 +337,7 @@ export default function ActivityExecutor({
             <div>
               <p className="text-sm text-gray-800">Dia</p>
               <p className="font-medium text-gray-500">
-                {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][progress.dayOfWeek]}
+                {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'][progress.dayOfWeek]}
               </p>
             </div>
           </div>

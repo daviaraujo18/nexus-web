@@ -9,7 +9,7 @@ import { AuthError } from '@/types';
 import InputField from '../ui/InputField';
 import PasswordStrength from '../ui/PasswordStrength';
 import { FaEnvelope, FaLock, FaUser } from 'react-icons/fa';
-import { AuthService } from '@/lib/auth/AuthService';
+import { useAuth } from '@/context/AuthContext';
 import UserTypeSelector from './UserTypeSelector';
 import ProfessionalFields from './ProfessionalFields';
 import StudentFields from './StudentFields';
@@ -87,8 +87,6 @@ interface AuthFormProps {
   defaultUserType?: 'student' | 'professional';
   onSuccess?: (result: any) => void;
   onError?: (error: AuthError) => void;
-  onSubmit?: (data: any) => Promise<void>; // ← NOVO
-  loading?: boolean; // ← NOVO
 }
 
 /* =========================
@@ -102,6 +100,7 @@ export default function AuthForm({
   onError
 }: AuthFormProps) {
 
+  const { login, register: contextRegister } = useAuth();
   const [userType, setUserType] =
     useState<'student' | 'professional'>(defaultUserType);
 
@@ -145,7 +144,7 @@ export default function AuthForm({
       let result;
 
       if (mode === 'login') {
-        result = await AuthService.login(data.email, data.password);
+        result = await login(data.email, data.password);
       } else {
         // Crie um objeto completo com todos os dados
         const registerData = {
@@ -172,7 +171,7 @@ export default function AuthForm({
         };
 
         console.log('Dados de registro:', registerData);
-        result = await AuthService.register(registerData);
+        result = await contextRegister(registerData);
       }
 
       onSuccess?.(result);

@@ -13,14 +13,14 @@ export const metadata: Metadata = {
 };
 
 interface RegisterPageProps {
-  searchParams: {
-    type?: string; // SearchParams em Server Components são tratados como strings
-  };
+  searchParams: Promise<{
+    type?: string;
+  }>;
 }
 
-export default function RegisterPage({ searchParams }: RegisterPageProps) {
-  // Garantindo que o tipo seja válido
-  const defaultUserType = (searchParams.type === 'professional' ? 'professional' : 'student') as 'student' | 'professional';
+export default async function RegisterPage({ searchParams }: RegisterPageProps) {
+  const { type } = await searchParams;
+  const defaultUserType = (type === 'professional' ? 'professional' : 'student') as 'student' | 'professional';
   
   const isStudent = defaultUserType === 'student';
   const accentColor = isStudent ? 'text-purple-600' : 'text-indigo-600';

@@ -937,7 +937,7 @@ export default function DebugInstancesCleanerPage() {
                         </div>
                         <div>
                           <span className="text-gray-500">Início:</span>
-                          <span className="ml-1">{format(instance.startedAt, 'dd/MM/yyyy')}</span>
+                          <span className="ml-1">{instance.startedAt ? format(instance.startedAt, 'dd/MM/yyyy') : '-'}</span>
                         </div>
                       </div>
                     </div>

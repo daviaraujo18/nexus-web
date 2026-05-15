@@ -1,7 +1,11 @@
 {
   "functions": {
     "source": "cloud-functions",
-    "runtime": "nodejs18"
+    "runtime": "nodejs20"
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "emulators": {
     "functions": {

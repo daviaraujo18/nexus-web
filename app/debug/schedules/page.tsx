@@ -1,6 +1,6 @@
 // pages/debug/schedules.tsx
 'use client'
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   collection,
   query,
@@ -48,14 +48,7 @@ export default function DebugSchedulesPage() {
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [professionals, setProfessionals] = useState<Record<string, string>>({});
 
-  // Carregar dados — apenas para profissionais e admins
-  useEffect(() => {
-    if (!user) return;
-    if (user.role !== 'professional' && user.role !== 'admin') return;
-    loadAllData();
-  }, [user]);
-
-  const loadAllData = async () => {
+  const loadAllData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -67,11 +60,10 @@ export default function DebugSchedulesPage() {
       );
       const templatesSnapshot = await getDocs(templatesQuery);
 
-      const templatesData: TemplateWithData[] = [];
+      // 2. Processar todos os templates em paralelo (era serial, com await por template)
       const professionalIdsToFetch = new Set<string>();
 
-      // 2. Para cada template, buscar instâncias relacionadas
-      for (const templateDoc of templatesSnapshot.docs) {
+      const processTemplate = async (templateDoc: any): Promise<TemplateWithData> => {
         const template = {
           id: templateDoc.id,
           ...templateDoc.data(),
@@ -81,78 +73,93 @@ export default function DebugSchedulesPage() {
           endDate: templateDoc.data().endDate?.toDate()
         } as ScheduleTemplate;
 
-        // Buscar instâncias deste template
         const instancesQuery = query(
           collection(firestore, 'scheduleInstances'),
           where('scheduleTemplateId', '==', templateDoc.id)
         );
         const instancesSnapshot = await getDocs(instancesQuery);
 
-        const instances = [];
+        const instanceIds = instancesSnapshot.docs.map(d => d.id);
+        const chunkSize = 30;
+        const activitiesByInstance = new Map<string, (ActivityProgress & { id: string })[]>();
+        const snapshotsByInstance = new Map<string, (WeeklySnapshot & { id: string })[]>();
 
-        for (const instanceDoc of instancesSnapshot.docs) {
+        if (instanceIds.length > 0) {
+          const chunks: string[][] = [];
+          for (let c = 0; c < instanceIds.length; c += chunkSize) {
+            chunks.push(instanceIds.slice(c, c + chunkSize));
+          }
+
+          await Promise.all(chunks.map(async (chunk) => {
+            const [actSnap, snapSnap] = await Promise.all([
+              getDocs(query(collection(firestore, 'activityProgress'), where('scheduleInstanceId', 'in', chunk))),
+              getDocs(query(collection(firestore, 'weeklySnapshots'), where('scheduleInstanceId', 'in', chunk), orderBy('weekNumber', 'desc')))
+            ]);
+
+            actSnap.docs.forEach(d => {
+              const sid = d.data().scheduleInstanceId;
+              if (!activitiesByInstance.has(sid)) activitiesByInstance.set(sid, []);
+              activitiesByInstance.get(sid)!.push({
+                id: d.id, ...d.data(),
+                createdAt: d.data().createdAt?.toDate(), updatedAt: d.data().updatedAt?.toDate(),
+                scheduledDate: d.data().scheduledDate?.toDate(), startedAt: d.data().startedAt?.toDate(),
+                completedAt: d.data().completedAt?.toDate(), dueDate: d.data().dueDate?.toDate()
+              } as ActivityProgress & { id: string });
+            });
+
+            snapSnap.docs.forEach(d => {
+              const sid = d.data().scheduleInstanceId;
+              if (!snapshotsByInstance.has(sid)) snapshotsByInstance.set(sid, []);
+              snapshotsByInstance.get(sid)!.push({
+                id: d.id, ...d.data(),
+                createdAt: d.data().createdAt?.toDate(), updatedAt: d.data().updatedAt?.toDate(),
+                weekStartDate: d.data().weekStartDate?.toDate(), weekEndDate: d.data().weekEndDate?.toDate()
+              } as WeeklySnapshot & { id: string });
+            });
+          }));
+        }
+
+        const instances = instancesSnapshot.docs.map(instanceDoc => {
+          const iData = instanceDoc.data();
           const instance = {
             id: instanceDoc.id,
-            ...instanceDoc.data(),
-            createdAt: instanceDoc.data().createdAt?.toDate(),
-            updatedAt: instanceDoc.data().updatedAt?.toDate(),
-            startedAt: instanceDoc.data().startedAt?.toDate(),
-            completedAt: instanceDoc.data().completedAt?.toDate(),
-            currentWeekStartDate: instanceDoc.data().currentWeekStartDate?.toDate(),
-            currentWeekEndDate: instanceDoc.data().currentWeekEndDate?.toDate()
+            ...iData,
+            createdAt: iData.createdAt?.toDate(),
+            updatedAt: iData.updatedAt?.toDate(),
+            startedAt: iData.startedAt?.toDate(),
+            completedAt: iData.completedAt?.toDate(),
+            currentWeekStartDate: iData.currentWeekStartDate?.toDate(),
+            currentWeekEndDate: iData.currentWeekEndDate?.toDate(),
+            progressCache: iData.progressCache ? {
+              ...iData.progressCache,
+              lastUpdatedAt: iData.progressCache.lastUpdatedAt?.toDate?.() ?? iData.progressCache.lastUpdatedAt
+            } : iData.progressCache
           } as ScheduleInstance;
-
-          // Buscar activityProgress desta instância
-          const activitiesQuery = query(
-            collection(firestore, 'activityProgress'),
-            where('scheduleInstanceId', '==', instanceDoc.id)
-          );
-          const activitiesSnapshot = await getDocs(activitiesQuery);
-
-          const activities = activitiesSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            createdAt: doc.data().createdAt?.toDate(),
-            updatedAt: doc.data().updatedAt?.toDate(),
-            scheduledDate: doc.data().scheduledDate?.toDate(),
-            startedAt: doc.data().startedAt?.toDate(),
-            completedAt: doc.data().completedAt?.toDate(),
-            dueDate: doc.data().dueDate?.toDate()
-          })) as (ActivityProgress & { id: string })[];
-
-          // Buscar weeklySnapshots desta instância
-          const snapshotsQuery = query(
-            collection(firestore, 'weeklySnapshots'),
-            where('scheduleInstanceId', '==', instanceDoc.id),
-            orderBy('weekNumber', 'desc')
-          );
-          const snapshotsSnapshot = await getDocs(snapshotsQuery);
-
-          const snapshots = snapshotsSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            createdAt: doc.data().createdAt?.toDate(),
-            updatedAt: doc.data().updatedAt?.toDate(),
-            weekStartDate: doc.data().weekStartDate?.toDate(),
-            weekEndDate: doc.data().weekEndDate?.toDate()
-          })) as (WeeklySnapshot & { id: string })[];
-
-          instances.push({
-            ...instance,
-            activities,
-            snapshots
-          });
 
           if (instance.professionalId) {
             professionalIdsToFetch.add(instance.professionalId);
           }
-        }
 
-        templatesData.push({
-          ...template,
-          instances
+          return {
+            ...instance,
+            activities: activitiesByInstance.get(instanceDoc.id) ?? [],
+            snapshots: snapshotsByInstance.get(instanceDoc.id) ?? []
+          };
         });
-      }
+
+        return { ...template, instances };
+      };
+
+      const templatesData = (await Promise.all(
+        templatesSnapshot.docs.map(async (doc) => {
+          try {
+            return await processTemplate(doc);
+          } catch (e) {
+            console.error('⚠️ Template ignorado devido a erro:', doc.id, e);
+            return null as unknown as TemplateWithData;
+          }
+        })
+      )).filter(Boolean);
 
       setTemplates(templatesData);
 
@@ -161,7 +168,7 @@ export default function DebugSchedulesPage() {
       if (professionalIds.length > 0) {
         const professionalNames: Record<string, string> = {};
 
-        for (const id of professionalIds) {
+        await Promise.all(professionalIds.map(async (id) => {
           try {
             const profDoc = await getDoc(doc(firestore, 'professionals', id));
             if (profDoc.exists()) {
@@ -173,7 +180,7 @@ export default function DebugSchedulesPage() {
           } catch (err) {
             professionalNames[id] = 'Erro ao carregar';
           }
-        }
+        }));
 
         setProfessionals(professionalNames);
       }
@@ -184,7 +191,15 @@ export default function DebugSchedulesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  // Carregar dados — apenas quando debug habilitado e para profissionais/admins
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_ENABLE_DEBUG !== 'true') return;
+    if (!user) return;
+    if (user.role === 'student') return;
+    loadAllData();
+  }, [user, loadAllData]);
 
   const toggleTemplate = () => {
     setExpandedSections(prev => ({
@@ -236,8 +251,19 @@ export default function DebugSchedulesPage() {
     }
   };
 
-  const formatDate = (date: Date | null | undefined) => {
-    if (!date) return '—';
+  const formatDate = (date: unknown) => {
+    if (date == null) return '—';
+
+    let safeDate: Date;
+    if (date instanceof Date) {
+      safeDate = date;
+    } else if (typeof (date as any)?.toDate === 'function') {
+      safeDate = (date as any).toDate();
+    } else {
+      return '—';
+    }
+
+    if (isNaN(safeDate.getTime())) return '—';
 
     return new Intl.DateTimeFormat('pt-BR', {
       day: '2-digit',
@@ -245,8 +271,8 @@ export default function DebugSchedulesPage() {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false // Garante o formato 24h
-    }).format(date);
+      hour12: false
+    }).format(safeDate);
   };
 
   const filteredTemplates = templates.filter(template => {
@@ -282,7 +308,20 @@ export default function DebugSchedulesPage() {
     );
   }
 
-  if (!user || (user.role !== 'professional' && user.role !== 'admin')) {
+  if (process.env.NEXT_PUBLIC_ENABLE_DEBUG !== 'true') {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+            <h2 className="text-xl font-semibold text-red-800 mb-2">Não disponível</h2>
+            <p className="text-red-600">Ferramentas de debug estão desabilitadas neste ambiente.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || user.role === 'student') {
     return (
       <div className="min-h-screen bg-gray-50 p-8">
         <div className="max-w-7xl mx-auto">

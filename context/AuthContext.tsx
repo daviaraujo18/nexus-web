@@ -36,7 +36,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'User profile not found or inactive') {
         console.log('⏳ Profile ainda não criado, aguardando...');
-        setProfileReady(true);
 
         await new Promise(resolve => setTimeout(resolve, 800));
 
@@ -55,79 +54,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Login unificado com redirecionamento
+  // Login unificado — navegação gerenciada exclusivamente pelo redirect effect
+  // loading NÃO é resetado aqui: onAuthStateChanged é o único responsável por setar loading=false
+  // após fetchUserData completar, evitando race onde redirect effect vê user=null e redireciona
   const login = async (email: string, password: string): Promise<LoginResult> => {
     setLoading(true);
     try {
       const result = await AuthService.login(email, password);
 
-      // Buscar dados completos do usuário
-      const userData = await fetchUserData(result.userId);
-      if (userData) {
-        setUser(userData);
-
-        // Redirecionar baseado no tipo
-        if (result.userType === 'professional') {
-          router.push('/professional/dashboard');
-        } else {
-          router.push('/student/dashboard');
-        }
-      }
-
       if (result.success) {
-        // REGISTRAR TOKEN FCM APÓS LOGIN BEM-SUCEDIDO
-        try {
-          // Aguardar um pouco para garantir que o usuário está carregado
-          setTimeout(async () => {
-            if (userData && userData.id) {
-              console.log('🔄 Registrando token FCM para notificações...');
-
-              // Solicitar permissão e token FCM
-              const token = await NotificationService.requestFCMToken(userData.id);
-
-              if (token) {
-                console.log('✅ Token FCM registrado com sucesso');
-
-                // Configurar listener para mensagens em foreground
-                NotificationService.setupForegroundMessageListener((payload) => {
-                  console.log('Notificação recebida em foreground:', payload);
-                  // Aqui você pode mostrar um toast ou atualizar UI
-                });
-              } else {
-                console.log('⚠️ Token FCM não obtido (usuário pode ter negado)');
-              }
-            }
-          }, 1000);
-        } catch (fcmError) {
-          console.warn('⚠️ Erro ao registrar token FCM:', fcmError);
-          // Não falhar o login por causa do FCM
+        const uid = auth.currentUser?.uid;
+        if (uid) {
+          NotificationService.requestFCMToken(uid).then(token => {
+            if (token) NotificationService.setupForegroundMessageListener(() => {});
+          }).catch((err) => {
+            console.warn('⚠️ Erro ao registrar token FCM:', err);
+          });
         }
       }
 
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Login error in context:', error);
-      throw error;
-    } finally {
       setLoading(false);
+      throw error;
     }
   };
 
   // Registro unificado com redirecionamento
+  // loading é resetado no finally pois registro não autentica o usuário
   const register = async (data: any): Promise<RegisterResult> => {
     setLoading(true);
     try {
       const result = await AuthService.register(data);
 
-      // Se registro foi bem sucedido, fazer login automático
       if (result.success && result.userId) {
-        // Em produção, aqui faríamos login automático ou redirecionaria para confirmação
-        // Por enquanto, redirecionar para login
         router.push('/login');
       }
 
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Registration error in context:', error);
       throw error;
     } finally {
@@ -135,17 +101,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Logout com redirecionamento
+  // Logout — navegação gerenciada pelo redirect effect via onAuthStateChanged → setUser(null)
   const logout = async (): Promise<void> => {
     try {
       await AuthService.logout();
-      setUser(null);
-      router.push('/login');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Erro no logout:', error);
       throw error;
     }
   };
+
+  // Safety: se loading ficar true por mais de 15s, força limpeza
+  // (proteção contra cenário onde onAuthStateChanged não dispara após login)
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setTimeout(() => setLoading(false), 15000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   // Listener de estado de autenticação SIMPLIFICADO
   useEffect(() => {
@@ -160,6 +132,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
       } else {
         setUser(null);
+        setProfileReady(true); // garante que o redirect effect rode após logout/sessão expirada
       }
       setLoading(false);
     });

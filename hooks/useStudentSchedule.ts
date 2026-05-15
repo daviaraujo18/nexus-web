@@ -9,6 +9,13 @@ import { useAuth } from '@/context/AuthContext';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 
+const toDateSafe = (v: unknown): Date | undefined => {
+  if (!v) return undefined;
+  if (typeof (v as any).toDate === 'function') return (v as any).toDate();
+  if (v instanceof Date) return v;
+  return undefined;
+};
+
 export function useStudentSchedule() {
   const { user } = useAuth();
   const [instances, setInstances] = useState<ScheduleInstance[]>([]);
@@ -19,6 +26,7 @@ export function useStudentSchedule() {
   const [weekActivities, setWeekActivities] = useState<ActivityProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [instancesTruncated, setInstancesTruncated] = useState(false);
 
   /**
    * 1. CARREGAR INSTÂNCIAS — reativo via onSnapshot em scheduleInstances.
@@ -26,15 +34,16 @@ export function useStudentSchedule() {
    *    re-valida contra o template (endDate, isDeleted etc.) e atualiza o state.
    */
   useEffect(() => {
-    if (!user?.id || user.role !== 'student') return;
-
-    // Reset completo ao trocar de usuário — evita exibir dados do ciclo anterior
+    // Reset completo ao trocar de usuário — deve vir ANTES do guard para limpar dados
+    // mesmo quando o usuário faz logout ou muda de role
     setInstances([]);
     setInstancesLoaded(false);
     instancesLoadedRef.current = false;
     setWeekActivities([]);
     setLoading(true);
     setError(null);
+
+    if (!user?.id || user.role !== 'student') return;
 
     const myEffectId = ++effectIdRef.current;
     const userId = user.id;
@@ -55,6 +64,7 @@ export function useStudentSchedule() {
       try {
         const active = await ScheduleInstanceService.getStudentActiveInstances(userId);
         if (cancelled) return;
+        instancesRef.current = active;
         setInstances(active);
         setError(null);
       } catch (err) {
@@ -108,7 +118,14 @@ export function useStudentSchedule() {
     try {
       const active = await ScheduleInstanceService.getStudentActiveInstances(capturedId);
       if (user?.id !== capturedId) return;
+      instancesRef.current = active;
       setInstances(active);
+      // Garante que instancesLoaded=true mesmo quando chamado manualmente antes do onSnapshot
+      // (sem isso, o listener de activityProgress nunca abre após um refresh() inicial)
+      if (!instancesLoadedRef.current) {
+        instancesLoadedRef.current = true;
+        setInstancesLoaded(true);
+      }
     } catch (err) {
       console.error('❌ Falha ao buscar instâncias:', err);
     }
@@ -119,31 +136,49 @@ export function useStudentSchedule() {
     instancesRef.current = instances;
   }, [instances]);
 
+  // String estável derivada apenas dos IDs — muda só quando o conjunto de instâncias muda,
+  // não quando metadados como progressCache são atualizados pelo onSnapshot de instâncias.
+  const instanceIdsKey = useMemo(
+    () => instances.map(i => i.id).sort().join(','),
+    [instances]
+  );
+
   /**
    * 2. LISTENER REAL-TIME — abre uma vez por usuário, lê instancesRef no callback
    *    para filtrar sem precisar fechar/reabrir a conexão quando instâncias mudam.
    */
   useEffect(() => {
-    if (!user?.id || user.role !== 'student' || !instancesLoadedRef.current) return;
+    if (!user?.id || user.role !== 'student' || !instancesLoaded) return;
 
+    const activeInstanceIds = instancesRef.current.map(i => i.id);
+
+    // Se não há instâncias ativas, limpar atividades e não abrir listener
+    if (activeInstanceIds.length === 0) {
+      setWeekActivities([]);
+      setLoading(false);
+      return;
+    }
+
+    // Filtrar por scheduleInstanceId na query (Firestore `in` suporta até 30 itens).
+    // Isso elimina o histórico de semanas anteriores do aluno, reduzindo leituras linearmente.
+    // Firestore não permite `in` com array vazio — garantido pelo guard acima.
+    if (activeInstanceIds.length > 30) {
+      console.warn(`[useStudentSchedule] ${activeInstanceIds.length} instâncias ativas encontradas, mas o listener de activityProgress suporta no máximo 30 (limitação do Firestore 'in'). ${activeInstanceIds.length - 30} instância(s) serão ignoradas.`);
+      setInstancesTruncated(true);
+    } else {
+      setInstancesTruncated(false);
+    }
+    const instanceIdChunk = activeInstanceIds.slice(0, 30);
     const q = query(
       collection(firestore, 'activityProgress'),
       where('studentId', '==', user.id),
+      where('scheduleInstanceId', 'in', instanceIdChunk),
       where('isActive', '==', true)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      // Lê sempre o snapshot mais recente das instâncias (ref atualizado sem recriar listener)
       const currentInstances = instancesRef.current;
       const validInstanceIds = new Set(currentInstances.map(i => i.id));
-      const hasActiveInstances = validInstanceIds.size > 0;
-
-      if (!hasActiveInstances) {
-        setWeekActivities([]);
-        setError(null);
-        setLoading(false);
-        return;
-      }
 
       const instanceWindows = new Map<string, { start: Date; end: Date; weekNumber: number }>();
       currentInstances.forEach(i => {
@@ -164,7 +199,7 @@ export function useStudentSchedule() {
 
       snapshot.forEach((doc) => {
         const data = doc.data();
-        const scheduledDate = data.scheduledDate?.toDate();
+        const scheduledDate = toDateSafe(data.scheduledDate);
         if (!scheduledDate) return;
 
         const isLegit = validInstanceIds.has(data.scheduleInstanceId);
@@ -175,6 +210,13 @@ export function useStudentSchedule() {
           if (window) {
             if (data.weekNumber !== undefined && window.weekNumber !== undefined) {
               isWithinWindow = data.weekNumber === window.weekNumber;
+              // Safeguard: mesmo com weekNumber igual, verifica se a data agendada
+              // está DENTRO da janela da semana atual. Isso impede que atividades
+              // de semanas passadas (com currentWeekNumber desatualizado) apareçam.
+              if (isWithinWindow && scheduledDate) {
+                const activityDay = new Date(scheduledDate.getFullYear(), scheduledDate.getMonth(), scheduledDate.getDate(), 12, 0, 0);
+                isWithinWindow = activityDay >= window.start && activityDay <= window.end;
+              }
             } else {
               const isUTCMidnight = scheduledDate.getUTCHours() === 0 && scheduledDate.getUTCMinutes() === 0;
               const intendedYear = isUTCMidnight ? scheduledDate.getUTCFullYear() : scheduledDate.getFullYear();
@@ -186,13 +228,13 @@ export function useStudentSchedule() {
           }
         }
 
-        if (isLegit && isWithinWindow) {
+        if (isLegit && isWithinWindow && !data.isDeleted) {
           filteredActivities.push({
             id: doc.id,
             ...data,
             scheduledDate,
-            startedAt: data.startedAt?.toDate(),
-            completedAt: data.completedAt?.toDate(),
+            startedAt: toDateSafe(data.startedAt),
+            completedAt: toDateSafe(data.completedAt),
           } as ActivityProgress);
         }
       });
@@ -208,7 +250,8 @@ export function useStudentSchedule() {
     });
 
     return () => unsubscribe();
-  }, [user?.id, user?.role, instancesLoaded]);
+  // instanceIdsKey: recria listener só quando o conjunto de IDs muda — ignora mudanças de metadados
+  }, [user?.id, user?.role, instancesLoaded, instanceIdsKey]);
 
   /**
    * 3. FILTRO PARA HOJE BLINDADO (MATEMÁTICA PURA)
@@ -252,16 +295,16 @@ export function useStudentSchedule() {
   /**
    * 4. AÇÕES
    */
-  const startActivity = useCallback(async (id: string) => {
-    if (!user?.id) return;
-    try { await ProgressService.startActivity(id, user.id); } 
-    catch (err) { console.error("❌ Erro ao startar:", err); }
+  const startActivity = useCallback(async (id: string): Promise<boolean> => {
+    if (!user?.id) return false;
+    try { await ProgressService.startActivity(id, user.id); return true; } 
+    catch (err) { console.error("❌ Erro ao startar:", err); return false; }
   }, [user?.id]);
 
-  const completeActivity = useCallback(async (id: string, data?: any) => {
-    if (!user?.id) return;
-    try { await ProgressService.completeActivity(id, user.id, data); } 
-    catch (err) { console.error("❌ Erro ao completar:", err); }
+  const completeActivity = useCallback(async (id: string, data?: any): Promise<boolean> => {
+    if (!user?.id) return false;
+    try { await ProgressService.completeActivity(id, user.id, data); return true; } 
+    catch (err) { console.error("❌ Erro ao completar:", err); return false; }
   }, [user?.id]);
 
   return {
@@ -271,6 +314,7 @@ export function useStudentSchedule() {
     totalTodayActivities,
     loading,
     error,
+    instancesTruncated,
     refresh: fetchInstances,
     startActivity,
     completeActivity

@@ -1,0 +1,10 @@
+{
+  "name": "Nexus Platform",
+  "short_name": "Nexus",
+  "description": "Plataforma de gestão de cronogramas terapêuticos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#6366f1",
+  "icons": []
+}

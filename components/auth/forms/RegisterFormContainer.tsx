@@ -3,8 +3,7 @@
 import React, { useState } from 'react';
 import AuthForm from './AuthForm';
 import { useRouter } from 'next/navigation';
-import { RegisterResult, AuthError, RegisterData } from '@/types';
-import { useAuth } from '@/context/AuthContext';
+import { RegisterResult, AuthError } from '@/types';
 
 interface RegisterFormContainerProps {
   defaultUserType: 'student' | 'professional';
@@ -14,8 +13,6 @@ export default function RegisterFormContainer({
   defaultUserType 
 }: RegisterFormContainerProps) {
   const router = useRouter();
-  const { register: authRegister } = useAuth();
-  const [loading, setLoading] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
   const handleSuccess = (result: RegisterResult) => {
@@ -23,10 +20,8 @@ export default function RegisterFormContainer({
     setGlobalError(null);
     
     if (result.requiresVerification) {
-      // Redirecionar para página de verificação
       router.push('/verify-email');
     } else {
-      // Redirecionar para login com mensagem de sucesso
       router.push('/login?registered=true');
     }
   };
@@ -34,36 +29,6 @@ export default function RegisterFormContainer({
   const handleError = (error: AuthError) => {
     console.error('Registration error:', error);
     setGlobalError(error.message || 'Erro ao criar conta. Tente novamente.');
-  };
-
-  const handleSubmit = async (data: RegisterData) => {
-    try {
-      setLoading(true);
-      setGlobalError(null);
-      
-      // Adicionar tipo de usuário se não estiver presente
-      const formData = {
-        ...data,
-        type: data.type || defaultUserType
-      };
-
-      console.log('Submitting registration:', formData);
-      const result = await authRegister(formData);
-      
-      if (result.success) {
-        handleSuccess(result);
-      } else {
-        handleError(new AuthError('Falha no registro', 'REGISTRATION_FAILED'));
-      }
-    } catch (error: any) {
-      console.error('Registration error in container:', error);
-      handleError(error instanceof AuthError ? error : new AuthError(
-        error.message || 'Erro ao criar conta',
-        error.code || 'UNKNOWN_ERROR'
-      ));
-    } finally {
-      setLoading(false);
-    }
   };
 
   return (
@@ -93,8 +58,6 @@ export default function RegisterFormContainer({
         defaultUserType={defaultUserType}
         onSuccess={handleSuccess}
         onError={handleError}
-        onSubmit={handleSubmit}
-        loading={loading}
       />
     </>
   );

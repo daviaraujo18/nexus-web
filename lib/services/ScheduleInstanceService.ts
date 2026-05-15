@@ -1,7 +1,7 @@
 // lib/services/ScheduleInstanceService.ts
 import { 
   collection, doc, getDoc, getDocs, query, where, Timestamp, setDoc, 
-  serverTimestamp, writeBatch, updateDoc 
+  serverTimestamp, writeBatch, updateDoc, deleteDoc, runTransaction
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import { ScheduleInstance, ActivityProgress, AssignScheduleDTO } from '@/types/schedule';
@@ -86,10 +86,18 @@ export class ScheduleInstanceService {
       const successful = [];
       const failed = [];
 
+      const parseDateLocal = (s: string | Date): Date => {
+        if (typeof s === 'string') {
+          const [y, m, d] = s.split('-').map(Number);
+          return new Date(y, m - 1, d);
+        }
+        return new Date(s);
+      };
+
       for (const studentId of assignData.studentIds) {
         try {
-          const dateFromForm = assignData.startDate ? new Date(assignData.startDate) : null;
-          const dateFromTemplate = schedule.startDate ? new Date(schedule.startDate) : null;
+          const dateFromForm = assignData.startDate ? parseDateLocal(assignData.startDate) : null;
+          const dateFromTemplate = schedule.startDate ? parseDateLocal(schedule.startDate) : null;
           const today = new Date();
           today.setHours(0, 0, 0, 0);
 
@@ -103,7 +111,8 @@ export class ScheduleInstanceService {
           }
           
           startDate.setHours(0, 0, 0, 0);
-          const instanceId = `${scheduleTemplateId}_${studentId.substring(0, 8)}_${Date.now()}`;
+          const uniqueSuffix = doc(collection(firestore, this.COLLECTIONS.INSTANCES)).id;
+          const instanceId = `${scheduleTemplateId}_${studentId.substring(0, 8)}_${Date.now()}_${uniqueSuffix}`;
           const weekStart = DateUtils.getWeekStartDate(startDate);
           const weekEnd = DateUtils.getWeekEndDate(startDate);
 
@@ -131,22 +140,54 @@ export class ScheduleInstanceService {
             updatedAt: serverTimestamp()
           };
 
-          const existingSnap = await getDocs(query(
-            collection(firestore, this.COLLECTIONS.INSTANCES),
-            where('studentId', '==', studentId),
-            where('scheduleTemplateId', '==', scheduleTemplateId),
-            where('status', 'in', ['active', 'paused'])
-          ));
-          if (!existingSnap.empty) {
-            failed.push({ studentId, error: 'Aluno já possui uma instância ativa deste cronograma.' });
-            continue;
-          }
+          const guardId = `${scheduleTemplateId}_${studentId}`;
+          const guardRef = doc(firestore, 'instanceGuards', guardId);
 
-          await setDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), instanceData);
+          await runTransaction(firestore, async (tx) => {
+            const guardSnap = await tx.get(guardRef);
+            if (guardSnap.exists()) {
+              const s = guardSnap.data().status;
+              if (s === 'active' || s === 'paused') {
+                throw new Error('Aluno já possui uma instância ativa deste cronograma.');
+              }
+            }
+            tx.set(guardRef, {
+              instanceId,
+              scheduleTemplateId,
+              studentId,
+              status: 'active',
+              createdAt: serverTimestamp()
+            });
+            tx.set(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
+              ...instanceData,
+              activitiesReady: false
+            });
+          });
           console.log(`✅ [SUCESSO] Instância criada: ${instanceId}`);
-          
-          await this.generateWeekActivities(instanceId, 1);
-          successful.push({ studentId, instanceId });
+
+          try {
+            await this.generateWeekActivities(instanceId, 1, weekStart);
+            await this.updateProgressCache(instanceId, 1);
+            await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
+              activitiesReady: true,
+              updatedAt: serverTimestamp()
+            });
+            successful.push({ studentId, instanceId });
+          } catch (genError: any) {
+            await deleteDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
+            const actSnap = await getDocs(query(
+              collection(firestore, this.COLLECTIONS.PROGRESS),
+              where('scheduleInstanceId', '==', instanceId)
+            ));
+            if (actSnap.size > 0) {
+              const cleanupBatch = writeBatch(firestore);
+              actSnap.docs.forEach(d => cleanupBatch.delete(d.ref));
+              await cleanupBatch.commit();
+            }
+            const guardRef = doc(firestore, 'instanceGuards', `${scheduleTemplateId}_${studentId}`);
+            await deleteDoc(guardRef).catch(e => console.warn('⚠️ Falha ao limpar guard:', e));
+            throw new Error(`Falha ao gerar atividades: ${genError.message}. Instância removida.`);
+          }
         } catch (err: any) {
           console.error(`❌ [ERRO] Falha no aluno ${studentId}:`, err);
           failed.push({ studentId, error: err.message });
@@ -159,19 +200,17 @@ export class ScheduleInstanceService {
   /**
    * 🛠️ [GERAÇÃO ATIVIDADES]
    */
-  static async generateWeekActivities(instanceId: string, weekNo: number) {
+  static async generateWeekActivities(instanceId: string, weekNo: number, providedWeekStartDate?: Date) {
     console.log(`⚙️ [GENERATE] Gerando atividades para instância ${instanceId} (Semana ${weekNo})`);
     const snap = await getDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
     const inst = snap.data();
     if (!inst) {
-      console.warn(`⚠️ [GENERATE] Instância ${instanceId} não encontrada.`);
-      return;
+      throw new Error(`Instância ${instanceId} não encontrada.`);
     }
 
     const { visible, data: templateData, reason } = await this.getVisibleTemplateForStudent(inst.scheduleTemplateId);
     if (!visible) {
-      console.warn(`⚠️ [GENERATE] Template ${inst.scheduleTemplateId} não visível (${reason}) — geração cancelada.`);
-      return;
+      throw new Error(`Template ${inst.scheduleTemplateId} não visível (${reason}) — geração cancelada.`);
     }
 
     const templateEndDate: Date | null = (() => {
@@ -184,13 +223,17 @@ export class ScheduleInstanceService {
       return new Date(year, month, date, 23, 59, 59, 999);
     })();
 
-    if (!inst.currentWeekStartDate) {
-      console.warn(`⚠️ [GENERATE] Instância ${instanceId} sem currentWeekStartDate — geração cancelada.`);
-      return;
-    }
-
     const activities = await ActivityService.listScheduleActivities(inst.scheduleTemplateId);
-    const weekStartDate = inst.currentWeekStartDate.toDate();
+    let weekStartDate: Date;
+    if (providedWeekStartDate) {
+      weekStartDate = providedWeekStartDate;
+    } else if (inst.currentWeekStartDate) {
+      weekStartDate = typeof (inst.currentWeekStartDate as any).toDate === 'function'
+        ? (inst.currentWeekStartDate as any).toDate()
+        : new Date(inst.currentWeekStartDate as any);
+    } else {
+      weekStartDate = DateUtils.getWeekStartDate(new Date());
+    }
 
     const existingSnap = await getDocs(query(
       collection(firestore, this.COLLECTIONS.PROGRESS),
@@ -233,12 +276,15 @@ export class ScheduleInstanceService {
         skipped++;
         continue;
       }
+      // Converte dayOfWeek de Conv A (0=Dom) para Conv B (0=Seg)
+      // para manter consistência com todo o código do aluno que espera 0=Seg
+      const convertedDayOfWeek = (act.dayOfWeek + 6) % 7;
       batch.set(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
         scheduleInstanceId: instanceId,
         activityId: act.id,
         studentId: inst.studentId,
         weekNumber: weekNo,
-        dayOfWeek: act.dayOfWeek,
+        dayOfWeek: convertedDayOfWeek,
         activitySnapshot: act,
         status: 'pending',
         scheduledDate: Timestamp.fromDate(activityDate),
@@ -264,7 +310,10 @@ export class ScheduleInstanceService {
     return {
       id: snap.id,
       ...d,
+      createdAt: d.createdAt?.toDate(),
+      updatedAt: d.updatedAt?.toDate(),
       startedAt: d.startedAt?.toDate(),
+      completedAt: d.completedAt?.toDate(),
       currentWeekStartDate: d.currentWeekStartDate?.toDate(),
       currentWeekEndDate: d.currentWeekEndDate?.toDate()
     } as ScheduleInstance;
@@ -278,11 +327,24 @@ export class ScheduleInstanceService {
       where('isActive', '==', true)
     );
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({
-      id: d.id,
-      ...d.data(),
-      scheduledDate: d.data().scheduledDate?.toDate()
-    })) as ActivityProgress[];
+    return snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        scheduledDate: data.scheduledDate?.toDate(),
+        dueDate: data.dueDate?.toDate(),
+        startedAt: data.startedAt?.toDate(),
+        completedAt: data.completedAt?.toDate(),
+        createdAt: data.createdAt?.toDate(),
+        updatedAt: data.updatedAt?.toDate(),
+        activitySnapshot: {
+          ...(data.activitySnapshot ?? {}),
+          createdAt: data.activitySnapshot?.createdAt?.toDate(),
+          updatedAt: data.activitySnapshot?.updatedAt?.toDate()
+        }
+      } as ActivityProgress;
+    });
   }
 
   static async updateProgressCache(instanceId: string, weekNumber?: number): Promise<void> {
@@ -292,25 +354,57 @@ export class ScheduleInstanceService {
       if (!instSnap.exists()) return;
       resolvedWeek = instSnap.data().currentWeekNumber ?? 1;
     }
-    const progress = await this.getWeekProgress(instanceId, resolvedWeek);
+    const progress = await this.getWeekProgress(instanceId, resolvedWeek!);
     const total = progress.length;
     const completed = progress.filter(p => p.status === 'completed').length;
+    const skipped = progress.filter(p => p.status === 'skipped').length;
     const points = progress.reduce((sum, p) => sum + (p.scoring?.pointsEarned || 0), 0);
+    const timeSpent = progress
+      .filter(p => p.status === 'completed' && p.executionData?.timeSpent)
+      .reduce((sum, p) => sum + (p.executionData!.timeSpent || 0), 0);
+
+    // Consistência: dias únicos com atividades completadas
+    const uniqueDays = new Set(
+      progress.filter(p => p.status === 'completed').map(p => p.dayOfWeek)
+    ).size;
+    const consistencyScore = total > 0 ? Math.round((uniqueDays / 7) * 100) : 0;
+
+    // Adesão: completou no dia agendado
+    const onTimeActivities = progress.filter(p => {
+      if (p.status !== 'completed' || !p.completedAt || !p.scheduledDate) return false;
+      return p.completedAt.getFullYear() === p.scheduledDate.getFullYear()
+        && p.completedAt.getMonth() === p.scheduledDate.getMonth()
+        && p.completedAt.getDate() === p.scheduledDate.getDate();
+    }).length;
+    const adherenceScore = completed > 0 ? Math.round((onTimeActivities / completed) * 100) : 0;
+
     await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
       'progressCache.totalActivities': total,
       'progressCache.completedActivities': completed,
+      'progressCache.skippedActivities': skipped,
       'progressCache.completionPercentage': total > 0 ? Math.round((completed / total) * 100) : 0,
       'progressCache.totalPointsEarned': points,
+      'progressCache.totalTimeSpent': timeSpent,
+      'progressCache.consistencyScore': consistencyScore,
+      'progressCache.adherenceScore': adherenceScore,
       'progressCache.lastUpdatedAt': serverTimestamp(),
       updatedAt: serverTimestamp()
     });
   }
 
   static async completeSchedule(instanceId: string): Promise<void> {
-    await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
-      status: 'completed',
-      completedAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
+    const snap = await getDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
+    const inst = snap.data();
+    await runTransaction(firestore, async (tx) => {
+      tx.update(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
+        status: 'completed',
+        completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      if (inst) {
+        const guardId = `${inst.scheduleTemplateId}_${inst.studentId}`;
+        tx.delete(doc(firestore, 'instanceGuards', guardId));
+      }
     });
   }
 
@@ -335,6 +429,11 @@ export class ScheduleInstanceService {
         const inst = { id: instDoc.id, ...instDoc.data() } as any;
 
         try {
+          if (inst.activitiesReady !== true) {
+            console.log(`⏳ [BLOQUEIO] Instância com activitiesReady=false ignorada: ${inst.id.substring(0, 12)}...`);
+            return null;
+          }
+
           const { visible, reason } = await this.getVisibleTemplateForStudent(inst.scheduleTemplateId);
 
           if (!visible) {
@@ -344,7 +443,10 @@ export class ScheduleInstanceService {
 
           return {
             ...inst,
+            createdAt: inst.createdAt?.toDate(),
+            updatedAt: inst.updatedAt?.toDate(),
             startedAt: inst.startedAt?.toDate(),
+            completedAt: inst.completedAt?.toDate(),
             currentWeekStartDate: inst.currentWeekStartDate?.toDate(),
             currentWeekEndDate: inst.currentWeekEndDate?.toDate()
           } as ScheduleInstance;
@@ -399,12 +501,42 @@ export class ScheduleInstanceService {
 
       console.log(`🌐 [SERVICE] Janela Civil: ${start.toLocaleDateString()} a ${end.toLocaleDateString()}`);
 
-      const q = query(
+      // Coleta weekNumbers únicos para restringir a query ao Firestore e evitar full-scan do histórico
+      const weekNums = Array.from(new Set(
+        active.map(i => i.currentWeekNumber).filter((n): n is number => n !== undefined)
+      ));
+
+      if (weekNums.length === 0) {
+        console.warn('[getWeekActivities] Nenhuma instância ativa possui currentWeekNumber definido — retornando grade vazia para evitar full-scan do histórico.');
+        return [];
+      }
+
+      // Filtrar por scheduleInstanceId para evitar ler atividades de instâncias inválidas
+      // Firestore `in` suporta até 30 itens — limitar para evitar erro
+      const instanceIdArr = Array.from(validInstanceIds).slice(0, 30);
+      if (instanceIdArr.length < validInstanceIds.size) {
+        console.warn(`[getWeekActivities] ${validInstanceIds.size} instâncias ativas, mas o filtro suporta no máximo 30. ${validInstanceIds.size - 30} serão ignoradas.`);
+      }
+
+      const baseQuery = query(
         collection(firestore, this.COLLECTIONS.PROGRESS),
         where('studentId', '==', studentId),
+        where('scheduleInstanceId', 'in', instanceIdArr),
         where('isActive', '==', true),
         where('isDeleted', '==', false)
       );
+
+      // Slice to 30 to respect Firestore `in` limit
+      if (weekNums.length > 30) {
+        console.warn(`[getWeekActivities] ${weekNums.length} weekNumbers distintos, limitando a 30 para o filtro Firestore.`);
+      }
+      const safeWeekNums = weekNums.slice(0, 30);
+
+      // safeWeekNums.length === 1 → equality filter (mais eficiente, sem índice composto)
+      // safeWeekNums.length > 1 → `in` filter (suporta até 30 valores; evita full-scan do histórico)
+      const q = safeWeekNums.length === 1
+        ? query(baseQuery, where('weekNumber', '==', safeWeekNums[0]))
+        : query(baseQuery, where('weekNumber', 'in', safeWeekNums));
 
       const snap = await getDocs(q);
       const activities: ActivityProgress[] = [];
@@ -416,10 +548,6 @@ export class ScheduleInstanceService {
         if (!scheduledDate) return;
 
         const isLegit = validInstanceIds.has(data.scheduleInstanceId);
-        if (!isLegit) {
-          console.log(`🚫 [BLOQUEIO ÓRFÃO] Tarefa bloqueada: [${data.activitySnapshot?.title || 'Sem título'}] | Instância: ${data.scheduleInstanceId.substring(0,8)}...`);
-          return;
-        }
 
         // Preferência por weekNumber; fallback para range de datas (dados legados sem weekNumber)
         let isWithinRange = false;

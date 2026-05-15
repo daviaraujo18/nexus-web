@@ -483,6 +483,7 @@ export interface WeeklySnapshot extends BaseModel {
     professionalId: string;
     generatedBy: 'system' | 'manual';
     dataSource: 'calculated' | 'cached';
+    scheduleName?: string;
   };
 }
 

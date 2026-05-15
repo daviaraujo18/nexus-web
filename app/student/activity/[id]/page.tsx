@@ -564,7 +564,7 @@ export default function ActivityPage() {
                       <span className="text-sm text-gray-500">Dia da Semana</span>
                       <span className="font-semibold text-gray-800 flex items-center gap-1">
                         <FaCalendarAlt className="w-3 h-3 text-gray-400" />
-                        {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][activityProgress.dayOfWeek]}
+                        {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'][activityProgress.dayOfWeek]}
                       </span>
                     </div>
                     

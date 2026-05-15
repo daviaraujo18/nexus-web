@@ -181,8 +181,6 @@ export default function QuickActivityModal({
       gradeLevel: null,
       subject: null
     },
-    estimatedDuration: 60,
-    pointsOnCompletion: 10
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -193,11 +191,8 @@ export default function QuickActivityModal({
   // Inicializar com dados existentes
   useEffect(() => {
     if (initialData) {
-      // ✅ CORREÇÃO: Limpar campos duplicados
-      const { estimatedDuration, pointsOnCompletion, ...cleanData } = initialData;
-
       setForm({
-        ...cleanData,
+        ...initialData,
         config: initialData.config || {},
         scoring: initialData.scoring || {
           isRequired: true,
@@ -266,8 +261,6 @@ export default function QuickActivityModal({
         gradeLevel: form.metadata?.gradeLevel || null,
         subject: form.metadata?.subject || null
       },
-      estimatedDuration: form.metadata?.estimatedDuration || 15,
-      pointsOnCompletion: form.scoring?.pointsOnCompletion || 10
     };
 
     onSave(activityData, repeatDays);

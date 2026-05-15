@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { RepetitionService } from '@/lib/services/RepetitionService';
+import { WeeklyResetService } from '@/lib/services/WeeklyResetService';
 
 export function useSystemStatus() {
   const [status, setStatus] = useState<{
@@ -24,7 +24,7 @@ export function useSystemStatus() {
   const loadStatus = useCallback(async () => {
     try {
       setStatus(prev => ({ ...prev, loading: true }));
-      const systemStatus = await RepetitionService.getResetStatus();
+      const systemStatus = await WeeklyResetService.getResetStatus();
       
       setStatus({
         ...systemStatus,

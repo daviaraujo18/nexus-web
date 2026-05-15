@@ -115,12 +115,10 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     return weekActivities.filter(activity => {
       if (activity.dayOfWeek !== selectedDay) return false;
 
-      // Deduplicação leve para evitar exibir a mesma atividade quando há instâncias repetidas.
-      // Prioriza activityId; se não existir, tenta id do snapshot; por último, usa uma chave semântica.
-      const key =
-        activity.activityId ||
-        activity.activitySnapshot?.id ||
-        `${activity.activitySnapshot?.title}-${activity.dayOfWeek}-${activity.activitySnapshot?.type}`;
+      // Deduplicação por scheduleInstanceId + activityId.
+      // Isso permite que a mesma atividade de templates diferentes apareça, mas
+      // evita duplicatas dentro da mesma instância (regeneração, etc.).
+      const key = `${activity.scheduleInstanceId}_${activity.activityId || activity.activitySnapshot?.id || `${activity.activitySnapshot?.title}-${activity.dayOfWeek}-${activity.activitySnapshot?.type}`}`;
 
       if (seen.has(key)) return false;
 
