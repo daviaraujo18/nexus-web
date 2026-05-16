@@ -68,6 +68,16 @@ service cloud.firestore {
       allow write: if isProfessional(request.auth.uid);
     }
 
+    // ── GAD-7 Assessments ─────────────────────────────────
+    match /gad7Assessments/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+      allow write: if isAuthenticated() &&
+        request.resource.data.studentId == request.auth.uid;
+    }
+
     // ── Instance Guards ───────────────────────────────────
     // Apenas profissionais gerenciam guards (protege contra duplicatas)
     match /instanceGuards/{docId} {
@@ -97,6 +107,20 @@ service cloud.firestore {
 
     match /systemErrors/{docId} {
       allow read, write: if isProfessional(request.auth.uid);
+    }
+
+    // ── Rate Limits ───────────────────────────────────────
+    // Qualquer usuário autenticado pode registrar tentativas de login
+    match /rate_limits/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // ── FCM Tokens ────────────────────────────────────────
+    // Usuário só acessa seus próprios tokens
+    match /fcmTokens/{docId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
     // ── Everything else: DENY ─────────────────────────────

@@ -109,7 +109,20 @@ export interface StudentAnalyticsSummary {
   
   // Insights personalizados
   insights: Insight[];
-  
+
+  // Atividades concluídas (mesma fonte que /student/progress: activityProgress where status=completed)
+  completedActivities?: Array<{
+    id: string;
+    name: string;
+    activityType: string;
+    subject: string | null;
+    gradeLevel: string | null;
+    description: string;
+    completedAt: Date;
+    duration: number;
+    attachments: string[];
+  }>;
+
   // Risco
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
   riskFactors: string[];

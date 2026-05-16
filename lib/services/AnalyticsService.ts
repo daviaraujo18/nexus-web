@@ -108,30 +108,30 @@ export class AnalyticsService {
       // * O tempo usado vem de `metadata.estimatedDuration`.
       // * Isso representa tempo estimado, não necessariamente tempo real gasto.
       try {
-        const activityCollections = ['activityProgress'];
-        for (const col of activityCollections) {
-          const qAct = query(collection(firestore, col), where('studentId', '==', studentId), where('status', '==', 'completed'));
-          const snapAct = await getDocs(qAct);
-          
-          snapAct.forEach(d => {
-            const data = d.data();
-            const snapshot = data.activitySnapshot || {};
-            const meta = snapshot.metadata || data.metadata || {};
-            const duration = Number(meta.estimatedDuration || 15); // 🔥 Puxa os 60min da Luta
-            
-            dbTotalTime += duration;
-            dbTotalActivities += 1;
+        const qAct = query(collection(firestore, 'activityProgress'), where('studentId', '==', studentId), where('status', '==', 'completed'));
+        const snapAct = await getDocs(qAct);
 
-            completedActivitiesList.push({
-              id: d.id,
-              name: snapshot.title || data.title || 'Atividade Concluída',
-              subject: meta.subject || snapshot.type || 'Geral',
-              description: snapshot.description || data.description || 'Registrada no histórico.',
-              completedAt: data.updatedAt?.toDate?.() || data.createdAt?.toDate?.() || new Date(),
-              duration
-            });
+        snapAct.forEach(d => {
+          const data = d.data();
+          const snapshot = data.activitySnapshot || {};
+          const meta = snapshot.metadata || data.metadata || {};
+          const duration = Number(meta.estimatedDuration || 15);
+
+          dbTotalTime += duration;
+          dbTotalActivities += 1;
+
+          completedActivitiesList.push({
+            id: d.id,
+            name: snapshot.title || data.title || 'Atividade Concluída',
+            activityType: snapshot.type || data.type || 'quick',
+            subject: meta.subject || null,
+            gradeLevel: meta.gradeLevel || null,
+            description: snapshot.description || data.description || snapshot.instructions || data.instructions || '',
+            completedAt: data.updatedAt?.toDate?.() || data.createdAt?.toDate?.() || new Date(),
+            duration,
+            attachments: (data.executionData?.attachments || []) as string[]
           });
-        }
+        });
         completedActivitiesList.sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());
       } catch (e) { console.warn("Erro ao buscar Atividades:", e); }
 
@@ -155,8 +155,11 @@ export class AnalyticsService {
         createdAt: act.completedAt
       }));
 
-      // Ajusta o Profile
-      studentData.streak = dbStreak > 0 ? dbStreak : studentData.streak;
+      // Streak: students.profile.streak é a fonte canônica (igual ao /student/progress).
+      // dbStreak (de scheduleInstances.progressCache) só é usado se o perfil ainda não tiver valor.
+      if (studentData.streak === 0 && dbStreak > 0) {
+        studentData.streak = dbStreak;
+      }
 
       // * Injeta métricas reais do banco na semana mais recente.
       // *
@@ -208,8 +211,8 @@ export class AnalyticsService {
         weeklyHistory,
         trends: { completionRate: 'stable', gad7Score: 'stable', consistency: 'stable', confidence: 'medium' },
         comparisons: { vsClassAverage: 0, vsPreviousWeek: 0, percentile: 50 },
-        // 🔥 INJETA AS ATIVIDADES NO LUGAR DOS INSIGHTS PARA A UI RENDERIZAR
-        insights: activityInsights.length > 0 ? activityInsights : [],
+        insights: activityInsights,
+        completedActivities: completedActivitiesList,
         riskLevel: currentMetrics.completionRate < 30 ? 'high' : 'low',
         riskFactors: []
       } as any;
@@ -227,14 +230,15 @@ export class AnalyticsService {
       const d = docSnap.data();
       const p = d.profile || {};
       const xp = Number(p.totalPoints) || Number(d.totalPoints) || 0;
-      
+      const profileLevel = Number(p.level) || Number(d.level) || 0;
+
       return {
         name: d.name || p.name || 'Aluno',
         grade: p.grade || d.grade || 'Não informado',
         school: p.school || d.school || 'Não informado',
         totalPoints: xp,
         streak: Number(p.streak) || Number(d.streak) || 0,
-        level: Math.floor(xp / 200) + 1,
+        level: profileLevel > 0 ? profileLevel : Math.floor(xp / 200) + 1,
         profileImage: d.profileImage
       };
     }
@@ -352,13 +356,13 @@ export class AnalyticsService {
   }
 
   private async fetchStudentSnapshots(sid: string, weeks: number): Promise<any[]> {
-    const q = query(collection(firestore, 'weeklySnapshots'), where('studentId', '==', sid), orderBy('weekStartDate', 'desc'), limit(weeks));
+    const q = query(collection(firestore, 'weeklySnapshots'), where('studentId', '==', sid), orderBy('weekNumber', 'desc'), limit(weeks));
     const snap = await getDocs(q);
     return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
 
-  private async fetchStudentGAD7(sid: string, _weeks: number): Promise<any[]> {
-    const q = query(collection(firestore, 'gad7Assessments'), where('studentId', '==', sid), orderBy('completedAt', 'desc'), limit(5));
+  private async fetchStudentGAD7(sid: string, weeks: number): Promise<any[]> {
+    const q = query(collection(firestore, 'gad7Assessments'), where('studentId', '==', sid), orderBy('completedAt', 'desc'), limit(Math.max(weeks, 12)));
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   }

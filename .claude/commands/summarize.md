@@ -1,0 +1,1 @@
+/home/davi/workspace/.ai-workflow/src/commands/summarize.md

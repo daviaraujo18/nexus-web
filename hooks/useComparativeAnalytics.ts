@@ -1,5 +1,5 @@
 // hooks/useComparativeAnalytics.ts
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ComparativeAnalysis, DateRange } from '@/types/analytics';
 import { AnalyticsService } from '@/lib/services/AnalyticsService';
@@ -13,7 +13,7 @@ export function useComparativeAnalytics() {
     previous: ComparativeAnalysis | null;
   }>({ current: null, previous: null });
 
-  const analyticsService = new AnalyticsService();
+  const analyticsService = useMemo(() => new AnalyticsService(user?.role), [user?.role]);
 
   const comparePeriods = useCallback(async (
     currentRange: DateRange,
