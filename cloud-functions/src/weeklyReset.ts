@@ -104,42 +104,44 @@ export async function runWeeklyReset(): Promise<{
         }
       }
 
-      try {
-        await db.collection('weeklySnapshots').doc(snapshotId).set({
-          scheduleInstanceId: instanceDoc.id,
-          studentId,
-          weekNumber: currentWeekNumber,
-          scheduleName: scheduleName || '',
-          weekStartDate: Timestamp.fromDate(currentWeekStartDate),
-          weekEndDate: Timestamp.fromDate(currentWeekEndDate),
-          isActive: true,
-          metrics,
-          createdAt: FieldValue.serverTimestamp(),
+      // Snapshot e avanço de semana dentro da mesma transaction:
+      // se a transaction falhar → snapshot não fica órfão; se snapshot falhar → semana não avança.
+      const snapshotData = {
+        scheduleInstanceId: instanceDoc.id,
+        studentId,
+        weekNumber: currentWeekNumber,
+        scheduleName: scheduleName || '',
+        weekStartDate: Timestamp.fromDate(currentWeekStartDate),
+        weekEndDate: Timestamp.fromDate(currentWeekEndDate),
+        isActive: true,
+        metrics,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+
+      await db.runTransaction(async (transaction) => {
+        const instanceRef = db.collection('scheduleInstances').doc(instanceDoc.id);
+        const instanceSnap = await transaction.get(instanceRef);
+        if (!instanceSnap.exists) return;
+
+        const snapshotRef = db.collection('weeklySnapshots').doc(snapshotId);
+        transaction.set(snapshotRef, snapshotData);
+
+        transaction.update(instanceRef, {
+          currentWeekNumber: newWeekNumber,
+          currentWeekStartDate: Timestamp.fromDate(newWeekStart),
+          currentWeekEndDate: Timestamp.fromDate(newWeekEnd),
+          'progressCache.completedActivities': 0,
+          'progressCache.completionPercentage': 0,
+          'progressCache.totalPointsEarned': 0,
+          'progressCache.lastUpdatedAt': FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
-        generatedSnapshots++;
-        console.log(`📸 Snapshot ${snapshotId}: ${metrics.completedActivities}/${metrics.totalActivities} concluídas, consistência=${metrics.consistencyScore}%, adesão=${metrics.adherenceScore}%`);
-      } catch (snapshotErr: any) {
-        console.error(`⚠️ Erro ao gerar snapshot para ${studentId}:`, snapshotErr.message);
-      }
-    }
-
-    await db.runTransaction(async (transaction) => {
-      const instanceRef = db.collection('scheduleInstances').doc(instanceDoc.id);
-      const instanceSnap = await transaction.get(instanceRef);
-      if (!instanceSnap.exists) return;
-
-      transaction.update(instanceRef, {
-        currentWeekNumber: newWeekNumber,
-        currentWeekStartDate: Timestamp.fromDate(newWeekStart),
-        currentWeekEndDate: Timestamp.fromDate(newWeekEnd),
-        'progressCache.completedActivities': 0,
-        'progressCache.completionPercentage': 0,
-        'progressCache.totalPointsEarned': 0,
-        'progressCache.lastUpdatedAt': FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
       });
-    });
+
+      generatedSnapshots++;
+      console.log(`📸 Snapshot ${snapshotId}: ${metrics.completedActivities}/${metrics.totalActivities} concluídas, consistência=${metrics.consistencyScore}%, adesão=${metrics.adherenceScore}%`);
+    }
 
     // Gerar atividades da nova semana e atualizar progressCache
     try {
@@ -183,11 +185,21 @@ export async function runWeeklyReset(): Promise<{
       .get();
     const existingIds = new Set(existingSnap.docs.map(d => d.id));
 
-    const batch = db.batch();
+    const BATCH_LIMIT = 499;
+    let currentBatch = db.batch();
+    let batchOpCount = 0;
     let added = 0;
     let skipped = 0;
 
-    activitiesSnap.docs.forEach(actDoc => {
+    const commitIfNeeded = async () => {
+      if (batchOpCount >= BATCH_LIMIT) {
+        await currentBatch.commit();
+        currentBatch = db.batch();
+        batchOpCount = 0;
+      }
+    };
+
+    for (const actDoc of activitiesSnap.docs) {
       const act = actDoc.data();
       const scheduleDay = ((act.dayOfWeek ?? 0) + 6) % 7;
       const activityDate = new Date(
@@ -200,13 +212,14 @@ export async function runWeeklyReset(): Promise<{
       const progressId = `${instanceDoc.id}_w${weekNo}_${actDoc.id}`;
       if (existingIds.has(progressId)) {
         skipped++;
-        return;
+        continue;
       }
 
       const convertedDayOfWeek = ((act.dayOfWeek ?? 0) + 6) % 7;
-
       const docRef = db.collection('activityProgress').doc(progressId);
-      batch.set(docRef, {
+
+      await commitIfNeeded();
+      currentBatch.set(docRef, {
         scheduleInstanceId: instanceDoc.id,
         activityId: actDoc.id,
         studentId: data.studentId,
@@ -230,11 +243,12 @@ export async function runWeeklyReset(): Promise<{
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
+      batchOpCount++;
       added++;
-    });
+    }
 
     if (added > 0) {
-      await batch.commit();
+      await currentBatch.commit();
     }
 
     // Atualizar progressCache

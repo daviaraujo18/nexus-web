@@ -44,11 +44,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setProfileReady(true);
           return retryData;
         } catch {
+          // Sessão Firebase ativa mas perfil não existe — encerrar para evitar estado inválido
+          await AuthService.logout().catch(() => {});
           setProfileReady(true);
           return null;
         }
       }
 
+      // Erro inesperado — encerrar sessão para garantir estado limpo
+      await AuthService.logout().catch(() => {});
       setProfileReady(true);
       return null;
     }

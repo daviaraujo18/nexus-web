@@ -27,7 +27,7 @@ export function useSchedules(options: {
       setLoading(true);
       const data = await ScheduleService.listProfessionalSchedules(
         user.id,
-        options
+        { ...options, role: user.role }
       );
       setSchedules(data);
       setError(null);
@@ -71,7 +71,7 @@ export function useSchedules(options: {
     if (!user) throw new Error('Usuário não autenticado');
     
     try {
-      await ScheduleService.archiveSchedule(scheduleId, user.id);
+      await ScheduleService.archiveSchedule(scheduleId, user.id, user.role);
       await loadSchedules();
       return true;
     } catch (err: any) {

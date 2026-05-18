@@ -189,16 +189,16 @@ export class ProgressService {
         }
       }
 
-      // Calcular timeSpent e scoring primeiro — operações puramente locais, sem I/O
-      const timeSpentValue = timeSpentFromForm !== undefined
-        ? timeSpentFromForm
-        : 30;
+      // timeSpent: se não informado no form, será calculado via startedAt lido na transaction
+      const timeSpentFromFormOrNull = timeSpentFromForm !== undefined ? timeSpentFromForm : null;
 
-      const scoring = await this.calculateScoring(progressId, { ...completionData, timeSpent: timeSpentValue });
+      // Scoring preliminar (será recalculado com timeSpent real após a transaction se necessário)
+      const preliminaryTimeSpent = timeSpentFromFormOrNull ?? 30;
+      const scoring = await this.calculateScoring(progressId, { ...completionData, timeSpent: preliminaryTimeSpent });
 
-      // Construir executionData (pular Promises que o Firestore não aceita)
-      const executionDataEntries = Object.entries({ ...completionData, timeSpent: timeSpentValue })
-        .filter(([, v]) => !(v instanceof Promise));
+      // Construir executionData sem timeSpent — será injetado com o valor real após a transaction
+      const baseExecutionDataEntries = Object.entries(completionData)
+        .filter(([k, v]) => k !== 'timeSpent' && !(v instanceof Promise));
 
       // Transaction: valida ownership + status, atualiza status + scoring + executionData atômicamente
       const txData: TxExtractedData = await runTransaction(firestore, async (tx) => {
@@ -234,7 +234,7 @@ export class ProgressService {
           },
           updatedAt: serverTimestamp()
         };
-        for (const [key, value] of executionDataEntries) {
+        for (const [key, value] of baseExecutionDataEntries) {
           updateFields[`executionData.${key}`] = value;
         }
         tx.update(progressRef, updateFields);
@@ -245,6 +245,16 @@ export class ProgressService {
           startedAtMs: extractedStartedAt instanceof Date ? extractedStartedAt.getTime() : null
         } as TxExtractedData;
       });
+
+      // Calcular timeSpent real: usa o valor do form se fornecido, caso contrário deriva de startedAt
+      const timeSpentValue = timeSpentFromFormOrNull !== null
+        ? timeSpentFromFormOrNull
+        : txData.startedAtMs !== null
+          ? Math.max(1, Math.ceil((now.getTime() - txData.startedAtMs) / 60000))
+          : 30; // fallback absoluto (não há startedAt no documento)
+
+      // Persistir timeSpent real no executionData (fora da transaction principal para não bloqueá-la)
+      updateDoc(progressRef, { 'executionData.timeSpent': timeSpentValue }).catch(() => {});
 
       // Passo 1: recalcular progressCache da instância (com métricas reais de consistência/adesão)
       // Executa ANTES do snapshot para que a transaction do updateWeeklySnapshot leia dados frescos

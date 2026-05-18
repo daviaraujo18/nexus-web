@@ -10,17 +10,13 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isStudent(uid) {
-      return isAuthenticated() && exists(/databases/$(database)/documents/students/$(uid));
-    }
-
     function isProfessional(uid) {
       return isAuthenticated() && exists(/databases/$(database)/documents/professionals/$(uid));
     }
 
     // ── Students ──────────────────────────────────────────
     match /students/{studentId} {
-      allow read: if isAuthenticated();
+      allow read: if isOwner(studentId) || isProfessional(request.auth.uid);
       allow write: if isOwner(studentId);
     }
 
@@ -36,6 +32,12 @@ service cloud.firestore {
       allow write: if isProfessional(request.auth.uid);
     }
 
+    // ── Schedule Activities (atividades vinculadas a um template) ──
+    match /scheduleActivities/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isProfessional(request.auth.uid);
+    }
+
     // ── Schedule Instances ────────────────────────────────
     // Aluno lê suas próprias instâncias; profissional lê todas
     match /scheduleInstances/{docId} {
@@ -47,16 +49,36 @@ service cloud.firestore {
     }
 
     // ── Activity Progress ─────────────────────────────────
-    // Aluno lê e escreve apenas seu próprio progresso
+    // collectionGroup rule required for cross-collection queries (dashboard)
+    match /{path=**}/activityProgress/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+    }
+
+    // ── Schedule Instances (collectionGroup) ──────────────
+    match /{path=**}/scheduleInstances/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+    }
+
+    // Aluno lê e escreve apenas seu próprio progresso; profissional cria/atualiza para seus alunos
     match /activityProgress/{docId} {
       allow read: if isAuthenticated() && (
         resource.data.studentId == request.auth.uid ||
         isProfessional(request.auth.uid)
       );
-      allow create: if isAuthenticated() &&
-        request.resource.data.studentId == request.auth.uid;
-      allow update, delete: if isAuthenticated() &&
-        resource.data.studentId == request.auth.uid;
+      allow create: if isAuthenticated() && (
+        request.resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+      allow update, delete: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
     }
 
     // ── Weekly Snapshots ──────────────────────────────────
@@ -65,7 +87,9 @@ service cloud.firestore {
         resource.data.studentId == request.auth.uid ||
         isProfessional(request.auth.uid)
       );
-      allow write: if isProfessional(request.auth.uid);
+      allow write: if isProfessional(request.auth.uid) || (
+        isAuthenticated() && request.resource.data.studentId == request.auth.uid
+      );
     }
 
     // ── GAD-7 Assessments ─────────────────────────────────
@@ -110,9 +134,9 @@ service cloud.firestore {
     }
 
     // ── Rate Limits ───────────────────────────────────────
-    // Qualquer usuário autenticado pode registrar tentativas de login
+    // Usuário só pode ler/escrever seu próprio documento de rate limit
     match /rate_limits/{docId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isAuthenticated() && docId == request.auth.uid;
     }
 
     // ── FCM Tokens ────────────────────────────────────────

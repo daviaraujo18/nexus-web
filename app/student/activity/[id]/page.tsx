@@ -54,7 +54,7 @@ export default function ActivityPage() {
   const [error, setError] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const { active, startTimer, stopTimer } = useActivityTimer();
+  const { active, startTimer, stopTimer, completedProgressId } = useActivityTimer();
   const [completedByTimer, setCompletedByTimer] = useState(false);
 
   /**
@@ -174,11 +174,12 @@ export default function ActivityPage() {
    * - estado real da atividade
    */
   useEffect(() => {
-    if (!active && activityProgress?.status === 'in_progress' && !loading) {
+    // Só sinaliza conclusão via timer se o FloatingTimer chamou markCompleted com este progressId
+    if (activityProgress?.id && completedProgressId === activityProgress.id && !completedByTimer) {
       setCompletedByTimer(true);
       setActivityProgress(prev => prev ? { ...prev, status: 'completed' } : null);
     }
-  }, [active]);
+  }, [completedProgressId, activityProgress?.id]);
 
   /**
    * Callback disparado após conclusão da atividade.

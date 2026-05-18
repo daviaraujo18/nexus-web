@@ -1,6 +1,9 @@
 // components/schedule/AssignmentInterface.tsx
 'use client';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+function debugLog(...args: any[]) { if (DEBUG) console.log(...args); }
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { AssignScheduleDTO } from '@/types/schedule';
 import { Student } from '@/types/auth';
@@ -84,17 +87,17 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
   // * - Alterações manuais (se existirem no futuro) seriam perdidas
   useEffect(() => {
     if (schedule) {
-      console.group('📅 [AUTO-SYNC ATRIBUIÇÃO]');
-      console.log('📄 Cronograma:', schedule.name);
-      console.log('🕒 Aplicando Início:', schedule.startDate ? new Date(schedule.startDate).toLocaleDateString() : 'N/A');
-      console.log('🕒 Aplicando Fim:', schedule.endDate ? new Date(schedule.endDate).toLocaleDateString() : 'N/A');
+      debugLog('📅 [AUTO-SYNC ATRIBUIÇÃO]');
+      debugLog('📄 Cronograma:', schedule.name);
+      debugLog('🕒 Aplicando Início:', schedule.startDate ? new Date(schedule.startDate).toLocaleDateString() : 'N/A');
+      debugLog('🕒 Aplicando Fim:', schedule.endDate ? new Date(schedule.endDate).toLocaleDateString() : 'N/A');
 
       setAssignmentData(prev => ({
         ...prev,
         startDate: schedule.startDate ? new Date(schedule.startDate) : new Date(),
         endDate: schedule.endDate ? new Date(schedule.endDate) : new Date()
       }));
-      console.groupEnd();
+      ;
     }
   }, [schedule]);
 
@@ -171,6 +174,9 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
   }, [students, filters, isCoordinator, user?.id]);
 
   const handleStudentSelect = (studentId: string) => {
+    const student = filteredStudents.find(s => s.id === studentId);
+    // Bloqueia seleção de aluno com cronograma ativo (igual ao comportamento de handleSelectAllAvailable)
+    if (student?.hasActiveInstance && !assignmentData.allowMultiple) return;
     setSelectedStudents(prev =>
       prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId]
     );
@@ -215,10 +221,10 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
       return;
     }
 
-    console.group('🚀 [SUBMIT ATRIBUIÇÃO]');
-    console.log('📊 Alunos:', selectedStudents.length);
-    console.log('📅 Início:', assignmentData.startDate.toLocaleDateString());
-    console.log('📅 Fim:', assignmentData.endDate?.toLocaleDateString());
+    debugLog('🚀 [SUBMIT ATRIBUIÇÃO]');
+    debugLog('📊 Alunos:', selectedStudents.length);
+    debugLog('📅 Início:', assignmentData.startDate.toLocaleDateString());
+    debugLog('📅 Fim:', assignmentData.endDate?.toLocaleDateString());
 
     try {
       setError(null);
@@ -229,7 +235,7 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
       };
 
       const result = await assignSchedule(scheduleId, finalPayload);
-      console.log('✅ Resultado:', result);
+      debugLog('✅ Resultado:', result);
 
       if (result.failed.length > 0) {
         setPartialResult({ ok: result.successful.length, failed: result.failed });
@@ -241,7 +247,7 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
       console.error('❌ Erro no Submit:', err);
       setError(err.message || 'Erro ao atribuir cronograma');
     } finally {
-      console.groupEnd();
+      ;
     }
   };
 

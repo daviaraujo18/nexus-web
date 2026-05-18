@@ -23,6 +23,9 @@ import {
 } from '@/types/schedule';
 import { ValidationUtils } from '@/lib/utils/validationUtils';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+function debugLog(...args: any[]) { if (DEBUG) console.log(...args); }
+
 // * Serviço responsável pela gestão de cronogramas (templates).
 // *
 // * Responsabilidades:
@@ -148,7 +151,7 @@ export class ScheduleService {
     data?: CreateScheduleDTO
   ): Promise<void> {
     const resolvedData: CreateScheduleDTO = data ?? (professionalIdOrData as CreateScheduleDTO);
-    console.group(`🔥 [SERVICE] Atualizando Cronograma: ${scheduleId}`);
+    debugLog(`🔥 [SERVICE] Atualizando Cronograma: ${scheduleId}`);
     try {
       const validation = ValidationUtils.validateScheduleData(resolvedData);
       if (!validation.isValid) {
@@ -162,7 +165,7 @@ export class ScheduleService {
       const batch = writeBatch(firestore);
 
       // 1. Atualizar o Documento Principal (Template)
-      console.log(`📝 Preparando payload do template...`);
+      debugLog(`📝 Preparando payload do template...`);
       batch.update(templateRef, {
         name: sanitizedData.name,
         description: sanitizedData.description,
@@ -185,7 +188,7 @@ export class ScheduleService {
       // *
       // * ⚠️ Risco:
       // * - Se houver instâncias já geradas, elas continuarão referenciando versões antigas
-      console.log(`🧹 Buscando atividades antigas para limpeza...`);
+      debugLog(`🧹 Buscando atividades antigas para limpeza...`);
       const oldActivitiesQuery = query(
         collection(firestore, this.COLLECTIONS.ACTIVITIES),
         where('scheduleTemplateId', '==', scheduleId)
@@ -195,7 +198,7 @@ export class ScheduleService {
       oldActivitiesSnap.docs.forEach(doc => {
         batch.delete(doc.ref);
       });
-      console.log(`🗑️ ${oldActivitiesSnap.docs.length} atividades antigas removidas do lote.`);
+      debugLog(`🗑️ ${oldActivitiesSnap.docs.length} atividades antigas removidas do lote.`);
 
       // * Recria todas as atividades do template.
       // *
@@ -212,7 +215,7 @@ export class ScheduleService {
       // * ⚠️ Impacto:
       // * - Instâncias já geradas continuam com snapshots antigos
       // * - Alterações não propagam retroativamente para atividades já atribuídas
-      console.log(`➕ Adicionando ${sanitizedData.activities.length} atividades novas ao lote...`);
+      debugLog(`➕ Adicionando ${sanitizedData.activities.length} atividades novas ao lote...`);
 
       sanitizedData.activities.forEach((a, i) => {
         const actId = `${scheduleId}_act_${i}_${Date.now()}`; // Adiciona timestamp pra garantir ID único
@@ -227,14 +230,14 @@ export class ScheduleService {
       });
 
       // 4. Executa a transação no banco
-      console.log(`🚀 Disparando transação no banco...`);
+      debugLog(`🚀 Disparando transação no banco...`);
       await batch.commit();
 
-      console.log(`✅ Cronograma ${scheduleId} atualizado com sucesso!`);
-      console.groupEnd();
+      debugLog(`✅ Cronograma ${scheduleId} atualizado com sucesso!`);
+      debugLog();
     } catch (error: any) {
       console.error('❌ Erro na atualização do cronograma:', error);
-      console.groupEnd();
+      debugLog();
       throw new Error(`Falha ao atualizar cronograma: ${error.message}`);
     }
   }
@@ -262,7 +265,7 @@ export class ScheduleService {
   // * - Mantém integridade para analytics
   static async deleteSchedule(scheduleId: string, professionalId: string): Promise<void> {
     try {
-      console.log(`🛡️ Iniciando desativação segura do cronograma: ${scheduleId}`);
+      debugLog(`🛡️ Iniciando desativação segura do cronograma: ${scheduleId}`);
       const batch = writeBatch(firestore);
 
       // 1. Marcar Template como deletado (mas mantém o documento)
@@ -328,7 +331,7 @@ export class ScheduleService {
       }
 
       await batch.commit();
-      console.log(`✅ Cronograma desativado. Dados de evolução preservados.`);
+      debugLog(`✅ Cronograma desativado. Dados de evolução preservados.`);
 
     } catch (error: any) {
       console.error('❌ Erro na desativação segura:', error);
@@ -344,7 +347,7 @@ export class ScheduleService {
   // *
   // * Ao ARQUIVAR: desativa instâncias + oculta activityProgress.
   // * Ao RESTAURAR: apenas reativa o template — histórico não é reativado.
-  static async archiveSchedule(scheduleId: string, professionalId: string): Promise<void> {
+  static async archiveSchedule(scheduleId: string, professionalId: string, role?: string): Promise<void> {
     try {
       const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
       const snap = await getDoc(templateRef);
@@ -355,7 +358,7 @@ export class ScheduleService {
 
       const templateData = snap.data();
 
-      if (templateData.professionalId !== professionalId) {
+      if (role !== 'coordinator' && templateData.professionalId !== professionalId) {
         throw new Error('Você não tem permissão para arquivar este cronograma');
       }
 
@@ -376,7 +379,7 @@ export class ScheduleService {
       }
 
       // --- ARQUIVAR: propagar para instâncias e activityProgress ---
-      console.log(`🗄️ [ARCHIVE] Arquivando cronograma ${scheduleId} com propagação...`);
+      debugLog(`🗄️ [ARCHIVE] Arquivando cronograma ${scheduleId} com propagação...`);
 
       const CHUNK = 490;
       let ops: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
@@ -417,7 +420,7 @@ export class ScheduleService {
         )
       );
 
-      console.log(`📦 [ARCHIVE] ${instancesSnap.size} instâncias encontradas.`);
+      debugLog(`📦 [ARCHIVE] ${instancesSnap.size} instâncias encontradas.`);
 
       for (const instanceDoc of instancesSnap.docs) {
         ops.push(batch =>
@@ -469,7 +472,7 @@ export class ScheduleService {
 
       await flush();
 
-      console.log(`✅ [ARCHIVE] Cronograma ${scheduleId} arquivado. Dados históricos preservados.`);
+      debugLog(`✅ [ARCHIVE] Cronograma ${scheduleId} arquivado. Dados históricos preservados.`);
     } catch (error: any) {
       console.error('❌ [ARCHIVE] Erro ao arquivar/restaurar cronograma:', error);
       throw new Error(`Falha ao arquivar/restaurar cronograma: ${error.message}`);
@@ -504,8 +507,11 @@ export class ScheduleService {
   // *
   // * ⚠️ Observação:
   // * - Filtro de categoria/ativo ainda não está sendo aplicado na query (apenas pós-processamento)
-  static async listProfessionalSchedules(professionalId: string, options: { category?: ScheduleCategory; activeOnly?: boolean; limit?: number; } = {}): Promise<ScheduleTemplate[]> {
-    let q = query(collection(firestore, this.COLLECTIONS.TEMPLATES), where('professionalId', '==', professionalId));
+  static async listProfessionalSchedules(professionalId: string, options: { category?: ScheduleCategory; activeOnly?: boolean; limit?: number; role?: string; } = {}): Promise<ScheduleTemplate[]> {
+    // Coordinator vê apenas os próprios cronogramas (igual a outros profissionais).
+    // O acesso ampliado do coordinator (arquivar/deletar/atribuir cronogramas alheios) é tratado
+    // nas operações específicas, não na listagem.
+    const q = query(collection(firestore, this.COLLECTIONS.TEMPLATES), where('professionalId', '==', professionalId));
     const snap = await getDocs(q);
     const schedules: ScheduleTemplate[] = [];
     snap.forEach(doc => {

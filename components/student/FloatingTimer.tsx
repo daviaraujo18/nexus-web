@@ -135,7 +135,7 @@ export default function FloatingTimer() {
    *
    * ⚠️ Fonte única de verdade do timer
    */
-  const { active, elapsedSeconds, stopTimer } = useActivityTimer();
+  const { active, elapsedSeconds, stopTimer, markCompleted } = useActivityTimer();
   const [completing, setCompleting] = useState(false);
 
   /**
@@ -178,18 +178,17 @@ export default function FloatingTimer() {
    */
   const handleComplete = async () => {
     setCompleting(true);
+    const progressId = active.progressId;
     try {
-      await ProgressService.completeActivity(active.progressId, active.studentId, {
-
-        /**
-         * Converte tempo decorrido (segundos) para minutos inteiros
-         */
+      await ProgressService.completeActivity(progressId, active.studentId, {
         timeSpent: Math.ceil(elapsedSeconds / 60)
       });
+      // Sinaliza conclusão real — ActivityPage detecta via completedProgressId
+      markCompleted(progressId);
     } catch (e) {
-      // best-effort
-    } finally {
+      // best-effort: backend rejeitou (ex: já completado) — apenas cancela sem sinalizar conclusão
       stopTimer();
+    } finally {
       setCompleting(false);
     }
   };
