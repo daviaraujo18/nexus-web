@@ -29,6 +29,14 @@ export class DateUtils {
   }
 
   /**
+   * Converte dayOfWeek de Convenção A (0=Dom, 1=Seg…6=Sáb) para Convenção B (0=Seg…6=Dom).
+   * Convencção A é a usada nos templates; Convenção B é a usada internamente nos relatórios.
+   */
+  static convertDayOfWeekToMondayBased(dayOfWeekSundayBased: number): number {
+    return (dayOfWeekSundayBased + 6) % 7;
+  }
+
+  /**
    * 🛠️ Calcula a data real de uma atividade baseada no dia da semana (0-6)
    * dayOfWeek segue Convenção A (0=Dom, 1=Seg, ..., 6=Sáb) conforme armazenado
    * no template e no activityProgress.
@@ -37,7 +45,7 @@ export class DateUtils {
     const result = new Date(weekStartDate);
     // Converte de Conv A (0=Dom) para Conv B (0=Seg) antes de somar
     // Conv B é usada internamente: 0=Segunda (weekStartDate), 1=Terça...
-    const scheduleDay = (dayOfWeek + 6) % 7;
+    const scheduleDay = DateUtils.convertDayOfWeekToMondayBased(dayOfWeek);
     result.setDate(weekStartDate.getDate() + scheduleDay);
     return new Date(result.getFullYear(), result.getMonth(), result.getDate(), 12, 0, 0);
   }

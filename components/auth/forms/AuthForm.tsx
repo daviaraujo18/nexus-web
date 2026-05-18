@@ -170,7 +170,6 @@ export default function AuthForm({
           }),
         };
 
-        console.log('Dados de registro:', registerData);
         result = await contextRegister(registerData);
       }
 

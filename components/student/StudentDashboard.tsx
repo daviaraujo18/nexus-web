@@ -25,6 +25,9 @@ import SubjectBarChart, { computeSubjectStats } from '@/components/charts/Subjec
 import { doc, onSnapshot } from 'firebase/firestore';
 import { firestore, auth } from '@/firebase/config';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+const debugLog = (...args: unknown[]) => { if (DEBUG) console.log(...args); };
+
 interface StudentDashboardProps {
   showHeader?: boolean;
 }
@@ -50,7 +53,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     const unsubscribe = onSnapshot(ref, (snap) => {
       const rawData = snap.data();
 
-      console.log('[STUDENT_DASHBOARD_PROFILE_STATS]', {
+      debugLog('[STUDENT_DASHBOARD_PROFILE_STATS]', {
         uid,
         exists: snap.exists(),
         rawData,

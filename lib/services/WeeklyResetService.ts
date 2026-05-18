@@ -12,6 +12,7 @@ import {
   DocumentData,
   getDoc,
   runTransaction,
+  writeBatch,
   limit,
   orderBy,
   startAfter,
@@ -26,6 +27,9 @@ import { ScheduleInstanceService } from './ScheduleInstanceService';
 import { WeeklySnapshotService } from './WeeklySnapshotService';
 import { DateUtils } from '@/lib/utils/dateUtils';
 import { ConcurrentResetError, formatErrorMessage } from '@/lib/utils/errors';
+
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+const debugLog = (...args: unknown[]) => { if (DEBUG) console.log(...args); };
 
 export class WeeklyResetService {
   private static readonly COLLECTIONS = {
@@ -47,14 +51,14 @@ export class WeeklyResetService {
     results: WeeklyResetResult[];
   }> {
     try {
-      console.log('🚀 [RESET] Iniciando processo de reset semanal');
+      debugLog('🚀 [RESET] Iniciando processo de reset semanal');
 
       // 1. Buscar instâncias ativas que precisam de reset
       const instancesToReset = await this.findInstancesForReset();
-      console.log(`📊 [RESET] Encontradas ${instancesToReset.length} instâncias para processar`);
+      debugLog(`📊 [RESET] Encontradas ${instancesToReset.length} instâncias para processar`);
 
       if (instancesToReset.length === 0) {
-        console.log('✅ [RESET] Nenhuma instância precisa de reset');
+        debugLog('✅ [RESET] Nenhuma instância precisa de reset');
         return {
           totalProcessed: 0,
           successful: 0,
@@ -73,7 +77,7 @@ export class WeeklyResetService {
 
       for (let i = 0; i < instancesToReset.length; i += batchSize) {
         const batch = instancesToReset.slice(i, i + batchSize);
-        console.log(`🔄 [RESET] Processando batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(instancesToReset.length / batchSize)}`);
+        debugLog(`🔄 [RESET] Processando batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(instancesToReset.length / batchSize)}`);
 
         const batchResults = await Promise.allSettled(
           batch.map(instance => dto.dryRun
@@ -89,13 +93,13 @@ export class WeeklyResetService {
 
             if (instanceResult.status === 'success') {
               successful++;
-              console.log(`✅ [RESET] ${instanceResult.instanceId} resetado para semana ${instanceResult.newWeekNumber}`);
+              debugLog(`✅ [RESET] ${instanceResult.instanceId} resetado para semana ${instanceResult.newWeekNumber}`);
             } else if (instanceResult.status === 'skipped') {
               skipped++;
-              console.log(`⏭️ [RESET] ${instanceResult.instanceId} pulado: ${instanceResult.error}`);
+              debugLog(`⏭️ [RESET] ${instanceResult.instanceId} pulado: ${instanceResult.error}`);
             } else {
               failed++;
-              console.log(`❌ [RESET] ${instanceResult.instanceId} erro: ${instanceResult.error}`);
+              debugLog(`❌ [RESET] ${instanceResult.instanceId} erro: ${instanceResult.error}`);
             }
           } else {
             failed++;
@@ -111,7 +115,7 @@ export class WeeklyResetService {
         });
       }
 
-      console.log(`🎉 [RESET] Concluído! ${successful} sucessos, ${skipped} ignorados, ${failed} falhas`);
+      debugLog(`🎉 [RESET] Concluído! ${successful} sucessos, ${skipped} ignorados, ${failed} falhas`);
 
       return {
         totalProcessed: instancesToReset.length,
@@ -136,14 +140,15 @@ export class WeeklyResetService {
     const instanceId = instance.id;
     const oldWeekNumber = instance.currentWeekNumber;
 
-    console.log(`🔍 [DRY RUN] Simulando reset para ${instanceId}, semana ${oldWeekNumber}`);
+    debugLog(`🔍 [DRY RUN] Simulando reset para ${instanceId}, semana ${oldWeekNumber}`);
     return {
       instanceId,
       oldWeekNumber,
       newWeekNumber: oldWeekNumber + 1,
-      newActivitiesCount: 10, // Estimativa
+      newActivitiesCount: 0,
       status: 'success',
-      snapshotId: 'dry-run-snapshot-id'
+      isDryRun: true,
+      snapshotId: undefined
     };
   }
 
@@ -207,7 +212,7 @@ export class WeeklyResetService {
         return r.status === 'fulfilled' && r.value === true;
       });
 
-      console.log(`📊 [RESET] ${filteredInstances.length}/${instances.length} instâncias precisam de reset`);
+      debugLog(`📊 [RESET] ${filteredInstances.length}/${instances.length} instâncias precisam de reset`);
       return filteredInstances;
 
     } catch (error: any) {
@@ -226,8 +231,19 @@ export class WeeklyResetService {
       }
 
       // Recovery: se activitiesReady=false, houve reset parcial — permite re-processamento
-      if ((instance as ScheduleInstance & { activitiesReady?: boolean }).activitiesReady === false) {
-        console.log(`⚠️ [RESET] ${instance.id} tem activitiesReady=false — forçando recovery`);
+      // Limite de 3 tentativas para evitar loop infinito quando template foi deletado
+      if (instance.activitiesReady === false) {
+        const attempts = instance.recoveryAttempts ?? 0;
+        if (attempts >= 3) {
+          console.error(`🚫 [RESET] ${instance.id} atingiu limite de recovery (${attempts} tentativas) — marcando como recovery_failed`);
+          await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instance.id as string), {
+            activitiesReady: false,
+            status: 'recovery_failed',
+            updatedAt: serverTimestamp()
+          }).catch(e => console.error('[RESET] Falha ao marcar recovery_failed:', e));
+          return false;
+        }
+            debugLog(`⚠️ [RESET] ${instance.id} tem activitiesReady=false (tentativa ${attempts + 1}/3) — forçando recovery`);
         return true;
       }
 
@@ -327,24 +343,25 @@ export class WeeklyResetService {
     results: WeeklyResetResult[];
   }> {
     try {
-      console.log(`🚀 [FULL RESET] Iniciando reset semanal COMPLETO${dryRun ? ' (DRY RUN)' : ''}`);
-      console.log(`📅 Data atual: ${new Date().toLocaleDateString('pt-BR')}`);
+      debugLog(`🚀 [FULL RESET] Iniciando reset semanal COMPLETO${dryRun ? ' (DRY RUN)' : ''}`);
+      debugLog(`📅 Data atual: ${new Date().toLocaleDateString('pt-BR')}`);
 
-      // 1. Buscar TODAS as instâncias
-      const allInstances = await this.getAllActiveInstances();
-      console.log(`📊 [FULL RESET] Total de instâncias ativas: ${allInstances.length}`);
+      // 1. Buscar instâncias que realmente precisam de reset (currentWeekEndDate < now)
+      // findInstancesForReset já aplica o filtro — evita N chamadas extras a needsWeeklyReset
+      const instancesToReset = await this.findInstancesForReset();
+      debugLog(`📊 [FULL RESET] Instâncias elegíveis para reset: ${instancesToReset.length}`);
 
-      allInstances.forEach((instance, index) => {
-        console.log(`   ${index + 1}. ${instance.id}`);
-        console.log(`      Semana: ${instance.currentWeekNumber}`);
-        console.log(`      Início: ${instance.currentWeekStartDate.toLocaleDateString('pt-BR')}`);
-        console.log(`      Fim: ${instance.currentWeekEndDate.toLocaleDateString('pt-BR')}`);
-        console.log(`      Status: ${instance.status}`);
-        console.log(`      Progresso: ${instance.progressCache?.completedActivities || 0}/${instance.progressCache?.totalActivities || 0}`);
+      instancesToReset.forEach((instance, index) => {
+        debugLog(`   ${index + 1}. ${instance.id}`);
+        debugLog(`      Semana: ${instance.currentWeekNumber}`);
+        debugLog(`      Início: ${instance.currentWeekStartDate.toLocaleDateString('pt-BR')}`);
+        debugLog(`      Fim: ${instance.currentWeekEndDate.toLocaleDateString('pt-BR')}`);
+        debugLog(`      Status: ${instance.status}`);
+        debugLog(`      Progresso: ${instance.progressCache?.completedActivities || 0}/${instance.progressCache?.totalActivities || 0}`);
       });
 
-      if (allInstances.length === 0) {
-        console.log('ℹ️ [FULL RESET] Nenhuma instância ativa encontrada');
+      if (instancesToReset.length === 0) {
+        debugLog('ℹ️ [FULL RESET] Nenhuma instância precisa de reset agora');
         return {
           totalInstances: 0,
           processed: 0,
@@ -353,21 +370,6 @@ export class WeeklyResetService {
           snapshotsGenerated: 0,
           results: []
         };
-      }
-
-      // 2. Filtrar apenas instâncias que realmente precisam de reset
-      const needsResetResults = await Promise.allSettled(
-        allInstances.map(instance => this.needsWeeklyReset(instance))
-      );
-      const instancesToReset = allInstances.filter((_, i) => {
-        const r = needsResetResults[i];
-        return r.status === 'fulfilled' && r.value === true;
-      });
-      console.log(`📊 [FULL RESET] Instâncias elegíveis para reset: ${instancesToReset.length}/${allInstances.length}`);
-
-      if (instancesToReset.length === 0) {
-        console.log('ℹ️ [FULL RESET] Nenhuma instância precisa de reset agora');
-        return { totalInstances: allInstances.length, processed: 0, successful: 0, failed: 0, snapshotsGenerated: 0, results: [] };
       }
 
       // 3. Processar EM PARALELO (com limites)
@@ -380,7 +382,7 @@ export class WeeklyResetService {
 
       for (let i = 0; i < instancesToReset.length; i += BATCH_SIZE) {
         const batch = instancesToReset.slice(i, i + BATCH_SIZE);
-        console.log(`🔄 [FULL RESET] Processando batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(instancesToReset.length / BATCH_SIZE)}`);
+        debugLog(`🔄 [FULL RESET] Processando batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(instancesToReset.length / BATCH_SIZE)}`);
 
         const batchPromises = batch.map(instance =>
           dryRun
@@ -398,13 +400,13 @@ export class WeeklyResetService {
             if (instanceResult.status === 'success') {
               successful++;
               if (instanceResult.snapshotId) snapshotsGenerated++;
-              console.log(`✅ [FULL RESET] ${instanceResult.instanceId} → Semana ${instanceResult.newWeekNumber}`);
+              debugLog(`✅ [FULL RESET] ${instanceResult.instanceId} → Semana ${instanceResult.newWeekNumber}`);
             } else if (instanceResult.status === 'skipped') {
               skipped++;
-              console.log(`⏭️ [FULL RESET] ${instanceResult.instanceId} pulado: ${instanceResult.error}`);
+              debugLog(`⏭️ [FULL RESET] ${instanceResult.instanceId} pulado: ${instanceResult.error}`);
             } else {
               failed++;
-              console.log(`❌ [FULL RESET] ${instanceResult.instanceId} erro: ${instanceResult.error}`);
+              debugLog(`❌ [FULL RESET] ${instanceResult.instanceId} erro: ${instanceResult.error}`);
             }
           } else {
             failed++;
@@ -425,10 +427,10 @@ export class WeeklyResetService {
         }
       }
 
-      console.log(`🎉 [FULL RESET] CONCLUÍDO! Processadas: ${instancesToReset.length}, Sucessos: ${successful}, Falhas: ${failed}, Snapshots: ${snapshotsGenerated}`);
+      debugLog(`🎉 [FULL RESET] CONCLUÍDO! Processadas: ${instancesToReset.length}, Sucessos: ${successful}, Falhas: ${failed}, Snapshots: ${snapshotsGenerated}`);
 
       return {
-        totalInstances: allInstances.length,
+        totalInstances: instancesToReset.length,
         processed: instancesToReset.length,
         successful,
         failed,
@@ -503,11 +505,19 @@ export class WeeklyResetService {
     const oldWeekNumber = instance.currentWeekNumber;
 
     try {
-      console.log(`🔄 [FULL RESET] Processando ${instanceId}, semana ${oldWeekNumber}`);
+      debugLog(`🔄 [FULL RESET] Processando ${instanceId}, semana ${oldWeekNumber}`);
 
-      // 🔥 CORREÇÃO: SALVAR VALORES ANTIGOS PARA LOG
-      const oldCompleted = instance.progressCache?.completedActivities || 0;
-      const oldTotal = instance.progressCache?.totalActivities || 0;
+      // Incrementar contador de tentativas de recovery se activitiesReady=false
+      if (instance.activitiesReady === false) {
+        await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
+          recoveryAttempts: (instance.recoveryAttempts ?? 0) + 1,
+          updatedAt: serverTimestamp()
+        }).catch(e => console.warn('[RESET] Falha ao incrementar recoveryAttempts:', e));
+      }
+
+      // Valores capturados dentro da transaction para evitar stale closure
+      let oldCompleted = 0;
+      let oldTotal = 0;
 
       // 1. Sempre gerar snapshot
       // Salvar snapshot existente ANTES de regenerar — para restauração no rollback
@@ -570,6 +580,9 @@ export class WeeklyResetService {
         if (currentWeek !== oldWeekNumber) {
           throw new ConcurrentResetError(currentWeek);
         }
+        // Captura valores reais da instância (evita stale closure do parâmetro `instance`)
+        oldCompleted = currentData.progressCache?.completedActivities || 0;
+        oldTotal = currentData.progressCache?.totalActivities || 0;
 
         // 🔥 FORÇAR ZERAMENTO DO PROGRESSCACHE (totalActivities será atualizado após geração)
         transaction.update(instanceRef, {
@@ -580,16 +593,16 @@ export class WeeklyResetService {
           'progressCache.completionPercentage': 0,
           'progressCache.totalPointsEarned': 0,
           'progressCache.totalActivities': 0,
-          'progressCache.streakDays': instance.progressCache?.streakDays || 0,
+          'progressCache.streakDays': instance.progressCache?.streakDays ?? 0,
           'progressCache.lastUpdatedAt': serverTimestamp(),
           activitiesReady: false,
           updatedAt: serverTimestamp()
         });
 
-        console.log(`🔒 [TRANSACTION] Zerando progressCache de ${oldCompleted}/${oldTotal} para 0/0 (total será calculado após geração)`);
+        debugLog(`🔒 [TRANSACTION] Zerando progressCache de ${oldCompleted}/${oldTotal} para 0/0 (total será calculado após geração)`);
       });
 
-      console.log(`✅ [FULL RESET] ${instanceId} atualizada: semana ${oldWeekNumber} → ${newWeekNumber}`);
+      debugLog(`✅ [FULL RESET] ${instanceId} atualizada: semana ${oldWeekNumber} → ${newWeekNumber}`);
 
       // 5. GERAR NOVAS ATIVIDADES
       // activitiesReady=false foi escrito na transaction; só vira true após geração bem-sucedida.
@@ -597,7 +610,7 @@ export class WeeklyResetService {
       let newActivitiesCount = 0;
       try {
         newActivitiesCount = await this.generateNewWeekActivities(instanceId, newWeekNumber, newWeekStartDate);
-        console.log(`📝 [FULL RESET] ${newActivitiesCount} novas atividades geradas`);
+        debugLog(`📝 [FULL RESET] ${newActivitiesCount} novas atividades geradas`);
         await ScheduleInstanceService.updateProgressCache(instanceId, newWeekNumber);
         await updateDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId), {
           activitiesReady: true,
@@ -613,17 +626,31 @@ export class WeeklyResetService {
             'progressCache.completedActivities': oldCompleted,
             'progressCache.totalActivities': oldTotal,
             'progressCache.completionPercentage': oldCompletionPct,
-            'progressCache.totalPointsEarned': instance.progressCache?.totalPointsEarned || 0,
+            'progressCache.totalPointsEarned': instance.progressCache?.totalPointsEarned ?? 0,
+            'progressCache.streakDays': instance.progressCache?.streakDays ?? 0,
             activitiesReady: true,
             updatedAt: serverTimestamp()
           };
-          rollbackData.currentWeekStartDate = instance.currentWeekStartDate
-            ? Timestamp.fromDate(instance.currentWeekStartDate)
-            : null;
-          rollbackData.currentWeekEndDate = instance.currentWeekEndDate
-            ? Timestamp.fromDate(instance.currentWeekEndDate)
-            : null;
+          const toTimestamp = (v: unknown, field: string): Timestamp => {
+            if (v instanceof Timestamp) return v;
+            if (v instanceof Date) return Timestamp.fromDate(v);
+            throw new Error(`[ROLLBACK] Campo obrigatório "${field}" é null/undefined — rollback abortado para evitar corrupção`);
+          };
+          rollbackData.currentWeekStartDate = toTimestamp(instance.currentWeekStartDate, 'currentWeekStartDate');
+          rollbackData.currentWeekEndDate = toTimestamp(instance.currentWeekEndDate, 'currentWeekEndDate');
 
+          // Buscar activityProgress parciais ANTES da transaction (queries não podem rodar dentro de runTransaction)
+          // Se a query falhar, lançar — rollback incompleto seria pior que nenhum rollback
+          const partialProgressSnap = await getDocs(
+            query(
+              collection(firestore, 'activityProgress'),
+              where('scheduleInstanceId', '==', instanceId),
+              where('weekNumber', '==', newWeekNumber)
+            )
+          );
+          const partialProgressRefs = partialProgressSnap.docs.map(d => d.ref);
+
+          // Rollback atômico: instância + snapshot + activityProgress parciais numa única transaction
           await runTransaction(firestore, async (transaction) => {
             const instanceRef = doc(firestore, this.COLLECTIONS.INSTANCES, instanceId);
             transaction.update(instanceRef, rollbackData);
@@ -636,8 +663,14 @@ export class WeeklyResetService {
                 transaction.delete(snapRef);
               }
             }
+
+            // Deletar activityProgress parciais na mesma transaction
+            partialProgressRefs.forEach(ref => transaction.delete(ref));
           });
 
+          if (partialProgressRefs.length > 0) {
+            console.warn(`↩️ [ROLLBACK] ${partialProgressRefs.length} activityProgress da semana ${newWeekNumber} removidos atomicamente.`);
+          }
           console.warn(`↩️ [FULL RESET] Rollback atômico concluído: instância ${instanceId} semana ${oldWeekNumber}, snapshot restaurado.`);
           return {
             instanceId,
@@ -673,7 +706,7 @@ export class WeeklyResetService {
 
     } catch (error: any) {
       if (error instanceof ConcurrentResetError) {
-        console.log(`⏭️ [FULL RESET] ${instanceId} já foi resetado por execução paralela — semana atual: ${error.currentWeekNumber}`);
+        debugLog(`⏭️ [FULL RESET] ${instanceId} já foi resetado por execução paralela — semana atual: ${error.currentWeekNumber}`);
         return {
           instanceId,
           oldWeekNumber,
@@ -715,10 +748,10 @@ export class WeeklyResetService {
       const nextWeekStartDateOnly = new Date(nextWeekStart.getFullYear(), nextWeekStart.getMonth(), nextWeekStart.getDate());
       const templateEndDateOnly = new Date(scheduleTemplate.endDate.getFullYear(), scheduleTemplate.endDate.getMonth(), scheduleTemplate.endDate.getDate());
 
-      console.log(`📅 [CONTINUE CHECK] Instância ${instance.id}:`);
-      console.log(`   - Próxima semana: ${nextWeekStartDateOnly.toLocaleDateString()}`);
-      console.log(`   - Template endDate: ${templateEndDateOnly.toLocaleDateString()}`);
-      console.log(`   - Deve continuar? ${nextWeekStartDateOnly <= templateEndDateOnly}`);
+      debugLog(`📅 [CONTINUE CHECK] Instância ${instance.id}:`);
+      debugLog(`   - Próxima semana: ${nextWeekStartDateOnly.toLocaleDateString()}`);
+      debugLog(`   - Template endDate: ${templateEndDateOnly.toLocaleDateString()}`);
+      debugLog(`   - Deve continuar? ${nextWeekStartDateOnly <= templateEndDateOnly}`);
 
       return nextWeekStartDateOnly <= templateEndDateOnly;
 

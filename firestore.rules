@@ -23,7 +23,13 @@ service cloud.firestore {
     // ── Professionals ─────────────────────────────────────
     match /professionals/{professionalId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner(professionalId);
+      // Criação: o próprio usuário cria seu perfil
+      allow create: if isOwner(professionalId);
+      // Update: o próprio profissional pode editar, mas NÃO pode alterar 'role'
+      // (role é gerenciado exclusivamente via Admin SDK / Cloud Functions)
+      allow update: if isOwner(professionalId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']);
+      allow delete: if isOwner(professionalId);
     }
 
     // ── Schedule Templates ────────────────────────────────
@@ -57,39 +63,68 @@ service cloud.firestore {
       );
     }
 
-    // ── Schedule Instances (collectionGroup) ──────────────
-    match /{path=**}/scheduleInstances/{docId} {
-      allow read: if isAuthenticated() && (
-        resource.data.studentId == request.auth.uid ||
-        isProfessional(request.auth.uid)
-      );
-    }
-
-    // Aluno lê e escreve apenas seu próprio progresso; profissional cria/atualiza para seus alunos
+    // Apenas profissionais criam activityProgress (via ScheduleInstanceService).
+    // Alunos só atualizam status e executionData do próprio progresso — campos imutáveis protegidos.
     match /activityProgress/{docId} {
       allow read: if isAuthenticated() && (
         resource.data.studentId == request.auth.uid ||
         isProfessional(request.auth.uid)
       );
-      allow create: if isAuthenticated() && (
-        request.resource.data.studentId == request.auth.uid ||
-        isProfessional(request.auth.uid)
+      allow create: if isProfessional(request.auth.uid);
+      allow update: if isAuthenticated() && (
+        isProfessional(request.auth.uid) ||
+        (
+          resource.data.studentId == request.auth.uid &&
+          request.resource.data.studentId == request.auth.uid &&
+          // Aluno pode alterar campos de progresso legítimos:
+          // - status/startedAt: startActivity (pending→in_progress)
+          // - status/completedAt/scoring/executionData: completeActivity (in_progress→completed)
+          // - status: skipActivity (pending→skipped)
+          // Campos imutáveis (IDs, scheduling, weekNumber) não estão na lista
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'startedAt', 'completedAt', 'scoring', 'executionData', 'updatedAt']) &&
+          // Validação de schema: executionData deve ser map com timeSpent >= 0
+          (
+            !('executionData' in request.resource.data) ||
+            (
+              request.resource.data.executionData is map &&
+              (!('timeSpent' in request.resource.data.executionData) ||
+               (request.resource.data.executionData.timeSpent is number &&
+                request.resource.data.executionData.timeSpent >= 0))
+            )
+          )
+        )
       );
-      allow update, delete: if isAuthenticated() && (
-        resource.data.studentId == request.auth.uid ||
-        isProfessional(request.auth.uid)
-      );
+      allow delete: if isProfessional(request.auth.uid);
     }
 
     // ── Weekly Snapshots ──────────────────────────────────
+    // Alunos criam/atualizam apenas o próprio snapshot (via ProgressService.updateWeeklySnapshot,
+    // chamado na conclusão de atividade). Profissionais acessam qualquer snapshot.
+    // Cloud Functions via Admin SDK bypassa estas regras automaticamente.
     match /weeklySnapshots/{docId} {
       allow read: if isAuthenticated() && (
         resource.data.studentId == request.auth.uid ||
         isProfessional(request.auth.uid)
       );
-      allow write: if isProfessional(request.auth.uid) || (
-        isAuthenticated() && request.resource.data.studentId == request.auth.uid
+      allow create: if isAuthenticated() && (
+        (request.resource.data.studentId == request.auth.uid &&
+         request.resource.data.studentId is string &&
+         request.resource.data.weekNumber is number &&
+         request.resource.data.weekNumber > 0) ||
+        isProfessional(request.auth.uid)
       );
+      allow update: if isAuthenticated() && (
+        isProfessional(request.auth.uid) ||
+        (
+          resource.data.studentId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['completedActivities', 'totalActivities', 'completionRate',
+                      'consistencyScore', 'adherenceScore', 'totalTimeSpent',
+                      'isTotalActivityPending', 'streakDays', 'updatedAt'])
+        )
+      );
+      allow delete: if isProfessional(request.auth.uid);
     }
 
     // ── GAD-7 Assessments ─────────────────────────────────

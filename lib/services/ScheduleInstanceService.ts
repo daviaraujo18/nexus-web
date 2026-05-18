@@ -15,6 +15,9 @@ import {
 import { ScheduleService } from './ScheduleService';
 import { ActivityService } from './ActivityService';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+const debugLog = (...args: unknown[]) => { if (DEBUG) console.log(...args); };
+
 export class ScheduleInstanceService {
   private static readonly COLLECTIONS = {
     TEMPLATES: 'weeklySchedules',
@@ -89,6 +92,13 @@ export class ScheduleInstanceService {
     console.group(`🚀 [SERVICE] Atribuindo Template: ${scheduleTemplateId}`);
     try {
       const schedule = await ScheduleService.getScheduleTemplate(scheduleTemplateId);
+
+      // Verificar ownership: apenas o dono do template ou um coordinator pode atribuir
+      const profSnap = await getDoc(doc(firestore, 'professionals', professionalId));
+      const isCoordinator = profSnap.data()?.role === 'coordinator';
+      if (!isCoordinator && schedule.professionalId !== professionalId) {
+        throw new Error('Você não tem permissão para atribuir este cronograma');
+      }
       const successful = [];
       const failed = [];
 
@@ -169,7 +179,7 @@ export class ScheduleInstanceService {
               activitiesReady: false
             });
           });
-          console.log(`✅ [SUCESSO] Instância criada: ${instanceId}`);
+          debugLog(`✅ [SUCESSO] Instância criada: ${instanceId}`);
 
           try {
             await this.generateWeekActivities(instanceId, 1, weekStart);
@@ -207,7 +217,7 @@ export class ScheduleInstanceService {
    * 🛠️ [GERAÇÃO ATIVIDADES]
    */
   static async generateWeekActivities(instanceId: string, weekNo: number, providedWeekStartDate?: Date) {
-    console.log(`⚙️ [GENERATE] Gerando atividades para instância ${instanceId} (Semana ${weekNo})`);
+    debugLog(`⚙️ [GENERATE] Gerando atividades para instância ${instanceId} (Semana ${weekNo})`);
     const snap = await getDoc(doc(firestore, this.COLLECTIONS.INSTANCES, instanceId));
     const inst = snap.data();
     if (!inst) {
@@ -263,16 +273,22 @@ export class ScheduleInstanceService {
     let added = 0;
 
     for (const act of activities) {
+      if (typeof act.dayOfWeek !== 'number' || act.dayOfWeek < 0 || act.dayOfWeek > 6) {
+        console.warn(`[generateWeekActivities] dayOfWeek inválido (${act.dayOfWeek}) na atividade ${act.id} — ignorada.`);
+        skipped++;
+        continue;
+      }
+
       const activityDate = DateUtils.calculateActivityDate(weekStartDate, act.dayOfWeek);
 
       if (templateEndDate && activityDate > templateEndDate) {
-        console.log(`📅 [GENERATE] "${act.title}" após endDate (${activityDate.toLocaleDateString()}) — ignorada.`);
+        debugLog(`📅 [GENERATE] "${act.title}" após endDate (${activityDate.toLocaleDateString()}) — ignorada.`);
         skipped++;
         continue;
       }
 
       if (weekNo === 1 && instanceStartDate && activityDate < instanceStartDate) {
-        console.log(`⏩ [GENERATE] "${act.title}" antes do início da instância (${activityDate.toLocaleDateString()}) — ignorada.`);
+        debugLog(`⏩ [GENERATE] "${act.title}" antes do início da instância (${activityDate.toLocaleDateString()}) — ignorada.`);
         skipped++;
         continue;
       }
@@ -282,9 +298,7 @@ export class ScheduleInstanceService {
         skipped++;
         continue;
       }
-      // Converte dayOfWeek de Conv A (0=Dom) para Conv B (0=Seg)
-      // para manter consistência com todo o código do aluno que espera 0=Seg
-      const convertedDayOfWeek = (act.dayOfWeek + 6) % 7;
+      const convertedDayOfWeek = DateUtils.convertDayOfWeekToMondayBased(act.dayOfWeek);
       batch.set(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
         scheduleInstanceId: instanceId,
         activityId: act.id,
@@ -306,7 +320,7 @@ export class ScheduleInstanceService {
     if (added > 0) {
       await batch.commit();
     }
-    console.log(`✨ [GENERATE] ${added} atividades geradas, ${skipped} ignoradas (endDate ou já existentes).`);
+    debugLog(`✨ [GENERATE] ${added} atividades geradas, ${skipped} ignoradas (endDate ou já existentes).`);
   }
 
   static async getScheduleInstanceById(instanceId: string): Promise<ScheduleInstance> {
@@ -422,23 +436,23 @@ export class ScheduleInstanceService {
         where('status', '==', 'active')
       );
       
-      console.log(`⏳ [SERVICE] Buscando documentos brutos na collection...`);
+      debugLog(`⏳ [SERVICE] Buscando documentos brutos na collection...`);
       const snap = await getDocs(q);
-      console.log(`📦 [SERVICE] ${snap.size} instâncias brutas encontradas. Validando integridade...`);
+      debugLog(`📦 [SERVICE] ${snap.size} instâncias brutas encontradas. Validando integridade...`);
       
       const validationPromises = snap.docs.map(async (instDoc) => {
         const inst = { id: instDoc.id, ...instDoc.data() } as any;
 
         try {
           if (inst.activitiesReady !== true) {
-            console.log(`⏳ [BLOQUEIO] Instância com activitiesReady=false ignorada: ${inst.id.substring(0, 12)}...`);
+            debugLog(`⏳ [BLOQUEIO] Instância com activitiesReady=false ignorada: ${inst.id.substring(0, 12)}...`);
             return null;
           }
 
           const { visible, reason } = await this.getVisibleTemplateForStudent(inst.scheduleTemplateId);
 
           if (!visible) {
-            console.log(`🗑️ [BLOQUEIO] Instância ignorada (${reason}): ${inst.id.substring(0, 12)}... template=${inst.scheduleTemplateId}`);
+            debugLog(`🗑️ [BLOQUEIO] Instância ignorada (${reason}): ${inst.id.substring(0, 12)}... template=${inst.scheduleTemplateId}`);
             return null;
           }
 
@@ -463,7 +477,7 @@ export class ScheduleInstanceService {
       // Filtra os nulos (as órfãs que descartamos)
       const validInstances = results.filter((inst): inst is ScheduleInstance => inst !== null);
       
-      console.log(`✅ [RESULTADO] ${validInstances.length} instâncias legítimas de fato aprovadas.`);
+      debugLog(`✅ [RESULTADO] ${validInstances.length} instâncias legítimas de fato aprovadas.`);
       return validInstances;
     } catch (err) {
       console.error("❌ [ERRO CRÍTICO] Erro ao auditar instâncias:", err);
@@ -484,7 +498,7 @@ export class ScheduleInstanceService {
       const validInstanceIds = new Set(active.map(i => i.id));
 
       if (validInstanceIds.size === 0) {
-        console.log('ℹ️ [SERVICE] Nenhuma instância ativa — retornando grade vazia.');
+        debugLog('ℹ️ [SERVICE] Nenhuma instância ativa — retornando grade vazia.');
         return [];
       }
 
@@ -500,7 +514,7 @@ export class ScheduleInstanceService {
       const start = DateUtils.getWeekStartDate(now);
       const end = DateUtils.getWeekEndDate(now);
 
-      console.log(`🌐 [SERVICE] Janela Civil: ${start.toLocaleDateString()} a ${end.toLocaleDateString()}`);
+      debugLog(`🌐 [SERVICE] Janela Civil: ${start.toLocaleDateString()} a ${end.toLocaleDateString()}`);
 
       // Coleta weekNumbers únicos para restringir a query ao Firestore e evitar full-scan do histórico
       const weekNums = Array.from(new Set(
@@ -516,7 +530,9 @@ export class ScheduleInstanceService {
       // Firestore `in` suporta até 30 itens — limitar para evitar erro
       const instanceIdArr = Array.from(validInstanceIds).slice(0, 30);
       if (instanceIdArr.length < validInstanceIds.size) {
-        console.warn(`[getWeekActivities] ${validInstanceIds.size} instâncias ativas, mas o filtro suporta no máximo 30. ${validInstanceIds.size - 30} serão ignoradas.`);
+        // Firestore `in` limita a 30 valores — instâncias além desse limite não aparecem na grade.
+        // Improvável no uso normal (1 programa por aluno), mas documentado para operações futuras.
+        console.warn(`[getWeekActivities] Aluno ${studentId} tem ${validInstanceIds.size} instâncias ativas; apenas as primeiras 30 serão incluídas na grade. Instâncias ignoradas: ${validInstanceIds.size - 30}.`);
       }
 
       const baseQuery = query(
@@ -567,11 +583,11 @@ export class ScheduleInstanceService {
         if (isWithinRange) {
           activities.push({ id: dDoc.id, ...data, scheduledDate } as ActivityProgress);
         } else if (!isWithinRange) {
-          console.log(`⏭️ [BLOQUEIO DATA] Fora da semana: [${data.activitySnapshot?.title || 'Sem título'}] | Data: ${scheduledDate.toLocaleDateString('pt-BR')}`);
+          debugLog(`⏭️ [BLOQUEIO DATA] Fora da semana: [${data.activitySnapshot?.title || 'Sem título'}] | Data: ${scheduledDate.toLocaleDateString('pt-BR')}`);
         }
       });
 
-      console.log(`🎯 [SERVICE] TOTAL FINAL NA GRADE: ${activities.length} atividades limpas.`);
+      debugLog(`🎯 [SERVICE] TOTAL FINAL NA GRADE: ${activities.length} atividades limpas.`);
       return activities;
     } catch (err) {
       console.error("❌ [ERRO CRÍTICO] Erro fatal no filtro semanal:", err);

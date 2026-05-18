@@ -34,25 +34,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setProfileReady(true);
       return data;
     } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'User profile not found or inactive') {
-        console.log('⏳ Profile ainda não criado, aguardando...');
+      const isProfileMissing = error instanceof Error && error.message === 'User profile not found or inactive';
 
+      if (isProfileMissing) {
+        // aguardando criação do profile (retry automático)
         await new Promise(resolve => setTimeout(resolve, 800));
 
         try {
           const retryData = await getFullData();
           setProfileReady(true);
           return retryData;
-        } catch {
-          // Sessão Firebase ativa mas perfil não existe — encerrar para evitar estado inválido
-          await AuthService.logout().catch(() => {});
+        } catch (retryError: unknown) {
+          const stillMissing = retryError instanceof Error && retryError.message === 'User profile not found or inactive';
+          if (stillMissing) {
+            // Sessão Firebase ativa mas perfil definitivamente não existe — encerrar
+            console.warn('⚠️ Perfil não encontrado após retry — encerrando sessão.');
+            await AuthService.logout().catch(() => {});
+          } else {
+            // Erro de rede/Firestore no retry — não deslogar, apenas sinalizar pronto
+            console.error('❌ Erro ao buscar perfil (retry):', retryError);
+          }
           setProfileReady(true);
           return null;
         }
       }
 
-      // Erro inesperado — encerrar sessão para garantir estado limpo
-      await AuthService.logout().catch(() => {});
+      // Erro de rede, Firestore indisponível etc. — não destruir sessão válida
+      console.error('❌ Erro ao buscar perfil (não crítico, sessão mantida):', error);
       setProfileReady(true);
       return null;
     }
@@ -69,11 +77,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (result.success) {
         const uid = auth.currentUser?.uid;
         if (uid) {
-          NotificationService.requestFCMToken(uid).then(token => {
-            if (token) NotificationService.setupForegroundMessageListener(() => {});
-          }).catch((err) => {
-            console.warn('⚠️ Erro ao registrar token FCM:', err);
-          });
+          NotificationService.requestFCMToken(uid)
+            .then(token => {
+              if (token) return NotificationService.setupForegroundMessageListener(() => {});
+            })
+            .catch((err) => {
+              console.warn('⚠️ Erro ao registrar token FCM:', err);
+            });
         }
       }
 
@@ -115,11 +125,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Safety: se loading ficar true por mais de 15s, força limpeza
+  // Safety: se loading ficar true por mais de 8s, força limpeza com estado consistente
   // (proteção contra cenário onde onAuthStateChanged não dispara após login)
   useEffect(() => {
     if (!loading) return;
-    const timer = setTimeout(() => setLoading(false), 15000);
+    const timer = setTimeout(() => {
+      console.warn('⚠️ [AuthContext] Timeout de loading atingido — forçando estado deslogado');
+      setUser(null);
+      setLoading(false);
+    }, 8000);
     return () => clearTimeout(timer);
   }, [loading]);
 

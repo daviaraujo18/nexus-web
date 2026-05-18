@@ -179,6 +179,10 @@ export interface ScheduleInstance extends BaseModel {
     streakDays: number;
     lastUpdatedAt: Date;
   };
+
+  // Reset semanal
+  activitiesReady?: boolean;
+  recoveryAttempts?: number;
 }
 
 export interface ActivityProgress extends BaseModel {
@@ -495,6 +499,7 @@ export interface WeeklyResetResult {
   snapshotId?: string;
   newActivitiesCount: number;
   status: 'success' | 'skipped' | 'error';
+  isDryRun?: boolean;
   error?: string;
 }
 

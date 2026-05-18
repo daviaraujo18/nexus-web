@@ -119,28 +119,41 @@ export async function runWeeklyReset(): Promise<{
         updatedAt: FieldValue.serverTimestamp(),
       };
 
-      await db.runTransaction(async (transaction) => {
-        const instanceRef = db.collection('scheduleInstances').doc(instanceDoc.id);
-        const instanceSnap = await transaction.get(instanceRef);
-        if (!instanceSnap.exists) return;
+      try {
+        await db.runTransaction(async (transaction) => {
+          const instanceRef = db.collection('scheduleInstances').doc(instanceDoc.id);
+          const instanceSnap = await transaction.get(instanceRef);
+          if (!instanceSnap.exists) return;
 
-        const snapshotRef = db.collection('weeklySnapshots').doc(snapshotId);
-        transaction.set(snapshotRef, snapshotData);
+          // Idempotência: se a semana já foi avançada por execução concorrente, abortar silenciosamente
+          const liveWeekNumber: number = instanceSnap.data()?.currentWeekNumber ?? 1;
+          if (liveWeekNumber !== currentWeekNumber) {
+            console.warn(`⚠️ [IDEMPOTÊNCIA] ${instanceDoc.id}: semana esperada=${currentWeekNumber}, atual=${liveWeekNumber} — reset já executado, pulando.`);
+            return;
+          }
 
-        transaction.update(instanceRef, {
-          currentWeekNumber: newWeekNumber,
-          currentWeekStartDate: Timestamp.fromDate(newWeekStart),
-          currentWeekEndDate: Timestamp.fromDate(newWeekEnd),
-          'progressCache.completedActivities': 0,
-          'progressCache.completionPercentage': 0,
-          'progressCache.totalPointsEarned': 0,
-          'progressCache.lastUpdatedAt': FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
+          const snapshotRef = db.collection('weeklySnapshots').doc(snapshotId);
+          transaction.set(snapshotRef, snapshotData);
+
+          transaction.update(instanceRef, {
+            currentWeekNumber: newWeekNumber,
+            currentWeekStartDate: Timestamp.fromDate(newWeekStart),
+            currentWeekEndDate: Timestamp.fromDate(newWeekEnd),
+            'progressCache.completedActivities': 0,
+            'progressCache.completionPercentage': 0,
+            'progressCache.totalPointsEarned': 0,
+            'progressCache.lastUpdatedAt': FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
         });
-      });
 
-      generatedSnapshots++;
-      console.log(`📸 Snapshot ${snapshotId}: ${metrics.completedActivities}/${metrics.totalActivities} concluídas, consistência=${metrics.consistencyScore}%, adesão=${metrics.adherenceScore}%`);
+        generatedSnapshots++;
+        console.log(`📸 Snapshot ${snapshotId}: ${metrics.completedActivities}/${metrics.totalActivities} concluídas, consistência=${metrics.consistencyScore}%, adesão=${metrics.adherenceScore}%`);
+      } catch (txErr: any) {
+        errors.push(`${instanceDoc.id}: Falha na transaction de reset (semana ${currentWeekNumber}): ${txErr.message}`);
+        console.error(`❌ Erro na transaction de reset para ${instanceDoc.id}:`, txErr);
+        return; // não avança para geração de atividades se o reset falhou
+      }
     }
 
     // Gerar atividades da nova semana e atualizar progressCache
@@ -367,31 +380,8 @@ export const processWeeklyReset = onSchedule(
   }
 );
 
-export const forceWeeklyReset = onRequest(
-  { region: 'southamerica-east1', timeoutSeconds: 540 },
-  async (req, res) => {
-    try {
-      const authHeader = req.headers.authorization;
-      if (!authHeader?.startsWith('Bearer ')) {
-        res.status(401).json({ error: 'Não autorizado' });
-        return;
-      }
-      const token = authHeader.split('Bearer ')[1];
-      const decoded = await admin.auth().verifyIdToken(token);
-      const adminDoc = await db.collection('professionals').doc(decoded.uid).get();
-      if (!adminDoc.exists || !adminDoc.data()?.profile?.canApproveRegistrations) {
-        res.status(403).json({ error: 'Acesso negado' });
-        return;
-      }
-      const result = await runWeeklyReset();
-      res.json({ success: true, ...result });
-    } catch (error: any) {
-      console.error('Erro no reset forçado:', error);
-      res.status(500).json({ error: error.message });
-    }
-  }
-);
-
+// Único endpoint HTTP para disparo manual do reset semanal por administradores.
+// forceWeeklyReset foi removido — era duplicata idêntica a triggerWeeklyReset.
 export const triggerWeeklyReset = onRequest(
   { region: 'southamerica-east1', timeoutSeconds: 540 },
   async (req, res) => {
@@ -413,10 +403,15 @@ export const triggerWeeklyReset = onRequest(
       res.status(403).json({ error: 'Acesso negado. Apenas administradores podem executar esta operação.' });
       return;
     }
-    console.log('🚀 Iniciando triggerWeeklyReset (onRequest)');
-    const result = await runWeeklyReset();
-    console.log('✅ triggerWeeklyReset concluído:', result);
-    res.json({ success: true, ...result });
+    try {
+      console.log('🚀 Iniciando triggerWeeklyReset (onRequest)');
+      const result = await runWeeklyReset();
+      console.log('✅ triggerWeeklyReset concluído:', result);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error('Erro no reset manual:', error);
+      res.status(500).json({ error: error.message });
+    }
   }
 );
 
@@ -523,13 +518,10 @@ export const backfillSnapshots = onRequest(
 
       console.log(`🎉 Concluído: ${recalculated} recalculados, ${errors} erros`);
 
-      const resetResult = await runWeeklyReset();
-
       res.json({
         success: true,
         snapshotsRecalculados: recalculated,
         erros: errors,
-        resetSemanal: resetResult,
       });
     } catch (error: any) {
       console.error('❌ Erro no backfillSnapshots:', error);

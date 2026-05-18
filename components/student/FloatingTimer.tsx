@@ -1,7 +1,7 @@
 // components/student/FloatingTimer.tsx
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useActivityTimer } from '@/context/ActivityTimerContext';
 import { FaTimes, FaCheckCircle } from 'react-icons/fa';
 import { ProgressService } from '@/lib/services/ProgressService';
@@ -137,6 +137,9 @@ export default function FloatingTimer() {
    */
   const { active, elapsedSeconds, stopTimer, markCompleted } = useActivityTimer();
   const [completing, setCompleting] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  // Ref síncrona para prevenir double-complete entre FloatingTimer e handleManualComplete
+  const completingRef = useRef(false);
 
   /**
    * Não renderiza o componente se não houver atividade ativa
@@ -177,18 +180,29 @@ export default function FloatingTimer() {
    * - possível inconsistência temporária
    */
   const handleComplete = async () => {
+    if (completingRef.current) return;
+    completingRef.current = true;
     setCompleting(true);
+    setCompleteError(null);
+    // Capturar imediatamente antes de qualquer await — active pode mudar se o contexto re-renderizar
     const progressId = active.progressId;
+    const studentId = active.studentId;
     try {
-      await ProgressService.completeActivity(progressId, active.studentId, {
-        timeSpent: Math.ceil(elapsedSeconds / 60)
-      });
-      // Sinaliza conclusão real — ActivityPage detecta via completedProgressId
+      // Não enviamos timeSpent: a transaction calcula via startedAt persistido no Firestore,
+      // evitando divergência entre o relógio do cliente e o momento real do commit.
+      await ProgressService.completeActivity(progressId, studentId, {});
       markCompleted(progressId);
-    } catch (e) {
-      // best-effort: backend rejeitou (ex: já completado) — apenas cancela sem sinalizar conclusão
-      stopTimer();
+    } catch (e: any) {
+      // Atividade já completada por outro caminho — tratar como sucesso
+      if (e?.message?.includes('já foi processada') || e?.message?.includes('completed')) {
+        markCompleted(progressId);
+      } else {
+        // Erro real (rede, Firestore) — manter timer ativo e mostrar erro ao usuário
+        console.error('[FloatingTimer] Erro ao concluir atividade:', e);
+        setCompleteError('Falha ao concluir. Tente novamente.');
+      }
     } finally {
+      completingRef.current = false;
       setCompleting(false);
     }
   };
@@ -271,7 +285,9 @@ export default function FloatingTimer() {
        *
        * ⚠️ Dispara handleComplete
        */}
-      {/* Complete button */}
+      {completeError && (
+        <p className="text-xs text-red-500 text-center mb-2">{completeError}</p>
+      )}
       <button
         onClick={handleComplete}
         disabled={completing}

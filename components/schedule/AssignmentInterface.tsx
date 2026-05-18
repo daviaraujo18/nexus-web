@@ -72,7 +72,7 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     studentIds: [],
     startDate: new Date(),
     endDate: new Date(),
-    allowMultiple: true,
+    allowMultiple: false,
     customizations: {}
   });
 
@@ -97,7 +97,6 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
         startDate: schedule.startDate ? new Date(schedule.startDate) : new Date(),
         endDate: schedule.endDate ? new Date(schedule.endDate) : new Date()
       }));
-      ;
     }
   }, [schedule]);
 
@@ -175,8 +174,9 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
 
   const handleStudentSelect = (studentId: string) => {
     const student = filteredStudents.find(s => s.id === studentId);
+    if (!student) return;
     // Bloqueia seleção de aluno com cronograma ativo (igual ao comportamento de handleSelectAllAvailable)
-    if (student?.hasActiveInstance && !assignmentData.allowMultiple) return;
+    if (student.hasActiveInstance && !assignmentData.allowMultiple) return;
     setSelectedStudents(prev =>
       prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId]
     );
@@ -246,8 +246,6 @@ export default function AssignmentInterface({ scheduleId, onSuccess, onCancel }:
     } catch (err: any) {
       console.error('❌ Erro no Submit:', err);
       setError(err.message || 'Erro ao atribuir cronograma');
-    } finally {
-      ;
     }
   };
 

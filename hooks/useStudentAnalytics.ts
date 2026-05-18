@@ -6,6 +6,9 @@ import { useAuth } from '@/context/AuthContext';
 import { StudentAnalyticsSummary, Insight } from '@/types/analytics';
 import { AnalyticsService } from '@/lib/services/AnalyticsService';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+const debugLog = (...args: unknown[]) => { if (DEBUG) console.log(...args); };
+
 /**
  * HOOK: useStudentAnalytics
  * Responsável por gerenciar o estado dos dados de analytics de um aluno específico.
@@ -33,15 +36,15 @@ export function useStudentAnalytics(studentId: string) {
       return;
     }
 
-    console.group(`📊 [HOOK-FETCH] Iniciando busca para Aluno: ${studentId}`);
-    console.log('👤 Profissional solicitante:', user.id);
-    console.log('⏳ Janela de histórico solicitada:', weeks, 'semanas');
+    if (DEBUG) console.group(`📊 [HOOK-FETCH] Iniciando busca para Aluno: ${studentId}`);
+    debugLog('👤 Profissional solicitante:', user.id);
+    debugLog('⏳ Janela de histórico solicitada:', weeks, 'semanas');
     
     setLoading(true);
     setError(undefined);
 
     try {
-      console.log('📡 Chamando AnalyticsService.getStudentAnalytics...');
+      debugLog('📡 Chamando AnalyticsService.getStudentAnalytics...');
       const studentData = await analyticsService.getStudentAnalytics(
         studentId,
         user.id,
@@ -49,7 +52,7 @@ export function useStudentAnalytics(studentId: string) {
       );
 
       // Log crítico para verificar sincronização de XP e Nível (Matar erro do Nível 1 com 400 pontos)
-      console.log('✅ [HOOK-SUCESSO] Dados recebidos do Service:', {
+      debugLog('✅ [HOOK-SUCESSO] Dados recebidos do Service:', {
         aluno: studentData.studentName,
         xpReal: studentData.studentTotalPoints,
         nivelCalculado: studentData.currentMetrics?.level,
@@ -63,7 +66,7 @@ export function useStudentAnalytics(studentId: string) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar dados do aluno');
     } finally {
       setLoading(false);
-      console.groupEnd();
+      if (DEBUG) console.groupEnd();
     }
   }, [user?.id, user?.role, studentId]);
 
@@ -73,18 +76,18 @@ export function useStudentAnalytics(studentId: string) {
    * Evita "dados fantasmas" de um aluno aparecendo no perfil de outro.
    */
   useEffect(() => {
-    console.group(`🚀 [HOOK-WATCHER] Mudança de Contexto -> Aluno ID: ${studentId}`);
+    if (DEBUG) console.group(`🚀 [HOOK-WATCHER] Mudança de Contexto -> Aluno ID: ${studentId}`);
     
     if (studentId) {
-      console.log('🧹 Resetando estado local (setData: null)');
+      debugLog('🧹 Resetando estado local (setData: null)');
       setData(null); 
-      console.log('🔄 Disparando nova carga de dados...');
+      debugLog('🔄 Disparando nova carga de dados...');
       loadStudentData();
     } else {
-      console.log('⏭️ Aguardando ID de aluno válido...');
+      debugLog('⏭️ Aguardando ID de aluno válido...');
     }
     
-    console.groupEnd();
+    if (DEBUG) console.groupEnd();
   }, [studentId, loadStudentData]);
 
   /**
@@ -96,13 +99,13 @@ export function useStudentAnalytics(studentId: string) {
       return [];
     }
     const filtered = data.insights.filter(i => i.type === 'risk' || i.type === 'warning');
-    console.log(`💡 [INSIGHTS] Triagem: ${filtered.length} alertas encontrados.`);
+    debugLog(`💡 [INSIGHTS] Triagem: ${filtered.length} alertas encontrados.`);
     return filtered;
   }, [data]);
 
   const getWeeklyTrend = useCallback(() => {
     if (!data || !data.weeklyHistory || data.weeklyHistory.length < 2) {
-      console.log('📈 [TREND] Dados insuficientes no histórico para calcular tendência.');
+      debugLog('📈 [TREND] Dados insuficientes no histórico para calcular tendência.');
       return null;
     }
     const latest = data.weeklyHistory[0];
@@ -115,7 +118,7 @@ export function useStudentAnalytics(studentId: string) {
       isImproving: latest.completionRate > previous.completionRate
     };
 
-    console.log('📈 [TREND] Tendência Semanal processada:', trend);
+    debugLog('📈 [TREND] Tendência Semanal processada:', trend);
     return trend;
   }, [data]);
 
@@ -131,7 +134,7 @@ export function useStudentAnalytics(studentId: string) {
         severity: week.gad7!.severity
       }));
       
-    console.log(`🧠 [GAD7-MAP] Extraídas ${history.length} avaliações históricas.`);
+    debugLog(`🧠 [GAD7-MAP] Extraídas ${history.length} avaliações históricas.`);
     return history;
   }, [data]);
 
@@ -139,7 +142,7 @@ export function useStudentAnalytics(studentId: string) {
     if (!data || !data.weeklyHistory || data.weeklyHistory.length === 0) return {};
     
     const breakdown = data.weeklyHistory[0].activityBreakdown;
-    console.log('📑 [BREAKDOWN] Mapeamento de tipos de atividade da última semana ativo.');
+    debugLog('📑 [BREAKDOWN] Mapeamento de tipos de atividade da última semana ativo.');
     return breakdown;
   }, [data]);
 

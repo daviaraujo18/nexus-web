@@ -53,15 +53,11 @@ export function useSchedules(options: {
 
   const updateSchedule = useCallback(async (scheduleId: string, updates: any) => {
     if (!user) throw new Error('Usuário não autenticado');
-    
+
     try {
-      const newScheduleId = await ScheduleService.updateScheduleTemplate(
-        scheduleId,
-        user.id,
-        updates
-      );
+      await ScheduleService.updateScheduleTemplate(scheduleId, user.id, updates);
       await loadSchedules();
-      return newScheduleId;
+      return scheduleId;
     } catch (err: any) {
       throw err;
     }
@@ -71,7 +67,7 @@ export function useSchedules(options: {
     if (!user) throw new Error('Usuário não autenticado');
     
     try {
-      await ScheduleService.archiveSchedule(scheduleId, user.id, user.role);
+      await ScheduleService.archiveSchedule(scheduleId, user.id);
       await loadSchedules();
       return true;
     } catch (err: any) {

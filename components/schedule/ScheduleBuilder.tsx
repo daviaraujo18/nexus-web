@@ -28,6 +28,11 @@ interface ScheduleBuilderProps {
 
 type ViewMode = 'schedule' | 'list' | 'preview';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+const debugLog = (...args: unknown[]) => { if (DEBUG) console.log(...args); };
+const debugGroup = (label: string) => { if (DEBUG) console.group(label); };
+const debugGroupEnd = () => { if (DEBUG) console.groupEnd(); };
+
 export default function ScheduleBuilder({
   onSuccess,
   onCancel,
@@ -49,12 +54,12 @@ export default function ScheduleBuilder({
 
   // 🛰️ TELEMETRIA: Sincronização de Dados Iniciais
   useEffect(() => {
-    console.group('🔄 [BUILDER] Sync InitialData');
+    debugGroup('🔄 [BUILDER] Sync InitialData');
     if (initialData && Object.keys(initialData).length > 0) {
-      console.log('📥 Recebido:', initialData.name);
+      debugLog('📥 Recebido:', initialData.name);
       setEffectiveInitialData(initialData);
     }
-    console.groupEnd();
+    debugGroupEnd();
   }, [initialData]);
 
   const {
@@ -85,21 +90,21 @@ export default function ScheduleBuilder({
   ];
 
   const handleAddActivity = (day: number) => {
-    console.log(`➕ [BUILDER] Novo item para dia: ${day}`);
+    debugLog(`➕ [BUILDER] Novo item para dia: ${day}`);
     setSelectedDay(day);
     setEditingActivity(null);
     setShowActivityModal(true);
   };
 
   const handleEditActivity = (day: number, activity: CreateActivityDTO, index: number) => {
-    console.log(`📝 [BUILDER] Editando item no índice: ${index}`);
+    debugLog(`📝 [BUILDER] Editando item no índice: ${index}`);
     setSelectedDay(day);
     setEditingActivity({ day, activity, index });
     setShowActivityModal(true);
   };
 
   const handleSaveActivity = (activityData: CreateActivityDTO, repeatDays: number[]) => {
-    console.group('💾 [BUILDER] Save Activity');
+    debugGroup('💾 [BUILDER] Save Activity');
     if (selectedDay === null) return;
 
     repeatDays.forEach(day => {
@@ -114,52 +119,52 @@ export default function ScheduleBuilder({
     setShowActivityModal(false);
     setSelectedDay(null);
     setEditingActivity(null);
-    console.groupEnd();
+    debugGroupEnd();
   };
 
   const handleRemoveActivity = (day: number, index: number) => {
-    console.warn(`🗑️ [BUILDER] Removendo item: ${index}`);
+    debugLog(`🗑️ [BUILDER] Removendo item: ${index}`);
     removeActivity(index);
   };
 
   // 🚀 [AUDITORIA TOTAL] SUBMIT
   const handleSubmit = async () => {
-    console.group('🚀 [SUBMIT] Processando Gravação');
+    debugGroup('🚀 [SUBMIT] Processando Gravação');
     
     if (!user) {
       console.error('❌ Erro: user_not_found');
       alert('Usuário não autenticado');
-      console.groupEnd();
+      debugGroupEnd();
       return;
     }
 
     // 🕵️ Rastreio Crítico de Datas
-    console.log('📅 DATA INÍCIO NO FORM:', formData.startDate?.toLocaleDateString('pt-BR'));
-    console.log('📦 PAYLOAD COMPLETO:', formData);
+    debugLog('📅 DATA INÍCIO NO FORM:', formData.startDate?.toLocaleDateString('pt-BR'));
+    debugLog('📦 PAYLOAD COMPLETO:', formData);
 
     try {
       let result: string;
       if (isEditing && scheduleId) {
-        console.log('🔄 Executando UPDATE...');
+        debugLog('🔄 Executando UPDATE...');
         result = await updateExistingSchedule(scheduleId, user.id);
       } else {
-        console.log('🆕 Executando CREATE...');
+        debugLog('🆕 Executando CREATE...');
         const creationResult = await submitForm(user.id);
         result = creationResult.scheduleId;
       }
-      console.log('✅ SUCESSO. ID:', result);
+      debugLog('✅ SUCESSO. ID:', result);
       if (onSuccess) onSuccess(result);
     } catch (err: any) {
       console.error('❌ ERRO NO SUBMIT:', err);
       alert(err.message || 'Erro ao salvar');
     } finally {
-      console.groupEnd();
+      debugGroupEnd();
     }
   };
 
   // Monitor de Mudanças de Campo
   useEffect(() => {
-    console.log('📊 [BUILDER STATE] Mudança detectada:', {
+    debugLog('📊 [BUILDER STATE] Mudança detectada:', {
       name: formData.name,
       startDate: formData.startDate?.toLocaleDateString('pt-BR'),
       activitiesCount: formData.activities.length

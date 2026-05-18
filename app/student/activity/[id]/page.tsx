@@ -140,13 +140,14 @@ export default function ActivityPage() {
             console.warn('Não foi possível iniciar automaticamente:', startError);
           }
         } else if (progress.status === 'in_progress' && !active) {
+          // Usar startedAt real do backend para refletir tempo já decorrido
           startTimer({
             progressId: progress.id,
             activityId: progress.activityId,
             studentId: progress.studentId,
             title: progress.activitySnapshot.title,
             estimatedMinutes: progress.activitySnapshot.metadata.estimatedDuration || 30,
-            startedAt: new Date()
+            startedAt: progress.startedAt instanceof Date ? progress.startedAt : new Date()
           });
         }
         
@@ -407,6 +408,18 @@ export default function ActivityPage() {
   }
 
   const activity = activityProgress.activitySnapshot;
+
+  if (!activity) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center p-8">
+          <p className="text-gray-500 mb-4">Dados da atividade incompletos.</p>
+          <button onClick={() => router.back()} className="text-indigo-600 hover:underline">Voltar</button>
+        </div>
+      </div>
+    );
+  }
+
   const isQuick = activity.type === 'quick';
   const isFile = activity.type === 'file';
 
@@ -565,7 +578,7 @@ export default function ActivityPage() {
                       <span className="text-sm text-gray-500">Dia da Semana</span>
                       <span className="font-semibold text-gray-800 flex items-center gap-1">
                         <FaCalendarAlt className="w-3 h-3 text-gray-400" />
-                        {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'][activityProgress.dayOfWeek]}
+                        {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'][activityProgress.dayOfWeek] ?? '—'}
                       </span>
                     </div>
                     
