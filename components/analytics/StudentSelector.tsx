@@ -1,4 +1,19 @@
 // components/analytics/StudentSelector.tsx
+//
+// COMPONENTE LEGADO — NÃO UTILIZADO EM PRODUÇÃO
+//
+// Versão original do seletor de alunos para filtro no dashboard analítico.
+// Foi substituído por `components/analytics/common/StudentSelector.tsx`,
+// que faz parte da biblioteca de primitivos compartilhados da pasta `common/`.
+//
+// O bloco de filtros que o consumia em `app/professional/analytics/page.tsx`
+// está atualmente comentado (linhas 324-352 do page.tsx), pois o filtro de alunos
+// foi temporariamente removido da UI em favor de filtros de escola e série
+// diretamente no ranking de bem-estar.
+//
+// Mantido para referência histórica. Não deve ser importado por novas rotas.
+// Utilize `components/analytics/common/StudentSelector.tsx` para novos usos.
+//
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -41,7 +56,7 @@ export default function StudentSelector({ onSelect }: StudentSelectorProps) {
         setLoading(true);
         setError(null);
 
-        // 🔥 USAR O MESMO MÉTODO QUE FUNCIONA NA PÁGINA DE STUDENTS
+        // USAR O MESMO MÉTODO QUE FUNCIONA NA PÁGINA DE STUDENTS
         const studentsData = await StudentService.getStudentsByProfessionalOrAll(
           user.id,
           user.role, // Passar o role do usuário
@@ -51,8 +66,8 @@ export default function StudentSelector({ onSelect }: StudentSelectorProps) {
           }
         );
 
-        console.log(`📊 Analytics - Alunos carregados: ${studentsData.length}`);
-        console.log(`📊 Role do usuário: ${user.role}`);
+        console.log(` Analytics - Alunos carregados: ${studentsData.length}`);
+        console.log(` Role do usuário: ${user.role}`);
 
         setStudents(studentsData);
         setFilteredStudents(studentsData);

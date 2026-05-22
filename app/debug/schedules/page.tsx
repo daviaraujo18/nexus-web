@@ -155,7 +155,7 @@ export default function DebugSchedulesPage() {
           try {
             return await processTemplate(doc);
           } catch (e) {
-            console.error('⚠️ Template ignorado devido a erro:', doc.id, e);
+            console.error(' Template ignorado devido a erro:', doc.id, e);
             return null as unknown as TemplateWithData;
           }
         })
@@ -374,7 +374,7 @@ export default function DebugSchedulesPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-4">
-            🐛 Debug: Cronogramas
+            Debug: Cronogramas
           </h1>
 
           {/* Stats */}
@@ -428,7 +428,7 @@ export default function DebugSchedulesPage() {
                 onClick={loadAllData}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
-                🔄 Recarregar
+                Recarregar
               </button>
             </div>
           </div>
@@ -541,7 +541,7 @@ export default function DebugSchedulesPage() {
                                   {/* Progress Cache */}
                                   {instance.progressCache && (
                                     <div className="bg-white rounded p-3 text-sm">
-                                      <div className="font-medium mb-2">📊 Progress Cache</div>
+                                      <div className="font-medium mb-2">Progress Cache</div>
                                       <div className="grid grid-cols-4 gap-2 text-xs">
                                         <div>Completadas: {instance.progressCache.completedActivities}/{instance.progressCache.totalActivities}</div>
                                         <div>Progresso: {instance.progressCache.completionPercentage?.toFixed(1)}%</div>
@@ -654,7 +654,7 @@ export default function DebugSchedulesPage() {
                                             {/* Daily Breakdown */}
                                             {snapshot.dailyBreakdown && (
                                               <div className="mt-2">
-                                                <div className="text-xs font-medium mb-1">📅 Por dia:</div>
+                                                <div className="text-xs font-medium mb-1">Por dia:</div>
                                                 <div className="flex space-x-1">
                                                   {Object.entries(snapshot.dailyBreakdown).map(([day, data]: [string, any]) => (
                                                     <div key={day} className="flex-1 bg-gray-50 p-1 rounded text-center">

@@ -1,4 +1,20 @@
 // components/analytics/StudentReports.tsx
+//
+// COMPONENTE LEGADO — NÃO UTILIZADO EM PRODUÇÃO
+//
+// Este componente era responsável por exibir o relatório individual de um aluno
+// dentro da mesma página do dashboard analítico, antes da migração para rota dedicada.
+//
+// A funcionalidade foi migrada para:
+//   - Rota: `app/professional/analytics/student/[id]/page.tsx`
+//   - Hook: `useStudentAnalytics`
+//
+// A nova implementação separou a visão de turma (dashboard) da visão individual
+// (rota `/student/[id]`), permitindo deep-link direto para o perfil de um aluno
+// e melhor separação de responsabilidades.
+//
+// Mantido para referência histórica. Não deve ser importado por novas rotas.
+//
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -240,8 +256,8 @@ console.log(report)
 
     return (
       <span className={`px-3 py-1 text-xs rounded-full border ${baseColors.bg} ${baseColors.text} ${baseColors.border}`}>
-        {trend === 'improving' ? '📈 Melhorando' :
-          trend === 'declining' ? '📉 Decaindo' : '➡️ Estável'} • {confidenceText}
+        {trend === 'improving' ? ' Melhorando' :
+          trend === 'declining' ? ' Decaindo' : ' Estável'} • {confidenceText}
       </span>
     );
   };
