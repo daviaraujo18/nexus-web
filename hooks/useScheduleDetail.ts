@@ -51,9 +51,11 @@ export function useScheduleDetail({
       setLoading(true);
       setError(null);
 
+      let instanceData: ScheduleInstance | null = null;
+
       if (instanceId) {
         // Carregar via instância
-        const instanceData = await ScheduleInstanceService.getScheduleInstanceById(instanceId);
+        instanceData = await ScheduleInstanceService.getScheduleInstanceById(instanceId);
         setInstance(instanceData);
 
         if (instanceData?.scheduleTemplateId) {
@@ -79,10 +81,10 @@ export function useScheduleDetail({
         }
       }
 
-      if (includeProgress && instanceId) {
-        // Carregar progressos se houver instância
+      if (includeProgress && instanceId && instanceData) {
         try {
-          const progressData = await ScheduleInstanceService.getWeekProgress(instanceId, 1); // Semana atual
+          const weekNumber = instanceData.currentWeekNumber ?? 1;
+          const progressData = await ScheduleInstanceService.getWeekProgress(instanceId, weekNumber);
           setProgress(progressData);
         } catch (progressError) {
           console.warn('Erro ao carregar progresso:', progressError);

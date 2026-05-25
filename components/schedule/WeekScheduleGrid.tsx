@@ -113,8 +113,6 @@ export default function WeekScheduleGrid({
         therapeuticFocus: [],
         educationalFocus: []
       },
-      estimatedDuration: 60,
-      pointsOnCompletion: 10
     };
 
     // Adiciona ao final do array de atividades

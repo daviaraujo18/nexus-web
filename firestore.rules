@@ -1,0 +1,190 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isProfessional(uid) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/professionals/$(uid));
+    }
+
+    // ── Students ──────────────────────────────────────────
+    match /students/{studentId} {
+      allow read: if isOwner(studentId) || isProfessional(request.auth.uid);
+      allow write: if isOwner(studentId);
+    }
+
+    // ── Professionals ─────────────────────────────────────
+    match /professionals/{professionalId} {
+      allow read: if isAuthenticated();
+      // Criação: o próprio usuário cria seu perfil
+      allow create: if isOwner(professionalId);
+      // Update: o próprio profissional pode editar, mas NÃO pode alterar 'role'
+      // (role é gerenciado exclusivamente via Admin SDK / Cloud Functions)
+      allow update: if isOwner(professionalId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']);
+      allow delete: if isOwner(professionalId);
+    }
+
+    // ── Schedule Templates ────────────────────────────────
+    match /weeklySchedules/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isProfessional(request.auth.uid);
+    }
+
+    // ── Schedule Activities (atividades vinculadas a um template) ──
+    match /scheduleActivities/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isProfessional(request.auth.uid);
+    }
+
+    // ── Schedule Instances ────────────────────────────────
+    // Aluno lê suas próprias instâncias; profissional lê todas
+    match /scheduleInstances/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+      allow write: if isProfessional(request.auth.uid);
+    }
+
+    // ── Activity Progress ─────────────────────────────────
+    // collectionGroup rule required for cross-collection queries (dashboard)
+    match /{path=**}/activityProgress/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+    }
+
+    // Apenas profissionais criam activityProgress (via ScheduleInstanceService).
+    // Alunos só atualizam status e executionData do próprio progresso — campos imutáveis protegidos.
+    match /activityProgress/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+      allow create: if isProfessional(request.auth.uid);
+      allow update: if isAuthenticated() && (
+        isProfessional(request.auth.uid) ||
+        (
+          resource.data.studentId == request.auth.uid &&
+          request.resource.data.studentId == request.auth.uid &&
+          // Aluno pode alterar campos de progresso legítimos:
+          // - status/startedAt: startActivity (pending→in_progress)
+          // - status/completedAt/scoring/executionData: completeActivity (in_progress→completed)
+          // - status: skipActivity (pending→skipped)
+          // Campos imutáveis (IDs, scheduling, weekNumber) não estão na lista
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'startedAt', 'completedAt', 'scoring', 'executionData', 'updatedAt']) &&
+          // Validação de schema: executionData deve ser map com timeSpent >= 0
+          (
+            !('executionData' in request.resource.data) ||
+            (
+              request.resource.data.executionData is map &&
+              (!('timeSpent' in request.resource.data.executionData) ||
+               (request.resource.data.executionData.timeSpent is number &&
+                request.resource.data.executionData.timeSpent >= 0))
+            )
+          )
+        )
+      );
+      allow delete: if isProfessional(request.auth.uid);
+    }
+
+    // ── Weekly Snapshots ──────────────────────────────────
+    // Alunos criam/atualizam apenas o próprio snapshot (via ProgressService.updateWeeklySnapshot,
+    // chamado na conclusão de atividade). Profissionais acessam qualquer snapshot.
+    // Cloud Functions via Admin SDK bypassa estas regras automaticamente.
+    match /weeklySnapshots/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+      allow create: if isAuthenticated() && (
+        (request.resource.data.studentId == request.auth.uid &&
+         request.resource.data.studentId is string &&
+         request.resource.data.weekNumber is number &&
+         request.resource.data.weekNumber > 0) ||
+        isProfessional(request.auth.uid)
+      );
+      allow update: if isAuthenticated() && (
+        isProfessional(request.auth.uid) ||
+        (
+          resource.data.studentId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['completedActivities', 'totalActivities', 'completionRate',
+                      'consistencyScore', 'adherenceScore', 'totalTimeSpent',
+                      'isTotalActivityPending', 'streakDays', 'updatedAt'])
+        )
+      );
+      allow delete: if isProfessional(request.auth.uid);
+    }
+
+    // ── GAD-7 Assessments ─────────────────────────────────
+    match /gad7Assessments/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isProfessional(request.auth.uid)
+      );
+      allow write: if isAuthenticated() &&
+        request.resource.data.studentId == request.auth.uid;
+    }
+
+    // ── Instance Guards ───────────────────────────────────
+    // Apenas profissionais gerenciam guards (protege contra duplicatas)
+    match /instanceGuards/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isProfessional(request.auth.uid);
+    }
+
+    // ── Notifications ─────────────────────────────────────
+    match /notifications/{docId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() &&
+        resource.data.userId == request.auth.uid;
+    }
+
+    // ── Audit Logs ────────────────────────────────────────
+    match /auditLogs/{docId} {
+      allow read: if isProfessional(request.auth.uid);
+      allow write: if isProfessional(request.auth.uid);
+    }
+
+    // ── System Logs / Errors ──────────────────────────────
+    match /systemLogs/{docId} {
+      allow read, write: if isProfessional(request.auth.uid);
+    }
+
+    match /systemErrors/{docId} {
+      allow read, write: if isProfessional(request.auth.uid);
+    }
+
+    // ── Rate Limits ───────────────────────────────────────
+    // Usuário só pode ler/escrever seu próprio documento de rate limit
+    match /rate_limits/{docId} {
+      allow read, write: if isAuthenticated() && docId == request.auth.uid;
+    }
+
+    // ── FCM Tokens ────────────────────────────────────────
+    // Usuário só acessa seus próprios tokens
+    match /fcmTokens/{docId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Everything else: DENY ─────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

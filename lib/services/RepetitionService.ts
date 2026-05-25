@@ -1,15 +1,20 @@
 // lib/services/RepetitionService.ts
+// ⚠️ DEPRECATED: Use WeeklyResetService instead.
+// Mantido temporariamente para referência, mas todas as chamadas foram redirecionadas
+// para WeeklyResetService, que possui rollback atômico, dry-run, e tratamento robusto
+// de concorrência.
 import {
   collection,
   query,
   where,
   getDocs,
-  writeBatch,
   serverTimestamp,
   Timestamp,
   orderBy,
   limit,
-  doc
+  doc,
+  updateDoc,
+  runTransaction
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import {
@@ -136,47 +141,103 @@ export class RepetitionService {
         };
       }
 
-      // 3. Calcular nova semana
+      // 3. Salvar estado anterior para rollback
+      const oldCompleted = instance.progressCache?.completedActivities || 0;
+      const oldTotal = instance.progressCache?.totalActivities || 0;
+
+      // 4. Calcular nova semana
       const newWeekNumber = instance.currentWeekNumber + 1;
       const newWeekStartDate = DateUtils.addWeeks(instance.currentWeekStartDate, 1);
+      newWeekStartDate.setHours(0, 0, 0, 0);
       const newWeekEndDate = DateUtils.addWeeks(instance.currentWeekEndDate, 1);
+      newWeekEndDate.setHours(23, 59, 59, 999);
 
-      // 4. Atualizar instância
-      const batch = writeBatch(firestore);
-      const instanceRef = doc(
-        firestore,
-        this.COLLECTIONS.INSTANCES,
-        instance.id
-      );
+      // 5. Atualizar instância com TRANSACTION (atomicidade + detecção de concorrência)
+      const instanceId = instance.id;
+      const oldWeekNumber = instance.currentWeekNumber;
+      const instanceRef = doc(firestore, this.COLLECTIONS.INSTANCES, instanceId);
 
-      batch.update(instanceRef, {
-        currentWeekNumber: newWeekNumber,
-        currentWeekStartDate: Timestamp.fromDate(newWeekStartDate),
-        currentWeekEndDate: Timestamp.fromDate(newWeekEndDate),
-        updatedAt: serverTimestamp(),
-        'progressCache.completedActivities': 0,
-        'progressCache.completionPercentage': 0,
-        'progressCache.totalPointsEarned': 0,
-        'progressCache.streakDays': 0,
-        'progressCache.lastUpdatedAt': serverTimestamp()
+      await runTransaction(firestore, async (transaction) => {
+        const snap = await transaction.get(instanceRef);
+        if (!snap.exists()) throw new Error(`Instância ${instanceId} não encontrada`);
+        const currentWeek = snap.data().currentWeekNumber;
+        if (currentWeek !== oldWeekNumber) {
+          throw new Error(`__ALREADY_RESET__:${currentWeek}`);
+        }
+
+        transaction.update(instanceRef, {
+          currentWeekNumber: newWeekNumber,
+          currentWeekStartDate: Timestamp.fromDate(newWeekStartDate),
+          currentWeekEndDate: Timestamp.fromDate(newWeekEndDate),
+          'progressCache.completedActivities': 0,
+          'progressCache.completionPercentage': 0,
+          'progressCache.totalPointsEarned': 0,
+          'progressCache.totalActivities': 0,
+          'progressCache.streakDays': instance.progressCache?.streakDays || 0,
+          'progressCache.lastUpdatedAt': serverTimestamp(),
+          activitiesReady: false,
+          updatedAt: serverTimestamp()
+        });
       });
 
-      // 5. Gerar atividades da nova semana (se necessário)
-      if (schedule.repeatRules.resetOnRepeat) {
-        await ScheduleInstanceService.generateWeekActivities(instance.id, newWeekNumber);
+      console.log(`✅ Instância ${instanceId} atualizada: semana ${oldWeekNumber} → ${newWeekNumber}`);
+
+      // 6. Gerar atividades da nova semana (APÓS transaction — activitiesReady=false protege o aluno)
+      let generatedActivities = false;
+      try {
+        if (schedule?.repeatRules?.resetOnRepeat) {
+          await ScheduleInstanceService.generateWeekActivities(instanceId, newWeekNumber);
+        }
+        await ScheduleInstanceService.updateProgressCache(instanceId, newWeekNumber);
+        await updateDoc(instanceRef, {
+          activitiesReady: true,
+          updatedAt: serverTimestamp()
+        });
+        generatedActivities = true;
+      } catch (activityError: any) {
+        console.warn(`⚠️ Falha ao gerar atividades — activitiesReady=false persiste:`, activityError.message);
+        // Rollback: restaurar instância ao estado anterior
+        try {
+          const oldCompletionPct = oldTotal > 0 ? Math.round((oldCompleted / oldTotal) * 100) : 0;
+          await runTransaction(firestore, async (transaction) => {
+            const rollbackRef = doc(firestore, this.COLLECTIONS.INSTANCES, instanceId);
+            transaction.update(rollbackRef, {
+              currentWeekNumber: oldWeekNumber,
+              currentWeekStartDate: Timestamp.fromDate(instance.currentWeekStartDate),
+              currentWeekEndDate: Timestamp.fromDate(instance.currentWeekEndDate),
+              'progressCache.completedActivities': oldCompleted,
+              'progressCache.totalActivities': oldTotal,
+              'progressCache.completionPercentage': oldCompletionPct,
+              'progressCache.totalPointsEarned': instance.progressCache?.totalPointsEarned || 0,
+              activitiesReady: true,
+              updatedAt: serverTimestamp()
+            });
+          });
+          console.warn(`↩️ Rollback concluído: instância ${instanceId} restaurada para semana ${oldWeekNumber}`);
+        } catch (rollbackError: any) {
+          console.error(`❌ Falha no rollback — instância ${instanceId} em estado inconsistente:`, rollbackError.message);
+        }
+        throw activityError;
       }
 
-      await batch.commit();
-
-      console.log(`✅ Instância ${instance.id} resetada para semana ${newWeekNumber}`);
+      console.log(`✅ Instância ${instanceId} resetada para semana ${newWeekNumber} (${generatedActivities ? 'atividades geradas' : 'sem repetição'})`);
 
       return {
-        instanceId: instance.id,
+        instanceId,
         snapshotGenerated,
         newWeekNumber
       };
 
     } catch (error: any) {
+      // Concorrência detectada — outra execução já avançou a semana
+      if (typeof (error as any)?.message === 'string' && (error as any).message.startsWith('__ALREADY_RESET__')) {
+        console.log(`⏭️ Instância ${instance.id} já foi resetada por execução paralela`);
+        return {
+          instanceId: instance.id,
+          snapshotGenerated: false,
+          newWeekNumber: instance.currentWeekNumber + 1
+        };
+      }
       console.error(`❌ Erro ao processar instância ${instance.id}:`, error);
       throw new Error(`Falha no reset da instância ${instance.id}: ${error.message}`);
     }
@@ -188,10 +249,7 @@ export class RepetitionService {
   private static async findInstancesForReset(): Promise<ScheduleInstance[]> {
     try {
       const now = new Date();
-      const today = DateUtils.getDayOfWeek(now);
 
-      // Reset ocorre na segunda-feira (dia 1)
-      // Mas buscamos todas ativas para processar eventualidades
       const q = query(
         collection(firestore, this.COLLECTIONS.INSTANCES),
         where('status', 'in', ['active', 'paused']),

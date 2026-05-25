@@ -24,9 +24,11 @@ import {
 import { ScheduleInstanceService } from './ScheduleInstanceService';
 import { AuditService } from '@/lib/auth/AuditService';
 import { DateUtils } from '@/lib/utils/dateUtils';
+import { calculateLevel, calculateStreak } from '@/lib/utils/levelUtils';
 
 interface CompletionData {
   timeSpent?: number; // em minutos
+  estimatedDuration?: number; // em minutos
   submission?: any;
   emotionalState?: {
     before?: number;
@@ -36,6 +38,11 @@ interface CompletionData {
   attachments?: string[];
 }
 
+interface TxExtractedData {
+  instanceId: string | undefined;
+  weekNumber: number;
+  timeSpent: number;
+}
 
 // * Serviço central responsável por gerenciar o ciclo de vida do progresso das atividades do aluno.
 // *
@@ -52,6 +59,12 @@ interface CompletionData {
 // * - analytics
 // * - ranking de bem-estar
 // * - progressão do aluno
+
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+
+function debugLog(...args: any[]) {
+  if (DEBUG) console.log(...args);
+}
 export class ProgressService {
   private static readonly COLLECTIONS = {
     PROGRESS: 'activityProgress',
@@ -75,43 +88,34 @@ export class ProgressService {
   static async startActivity(
     progressId: string,
     studentId: string
-  ): Promise<ActivityProgress> { // ← Mudar retorno para ActivityProgress
+  ): Promise<ActivityProgress> {
     try {
-      console.log('🚀 Iniciando atividade:', { progressId, studentId });
-
-      // 1. Buscar e validar progresso
-      const progress = await this.getActivityProgress(progressId, studentId);
-
-      console.log('📋 Progresso encontrado:', {
-        id: progress.id,
-        currentStatus: progress.status,
-        scheduledDate: progress.scheduledDate
-      });
-
-      // 2. Validar se pode iniciar
-      if (progress.status !== 'pending') {
-        throw new Error(`Atividade já está ${progress.status}`);
-      }
-
-      // 3. Atualizar status
       const now = new Date();
       const progressRef = doc(firestore, this.COLLECTIONS.PROGRESS, progressId);
+      let rawData: any;
 
-      await updateDoc(progressRef, {
-        status: 'in_progress',
-        startedAt: Timestamp.fromDate(now),
-        updatedAt: serverTimestamp()
+      await runTransaction(firestore, async (tx) => {
+        const snap = await tx.get(progressRef);
+        if (!snap.exists()) throw new Error('Atividade não encontrada');
+        rawData = snap.data();
+        if (rawData.studentId !== studentId) throw new Error('Sem permissão para acessar esta atividade');
+        if (rawData.status !== 'pending') throw new Error(`Atividade já está ${rawData.status}`);
+        tx.update(progressRef, {
+          status: 'in_progress',
+          startedAt: Timestamp.fromDate(now),
+          updatedAt: serverTimestamp()
+        });
       });
 
-      console.log(`✅ Atividade ${progressId} iniciada com sucesso`);
-
-      // 4. Retornar progresso atualizado
       return {
-        ...progress,
-        status: 'in_progress',
+        id: progressId,
+        ...rawData,
+        scheduledDate: rawData.scheduledDate?.toDate?.(),
         startedAt: now,
+        completedAt: rawData.completedAt?.toDate?.(),
+        status: 'in_progress',
         updatedAt: now
-      };
+      } as ActivityProgress;
 
     } catch (error: any) {
       console.error('❌ Erro ao iniciar atividade:', error);
@@ -130,7 +134,7 @@ export class ProgressService {
   // * 6. Atualiza cache da instância
   // * 7. Atualiza estatísticas do aluno
   // *
-  // * Side effects:
+  // * Efeitos colaterais:
   // * - Escrita em múltiplas coleções
   // * - Atualização indireta de dashboards e analytics
   // *
@@ -151,104 +155,136 @@ export class ProgressService {
     totalPoints: number;
   }> {
     try {
-      console.log('✅ Iniciando completeActivity:', { progressId, studentId });
-
-      // 1. Buscar progresso atual para validar
-      const progress = await this.getActivityProgress(progressId, studentId);
-
-      if (progress.status !== 'in_progress') {
-        throw new Error(`Atividade não está em progresso (status: ${progress.status})`);
-      }
-
-      // 2. Calcular pontuação PRIMEIRO
-      const scoring = await this.calculateScoring(progressId, completionData);
-
-      console.log('📊 Pontuação calculada:', scoring);
-
-      // * Determina o tempo gasto na atividade.
-      // *
-      // * Prioridade:
-      // * 1. Usa valor enviado pelo front (mais confiável)
-      // * 2. Se não existir, calcula com base em startedAt
-      // * 3. Se falhar, usa fallback (30 minutos)
-      // *
-      // * ⚠️ Risco:
-      // * - Diferença baseada no clock do cliente → pode gerar inconsistência leve
-      let timeSpentValue = completionData.timeSpent;
-
-      // Se não veio no completionData, calcular
-      if (!timeSpentValue && progress.startedAt) {
-        const startedAt = progress.startedAt;
-        const now = new Date();
-        const diffMs = now.getTime() - startedAt.getTime();
-        timeSpentValue = Math.floor(diffMs / (1000 * 60)); // minutos
-      }
-
-      // Valor padrão se ainda não tiver
-      timeSpentValue = timeSpentValue || 30;
-
-      console.log('⏱️ Tempo gasto:', timeSpentValue, 'minutos');
-
-      const now = new Date();
       const progressRef = doc(firestore, this.COLLECTIONS.PROGRESS, progressId);
 
-      // 4. Preparar dados para atualização
-      const updateData: any = {
-        status: 'completed',
-        completedAt: Timestamp.fromDate(now),
-        scoring: {
-          pointsEarned: scoring.pointsEarned,
-          bonusPoints: scoring.bonusPoints,
-          penaltyPoints: scoring.penaltyPoints || 0
-        },
-        updatedAt: serverTimestamp()
-      };
+      const timeSpentFromForm = completionData.timeSpent;
+      const now = new Date();
 
-      // 5. Adicionar executionData APENAS com dados válidos
-      const executionDataUpdate: any = {
-        timeSpent: timeSpentValue, // ← NÚMERO, não Promise!
-        ...completionData
-      };
-
-      // * Limpeza defensiva do executionData antes de persistir.
-      // *
-      // * Motivo:
-      // * Firestore NÃO aceita Promise como valor.
-      // *
-      // * ⚠️ Risco:
-      // * - Se não fizer isso, o updateDoc pode falhar silenciosamente
-      // * - Pode quebrar o fluxo de submissão da atividade
-      // * - Pode gerar dados inconsistentes no banco
-      Object.keys(executionDataUpdate).forEach(key => {
-        if (executionDataUpdate[key] instanceof Promise) {
-          console.warn('⚠️ Removendo Promise do executionData:', key);
-          delete executionDataUpdate[key];
+      // Validacao de entrada
+      if (timeSpentFromForm !== undefined) {
+        if (typeof timeSpentFromForm !== 'number' || isNaN(timeSpentFromForm) || timeSpentFromForm < 0 || timeSpentFromForm > 1440) {
+          throw new Error(`timeSpent invalido: ${timeSpentFromForm}. Deve ser um numero entre 0 e 1440 minutos.`);
         }
+      }
+      if (completionData.emotionalState) {
+        if (completionData.emotionalState.before !== undefined) {
+          if (typeof completionData.emotionalState.before !== 'number' || completionData.emotionalState.before < 1 || completionData.emotionalState.before > 5) {
+            throw new Error(`emotionalState.before invalido: ${completionData.emotionalState.before}. Deve ser 1-5.`);
+          }
+        }
+        if (completionData.emotionalState.after !== undefined) {
+          if (typeof completionData.emotionalState.after !== 'number' || completionData.emotionalState.after < 1 || completionData.emotionalState.after > 5) {
+            throw new Error(`emotionalState.after invalido: ${completionData.emotionalState.after}. Deve ser 1-5.`);
+          }
+        }
+      }
+      if (completionData.submission !== undefined && completionData.submission !== null) {
+        if (typeof completionData.submission !== 'object') {
+          throw new Error('submission invalido: deve ser um objeto');
+        }
+        try {
+          JSON.stringify(completionData.submission);
+        } catch {
+          throw new Error('submission invalido: contem referencia circular');
+        }
+      }
+
+      const timeSpentFromFormOrNull = timeSpentFromForm !== undefined ? timeSpentFromForm : null;
+
+      // Construir executionData sem timeSpent — será injetado com o valor real dentro da transaction
+      const baseExecutionDataEntries = Object.entries(completionData)
+        .filter(([k, v]) => k !== 'timeSpent' && !(v instanceof Promise));
+
+      // Transaction: valida ownership + status, calcula scoring com timeSpent real e persiste tudo
+      let scoring: ReturnType<typeof ProgressService.calculateScoring> = { pointsEarned: 10, bonusPoints: 0, penaltyPoints: 0, totalPoints: 10 };
+      const txData: TxExtractedData = await runTransaction(firestore, async (tx) => {
+        const snap = await tx.get(progressRef);
+        if (!snap.exists()) throw new Error('Atividade não encontrada');
+        const d = snap.data() as Record<string, any>;
+        if (d.studentId !== studentId) throw new Error('Sem permissão para acessar esta atividade');
+        if (d.status !== 'in_progress') {
+          throw new Error(`Atividade já foi processada (status: ${d.status})`);
+        }
+
+        const extractedInstanceId: string | undefined = typeof d.scheduleInstanceId === 'string' ? d.scheduleInstanceId : undefined;
+        const extractedWeekNumber = (typeof d.weekNumber === 'number' && d.weekNumber > 0)
+          ? d.weekNumber
+          : (() => {
+              const derived = DateUtils.getWeekNumber(d.scheduledDate?.toDate?.() ?? new Date());
+              console.warn(
+                `⚠️ [weekNumber] progressId=${progressId} weekNumber=${d.weekNumber} inválido — derivando ${derived} da scheduledDate`,
+              );
+              return derived;
+            })();
+        const extractedStartedAt: Date | null = d.startedAt
+          ? (typeof d.startedAt.toDate === 'function' ? d.startedAt.toDate() : new Date(d.startedAt))
+          : null;
+
+        // timeSpent real: form > derivado de startedAt > fallback
+        let timeSpentValue: number;
+        if (timeSpentFromFormOrNull !== null) {
+          timeSpentValue = timeSpentFromFormOrNull;
+        } else if (extractedStartedAt instanceof Date) {
+          timeSpentValue = Math.max(1, Math.ceil((now.getTime() - extractedStartedAt.getTime()) / 60000));
+        } else {
+          console.warn(`⚠️ [completeActivity] progressId=${progressId} sem startedAt — usando fallback de 30 min para timeSpent`);
+          timeSpentValue = 30;
+        }
+
+        // Scoring calculado com timeSpent real (função síncrona, sem I/O)
+        scoring = ProgressService.calculateScoring({ ...completionData, timeSpent: timeSpentValue });
+
+        const updateFields: Record<string, unknown> = {
+          status: 'completed',
+          completedAt: Timestamp.fromDate(now),
+          'executionData.timeSpent': timeSpentValue,
+          scoring: {
+            pointsEarned: scoring.pointsEarned,
+            bonusPoints: scoring.bonusPoints,
+            penaltyPoints: scoring.penaltyPoints
+          },
+          updatedAt: serverTimestamp()
+        };
+        for (const [key, value] of baseExecutionDataEntries) {
+          updateFields[`executionData.${key}`] = value;
+        }
+        tx.update(progressRef, updateFields);
+
+        return {
+          instanceId: extractedInstanceId,
+          weekNumber: extractedWeekNumber,
+          timeSpent: timeSpentValue
+        } as TxExtractedData;
       });
 
-      updateData.executionData = executionDataUpdate;
+      // Passo 1: recalcular progressCache da instância (com métricas reais de consistência/adesão)
+      // Executa ANTES do snapshot para que a transaction do updateWeeklySnapshot leia dados frescos
+      let progressCacheFailed = false;
+      if (txData.instanceId) {
+        try {
+          await ScheduleInstanceService.updateProgressCache(txData.instanceId, txData.weekNumber);
+        } catch (err) {
+          progressCacheFailed = true;
+          console.warn(
+            `⚠️ [completeActivity] progressCache não recalculado para instanceId=${txData.instanceId} — snapshot usará totalActivities stale. progressId=${progressId}`,
+            err
+          );
+        }
+      }
 
-      // 6. Atualizar no Firestore
-      await updateDoc(progressRef, updateData);
-
-      console.log(`✅ Atividade ${progressId} completada com sucesso`);
-
-      // 🔥 FIX: ATUALIZAR WEEKLY SNAPSHOT
-      const instanceId = progress.scheduleInstanceId;
+      // Passo 2: atualizar snapshot e stats do aluno
       const sideEffectResults = await Promise.allSettled([
         this.updateWeeklySnapshot(
           studentId,
-          progress.weekNumber || 1,
+          txData.weekNumber,
           scoring.totalPoints,
-          timeSpentValue,
-          instanceId
+          txData.timeSpent,
+          txData.instanceId,
+          progressCacheFailed
         ),
-        instanceId
-          ? ScheduleInstanceService.updateProgressCache(instanceId, progress.weekNumber || 1)
-          : Promise.resolve(),
         this.updateStudentStats(studentId, scoring.totalPoints),
       ]);
-      const sideEffectLabels = ['snapshot', 'cache', 'stats'];
+      const sideEffectLabels = ['snapshot', 'stats'];
       sideEffectResults.forEach((r, i) => {
         if (r.status === 'rejected') {
           console.warn(`⚠️ Erro ao atualizar ${sideEffectLabels[i]} (não crítico):`, r.reason);
@@ -272,11 +308,21 @@ export class ProgressService {
     reason?: string
   ): Promise<void> {
     try {
-      await updateDoc(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
-        status: 'skipped',
-        'executionData.skippedReason': reason || 'Skipped by student',
-        'executionData.skippedAt': serverTimestamp(),
-        updatedAt: serverTimestamp()
+      const progressRef = doc(firestore, this.COLLECTIONS.PROGRESS, progressId);
+      await runTransaction(firestore, async (tx) => {
+        const snap = await tx.get(progressRef);
+        if (!snap.exists()) throw new Error('Atividade não encontrada');
+        const d = snap.data();
+        if (d.studentId !== studentId) throw new Error('Sem permissão para acessar esta atividade');
+        if (d.status === 'completed' || d.status === 'skipped') {
+          throw new Error(`Não é possível pular atividade com status '${d.status}'`);
+        }
+        tx.update(progressRef, {
+          status: 'skipped',
+          'executionData.skippedReason': reason || 'Skipped by student',
+          'executionData.skippedAt': serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
       });
 
       // COMENTADO
@@ -296,15 +342,23 @@ export class ProgressService {
    */
   static async saveDraft(
     progressId: string,
+    studentId: string,
     draftData: any
   ): Promise<void> {
     try {
-      await updateDoc(doc(firestore, this.COLLECTIONS.PROGRESS, progressId), {
-        executionData: {
-          ...draftData,
-          lastSavedAt: new Date()
-        },
-        updatedAt: serverTimestamp()
+      const progressRef = doc(firestore, this.COLLECTIONS.PROGRESS, progressId);
+      await runTransaction(firestore, async (tx) => {
+        const snap = await tx.get(progressRef);
+        if (!snap.exists()) throw new Error('Atividade não encontrada');
+        const d = snap.data();
+        if (d.studentId !== studentId) throw new Error('Sem permissão');
+        if (d.status === 'completed' || d.status === 'skipped') {
+          throw new Error(`Não é possível salvar rascunho de atividade com status '${d.status}'`);
+        }
+        tx.update(progressRef, {
+          'executionData.draft': draftData,
+          updatedAt: serverTimestamp()
+        });
       });
 
     } catch (error: any) {
@@ -327,50 +381,10 @@ export class ProgressService {
     correctAnswers: number;
     passed: boolean;
   }> {
-    try {
-      // Buscar atividade para validar respostas
-      const progressRef = doc(firestore, this.COLLECTIONS.PROGRESS, progressId);
-
-      // Em produção, isso buscaria a atividade e validaria as respostas
-      // Por enquanto, simular pontuação
-      const score = Math.floor(Math.random() * 100); // Simulação
-      const totalQuestions = Object.keys(answers).length;
-      const correctAnswers = Math.floor(totalQuestions * (score / 100));
-
-      const quizConfig = {} as any; // Seria buscado do activitySnapshot
-      const passingScore = quizConfig.passingScore || 70;
-      const passed = score >= passingScore;
-
-      // Registrar tentativa
-      await updateDoc(progressRef, {
-        'executionData.attempts': arrayUnion({
-          attemptNumber,
-          startedAt: new Date(),
-          completedAt: new Date(),
-          score,
-          answers
-        }),
-        updatedAt: serverTimestamp()
-      });
-
-      // Se passou, completar atividade
-      if (passed) {
-        await this.completeActivity(progressId, studentId, {
-          submission: { answers, score }
-        });
-      }
-
-      return {
-        score,
-        totalQuestions,
-        correctAnswers,
-        passed
-      };
-
-    } catch (error: any) {
-      console.error('Erro ao submeter quiz:', error);
-      throw error;
-    }
+    // TODO: implementar validação real de respostas contra activitySnapshot.quizConfig
+    // Ao implementar: buscar quizConfig do activitySnapshot, calcular score real,
+    // registrar tentativa com arrayUnion e chamar completeActivity se passou.
+    throw new Error('submitQuizAnswers não implementado. Implemente validação real antes de habilitar.');
   }
 
   // * Calcula a pontuação da atividade.
@@ -390,88 +404,33 @@ export class ProgressService {
   // * - afeta nível do aluno
   // * - afeta ranking
   // * - afeta analytics
-  private static async calculateScoring(
-    progressId: string,
-    completionData: CompletionData
-  ): Promise<{
+  private static calculateScoring(
+    completionData: CompletionData & { timeSpent: number }
+  ): {
     pointsEarned: number;
     bonusPoints: number;
     penaltyPoints: number;
     totalPoints: number;
-  }> {
-    try {
-      // Em produção, buscaria a atividade e aplicaria regras de pontuação
-      // Por enquanto, lógica básica
-      const basePoints = 10; // Seria do activitySnapshot
-      let bonusPoints = 0;
-      let penaltyPoints = 0;
+  } {
+    const basePoints = 10;
+    let bonusPoints = 0;
+    const penaltyPoints = 0;
 
-      // Bônus por completar antes do prazo
-      if (completionData.timeSpent) {
-        // Se completou em menos tempo que o estimado
-        const estimatedTime = 30; // Seria do activitySnapshot
-        if (completionData.timeSpent < estimatedTime) {
-          bonusPoints += 2;
-        }
-      }
-
-      // Bônus por estado emocional positivo
-      if (completionData.emotionalState?.after) {
-        if (completionData.emotionalState.after >= 4) { // Escala 1-5
-          bonusPoints += 1;
-        }
-      }
-
-      const totalPoints = basePoints + bonusPoints - penaltyPoints;
-
-      return {
-        pointsEarned: basePoints,
-        bonusPoints,
-        penaltyPoints,
-        totalPoints
-      };
-
-    } catch (error) {
-      console.error('Erro ao calcular pontuação:', error);
-      return {
-        pointsEarned: 10,
-        bonusPoints: 0,
-        penaltyPoints: 0,
-        totalPoints: 10
-      };
+    const estimatedTime = completionData.estimatedDuration || 30;
+    if (completionData.timeSpent <= estimatedTime) {
+      bonusPoints += 2;
     }
-  }
 
-  private static async calculateTimeSpent(progressId: string): Promise<number> {
-    try {
-      const progressRef = doc(firestore, this.COLLECTIONS.PROGRESS, progressId);
-      const progressDoc = await getDoc(progressRef);
-
-      if (!progressDoc.exists()) {
-        console.warn('Progresso não encontrado para calcular tempo:', progressId);
-        return 0;
-      }
-
-      const data = progressDoc.data();
-      const startedAt = data.startedAt?.toDate();
-
-      if (!startedAt) {
-        console.warn('Atividade não tem startedAt:', progressId);
-        return 0;
-      }
-
-      // Calcular diferença em minutos
-      const now = new Date();
-      const diffInMs = now.getTime() - startedAt.getTime();
-      const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
-
-      // Garantir valor mínimo e máximo razoável
-      return Math.max(1, Math.min(diffInMinutes, 240)); // 1-240 minutos
-
-    } catch (error) {
-      console.error('Erro ao calcular tempo gasto:', error);
-      return 0;
+    if ((completionData.emotionalState?.after ?? 0) >= 4) {
+      bonusPoints += 1;
     }
+
+    return {
+      pointsEarned: basePoints,
+      bonusPoints,
+      penaltyPoints,
+      totalPoints: basePoints + bonusPoints - penaltyPoints
+    };
   }
 
   // * Atualiza métricas permanentes do aluno.
@@ -492,7 +451,7 @@ export class ProgressService {
   // * Melhor abordagem futura:
   // * - usar transaction()
   private static async updateStudentStats(studentId: string, points: number): Promise<void> {
-    console.log('[updateStudentStats] Iniciando atualização:', { studentId, points });
+    debugLog('[updateStudentStats] Iniciando atualização:', { studentId, points });
 
     const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
     const safePoints = Number(points) || 0;
@@ -504,9 +463,9 @@ export class ProgressService {
       }
 
       const profile = snap.data()?.profile ?? {};
-      const currentPoints: number = profile.totalPoints ?? 0;
+      const currentPoints: number = typeof profile.totalPoints === 'number' ? profile.totalPoints : 0;
       const newTotalPoints = currentPoints + safePoints;
-      const newLevel = Math.floor(newTotalPoints / 200) + 1;
+      const newLevel = calculateLevel(newTotalPoints);
 
       const lastActivityRaw = profile.lastActivityAt;
       const lastActivityAt: Date | undefined =
@@ -517,17 +476,16 @@ export class ProgressService {
           : undefined;
 
       const today = new Date();
-      const alreadyActiveToday =
-        lastActivityAt != null &&
-        lastActivityAt.getFullYear() === today.getFullYear() &&
-        lastActivityAt.getMonth() === today.getMonth() &&
-        lastActivityAt.getDate() === today.getDate();
+      const isSameLocalDay = (a: Date, b: Date) =>
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
+      const alreadyActiveToday = lastActivityAt != null && isSameLocalDay(lastActivityAt, today);
 
-      // serverTimestamp() é sentinel processado pós-commit — não pode ser relido dentro desta transação
       const updatePayload: Record<string, unknown> = {
         'profile.totalPoints': newTotalPoints,
         'profile.level': newLevel,
-        'profile.lastActivityAt': serverTimestamp(),
+        'profile.lastActivityAt': Timestamp.fromDate(today),
         updatedAt: serverTimestamp(),
       };
 
@@ -536,12 +494,12 @@ export class ProgressService {
         updatePayload['profile.streak'] = currentStreak + 1;
       }
 
-      console.log('[updateStudentStats] Gravando:', { newTotalPoints, newLevel, streakIncrement: !alreadyActiveToday });
+      debugLog('[updateStudentStats] Gravando:', { newTotalPoints, newLevel, streakIncrement: !alreadyActiveToday });
 
       transaction.update(studentRef, updatePayload);
     });
 
-    console.log('[updateStudentStats] ✅ Concluído com sucesso');
+    debugLog('[updateStudentStats] ✅ Concluído com sucesso');
   }
 
   /**
@@ -565,71 +523,109 @@ export class ProgressService {
     weekNumber: number,
     pointsEarned: number,
     timeSpent: number,
-    scheduleInstanceId?: string
+    scheduleInstanceId?: string,
+    forceTotalActivityPending = false
   ): Promise<void> {
     try {
-      // Busca o total real de atividades da semana quando instanceId está disponível
-      let realTotalActivities = 0;
-      if (scheduleInstanceId) {
-        const countQ = query(
-          collection(firestore, 'activityProgress'),
-          where('scheduleInstanceId', '==', scheduleInstanceId),
-          where('weekNumber', '==', weekNumber),
-          where('isActive', '==', true)
-        );
-        const countSnap = await getDocs(countQ);
-        realTotalActivities = countSnap.size;
-      }
-
-      const snapshotId = `${studentId}_week_${weekNumber}`;
+      const snapshotId = scheduleInstanceId
+        ? `${studentId}_${scheduleInstanceId}_week_${weekNumber}`
+        : `${studentId}_week_${weekNumber}`;
       const snapshotRef = doc(firestore, 'weeklySnapshots', snapshotId);
-      const snapDoc = await getDoc(snapshotRef);
 
-      if (snapDoc.exists()) {
-        const data = snapDoc.data();
-        const totalForRate = realTotalActivities > 0
-          ? realTotalActivities
-          : (data.metrics?.totalActivities || 1);
-        const newCompleted = (data.metrics?.completedActivities || 0) + 1;
-        const newRate = Math.round((newCompleted / totalForRate) * 100);
+      // Transaction: lê instância e snapshot atomicamente — datas e totalActivities nunca usam valor stale
+      await runTransaction(firestore, async (tx) => {
+        const [snapDoc, instDoc] = await Promise.all([
+          tx.get(snapshotRef),
+          scheduleInstanceId ? tx.get(doc(firestore, 'scheduleInstances', scheduleInstanceId)) : Promise.resolve(null)
+        ]);
+        const instData = instDoc?.data() ?? null;
+        const cacheTotal = instData?.progressCache?.totalActivities;
+        // Se progressCache falhou (forceTotalActivityPending=true), tratar como 0 e sinalizar pending
+        const totalActivities: number = (!forceTotalActivityPending && typeof cacheTotal === 'number' && cacheTotal > 0) ? cacheTotal : 0;
+        const currentStreak: number = typeof instData?.progressCache?.streakDays === 'number'
+          ? instData.progressCache.streakDays
+          : 1;
 
-        await updateDoc(snapshotRef, {
-          'metrics.completedActivities': increment(1),
-          'metrics.totalPointsEarned': increment(pointsEarned),
-          'metrics.totalTimeSpent': increment(timeSpent),
-          'metrics.completionRate': newRate,
-          ...(realTotalActivities > 0 && { 'metrics.totalActivities': realTotalActivities }),
-          updatedAt: serverTimestamp()
-        });
-      } else {
-        const now = new Date();
-        const startOfWeek = new Date(now);
-        startOfWeek.setDate(now.getDate() - ((now.getDay() + 6) % 7)); // Segunda-feira
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(startOfWeek.getDate() + 6); // Domingo
+        // Derivar datas da instância dentro da transaction para evitar staleness após weekly reset
+        let startOfWeek: Date;
+        let endOfWeek: Date;
+        if (instData) {
+          startOfWeek = instData.currentWeekStartDate?.toDate?.() ?? (() => {
+            const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d;
+          })();
+          endOfWeek = instData.currentWeekEndDate?.toDate?.() ?? (() => {
+            const d = new Date(startOfWeek); d.setDate(d.getDate() + 6); return d;
+          })();
+        } else {
+          startOfWeek = new Date();
+          startOfWeek.setDate(startOfWeek.getDate() - ((startOfWeek.getDay() + 6) % 7));
+          endOfWeek = new Date(startOfWeek);
+          endOfWeek.setDate(startOfWeek.getDate() + 6);
+        }
 
-        const totalForSnapshot = realTotalActivities > 0 ? realTotalActivities : 1;
+        if (snapDoc.exists()) {
+          const data = snapDoc.data();
+          // Usar totalActivities do snapshot persistido se disponível; senão do cache da instância.
+          // Se ambos forem 0 (updateProgressCache ainda não rodou), não calcular rate — deixar 0
+          // para ser corrigido quando updateProgressCache rodar após a geração de atividades.
+          const totalForRate = (data.metrics?.totalActivities > 0)
+            ? data.metrics.totalActivities
+            : (totalActivities > 0 ? totalActivities : 0);
+          const newCompleted = (data.metrics?.completedActivities || 0) + 1;
+          const newRate = totalForRate > 0 ? Math.round((newCompleted / totalForRate) * 100) : 0;
 
-        await setDoc(snapshotRef, {
-          studentId,
-          weekNumber,
-          weekStartDate: Timestamp.fromDate(startOfWeek),
-          weekEndDate: Timestamp.fromDate(endOfWeek),
-          metrics: {
-            completedActivities: 1,
-            totalPointsEarned: pointsEarned,
-            totalTimeSpent: timeSpent,
-            totalActivities: totalForSnapshot,
-            completionRate: Math.round((1 / totalForSnapshot) * 100),
-            streakAtEndOfWeek: 1,
-            adherenceScore: 100,
-            consistencyScore: 100
-          },
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-      }
-      console.log(`✅ WeeklySnapshot atualizado para a semana ${weekNumber} (total=${realTotalActivities})`);
+          // Métricas de engajamento: ler do progressCache da instância (recalculado pelo
+          // updateProgressCache que executa antes desta função) ou manter valor existente
+          const cacheConsistency = instData?.progressCache?.consistencyScore;
+          const cacheAdherence = instData?.progressCache?.adherenceScore;
+          const consistencyScore = typeof cacheConsistency === 'number'
+            ? cacheConsistency
+            : (data.metrics?.consistencyScore ?? Math.round((1 / 7) * 100));
+          const adherenceScore = typeof cacheAdherence === 'number'
+            ? cacheAdherence
+            : (data.metrics?.adherenceScore ?? 100);
+
+          tx.update(snapshotRef, {
+            'metrics.completedActivities': increment(1),
+            'metrics.totalPointsEarned': increment(pointsEarned),
+            'metrics.totalTimeSpent': increment(timeSpent),
+            'metrics.completionRate': newRate,
+            'metrics.consistencyScore': consistencyScore,
+            'metrics.adherenceScore': adherenceScore,
+            // Limpa flag de pending quando totalActivities já está disponível
+            ...(totalForRate > 0 && { isTotalActivityPending: false }),
+            updatedAt: serverTimestamp()
+          });
+        } else {
+          // Se totalActivities ainda não está disponível (reset recente sem updateProgressCache),
+          // salvar 0 para evitar completionRate falso de 100%. Será corrigido por updateProgressCache.
+          const safeTotal = totalActivities > 0 ? totalActivities : 0;
+          const initialRate = safeTotal > 0 ? Math.round((1 / safeTotal) * 100) : 0;
+          tx.set(snapshotRef, {
+            studentId,
+            weekNumber,
+            ...(scheduleInstanceId && { scheduleInstanceId }),
+            scheduleName: instData?.scheduleName || '',
+            weekStartDate: Timestamp.fromDate(startOfWeek),
+            weekEndDate: Timestamp.fromDate(endOfWeek),
+            isActive: true,
+            isTotalActivityPending: safeTotal === 0,
+            metrics: {
+              completedActivities: 1,
+              totalPointsEarned: pointsEarned,
+              totalTimeSpent: timeSpent,
+              totalActivities: safeTotal,
+              completionRate: initialRate,
+              streakAtEndOfWeek: currentStreak,
+              adherenceScore: 100,
+              consistencyScore: Math.round((1 / 7) * 100),
+            },
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+        }
+      });
+
     } catch (error) {
       console.error('Erro detalhado no updateWeeklySnapshot:', error);
       throw error;
@@ -664,7 +660,7 @@ export class ProgressService {
         createdAt: data.createdAt?.toDate(),
         updatedAt: data.updatedAt?.toDate(),
         activitySnapshot: {
-          ...data.activitySnapshot,
+          ...(data.activitySnapshot ?? {}),
           createdAt: data.activitySnapshot?.createdAt?.toDate(),
           updatedAt: data.activitySnapshot?.updatedAt?.toDate()
         }
@@ -714,7 +710,7 @@ export class ProgressService {
         createdAt: data.createdAt?.toDate(),
         updatedAt: data.updatedAt?.toDate(),
         activitySnapshot: {
-          ...data.activitySnapshot,
+          ...(data.activitySnapshot ?? {}),
           createdAt: data.activitySnapshot?.createdAt?.toDate(),
           updatedAt: data.activitySnapshot?.updatedAt?.toDate()
         }
@@ -723,6 +719,7 @@ export class ProgressService {
       return { canAccess: true, activity };
 
     } catch (error) {
+      console.error('Erro ao validar acesso:', error);
       return { canAccess: false, reason: 'Erro ao validar acesso' };
     }
   }
@@ -737,15 +734,12 @@ export class ProgressService {
     dayOfWeek: number
   ): Promise<ActivityProgress[]> {
     try {
-      console.log('🔍 [getActivitiesByWeekAndDay] Buscando atividades:', {
+      debugLog('🔍 [getActivitiesByWeekAndDay] Buscando atividades:', {
         studentId,
         scheduleInstanceId,
         weekNumber,
         dayOfWeek
       });
-
-      // Importar funções do Firestore necessárias
-      const { collection, query, where, getDocs } = await import('firebase/firestore');
 
       // Criar query para buscar atividades específicas
       const q = query(
@@ -762,31 +756,26 @@ export class ProgressService {
 
       snapshot.forEach(doc => {
         const data = doc.data();
+        const scheduledDate = data.scheduledDate?.toDate();
+        if (!scheduledDate) {
+          console.warn(`[getActivitiesByWeekAndDay] activityProgress/${doc.id} sem scheduledDate válido — ignorado`);
+          return;
+        }
 
-        // Converter timestamps do Firestore para Date
-        const activity: ActivityProgress = {
+        activities.push({
           id: doc.id,
           ...data,
-          scheduledDate: data.scheduledDate?.toDate(),
+          scheduledDate,
           startedAt: data.startedAt?.toDate(),
           completedAt: data.completedAt?.toDate(),
           createdAt: data.createdAt?.toDate(),
           updatedAt: data.updatedAt?.toDate(),
           activitySnapshot: {
-            ...data.activitySnapshot,
+            ...(data.activitySnapshot ?? {}),
             createdAt: data.activitySnapshot?.createdAt?.toDate(),
             updatedAt: data.activitySnapshot?.updatedAt?.toDate()
           }
-        } as ActivityProgress;
-
-        activities.push(activity);
-      });
-
-      console.log(`✅ [getActivitiesByWeekAndDay] Encontradas ${activities.length} atividades`);
-
-      // Log detalhado para debug
-      activities.forEach((activity, index) => {
-        console.log(`  ${index + 1}. ${activity.activitySnapshot?.title || 'Sem título'} (${activity.status})`);
+        } as ActivityProgress);
       });
 
       return activities;
@@ -832,7 +821,7 @@ export class ProgressService {
   }> {
     const { dryRun = false } = options;
 
-    console.group(`[recalculate] studentId=${studentId} dryRun=${dryRun}`);
+    debugLog(`[recalculate] studentId=${studentId} dryRun=${dryRun}`);
 
     // 1. Buscar TODOS os activityProgress do aluno (sem filtro de isActive)
     const q = query(
@@ -840,7 +829,7 @@ export class ProgressService {
       where('studentId', '==', studentId)
     );
     const snap = await getDocs(q);
-    console.log(`[recalculate] Documentos encontrados: ${snap.size}`);
+    debugLog(`[recalculate] Documentos encontrados: ${snap.size}`);
 
     let totalPoints = 0;
     let totalCompletedActivities = 0;
@@ -877,30 +866,56 @@ export class ProgressService {
       }
     });
 
-    const level = Math.floor(totalPoints / 200) + 1;
+    const level = calculateLevel(totalPoints);
 
-    console.log(`[recalculate] totalActivityProgress : ${snap.size}`);
-    console.log(`[recalculate] totalCompletedActivities: ${totalCompletedActivities}`);
-    console.log(`[recalculate] totalPoints             : ${totalPoints}`);
-    console.log(`[recalculate] level                   : ${level}`);
-    console.log('[recalculate] Exemplos (primeiros 5):');
-    examples.forEach((e) => console.log(e));
+    // Calcular streak: dias consecutivos com ao menos uma atividade completada, contando de hoje para trás
+    const completedDates: Date[] = [];
+    const oneYearAgo = Date.now() - 365 * 24 * 60 * 60 * 1000;
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data.status !== 'completed' || !data.completedAt) return;
+      try {
+        const date = typeof data.completedAt.toDate === 'function'
+          ? data.completedAt.toDate()
+          : new Date(data.completedAt);
+        if (isNaN(date.getTime()) || date.getTime() < oneYearAgo) return;
+        completedDates.push(date);
+      } catch (err) {
+        console.warn(`[recalculate] Erro ao converter completedAt (doc ${d.id}):`, err);
+      }
+    });
+    const streak = calculateStreak(completedDates);
+
+    debugLog(`[recalculate] totalActivityProgress : ${snap.size}`);
+    debugLog(`[recalculate] totalCompletedActivities: ${totalCompletedActivities}`);
+    debugLog(`[recalculate] totalPoints             : ${totalPoints}`);
+    debugLog(`[recalculate] level                   : ${level}`);
 
     if (!dryRun) {
       const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
-      await updateDoc(studentRef, {
-        'profile.totalPoints': totalPoints,
-        'profile.level': level,
-        'profile.totalCompletedActivities': totalCompletedActivities,
-        'profile.lastMetricsRecalculatedAt': serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      // Usar transaction para não sobrescrever pontos de atividades completadas
+      // concorrentemente durante a leitura do histórico
+      await runTransaction(firestore, async (tx) => {
+        const snap = await tx.get(studentRef);
+        if (!snap.exists()) return;
+        const storedPoints = snap.data()?.profile?.totalPoints ?? 0;
+        const storedCompleted = snap.data()?.profile?.totalCompletedActivities ?? 0;
+        // Preservar o maior valor (não perder pontos escritos concorrentemente)
+        const safePoints = Math.max(totalPoints, storedPoints);
+        const safeCompleted = Math.max(totalCompletedActivities, storedCompleted);
+        tx.update(studentRef, {
+          'profile.totalPoints': safePoints,
+          'profile.level': calculateLevel(safePoints),
+          'profile.totalCompletedActivities': safeCompleted,
+          'profile.streak': streak,
+          'profile.lastMetricsRecalculatedAt': serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
       });
-      console.log('[recalculate] ✅ Escrito no Firestore com sucesso');
+      debugLog('[recalculate] ✅ Escrito no Firestore com sucesso');
     } else {
-      console.log('[recalculate] ⚠️  dryRun=true — nada foi escrito no Firestore');
+      debugLog('[recalculate] ⚠️  dryRun=true — nada foi escrito no Firestore');
     }
-
-    console.groupEnd();
 
     return {
       studentId,

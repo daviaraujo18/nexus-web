@@ -52,14 +52,18 @@ export class AuditService {
     email: string,
     errorCode?: string
   ): Promise<void> {
-    await addDoc(collection(firestore, this.COLLECTION), {
-      eventType: 'LOGIN_FAILED',
-      email,
-      errorCode,
-      timestamp: serverTimestamp(),
-      userAgent: navigator.userAgent,
-      ipAddress: await this.getClientIP()
-    });
+    try {
+      await addDoc(collection(firestore, this.COLLECTION), {
+        eventType: 'LOGIN_FAILED',
+        email,
+        errorCode,
+        timestamp: serverTimestamp(),
+        userAgent: navigator.userAgent,
+        ipAddress: await this.getClientIP()
+      });
+    } catch (error) {
+      console.error('Failed to log failed login event:', error);
+    }
   }
 
   static async logLogout(userId: string): Promise<void> {

@@ -1,0 +1,67 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "activityProgress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "scheduleInstanceId", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "isDeleted", "order": "ASCENDING" },
+        { "fieldPath": "weekNumber", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "activityProgress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "scheduleInstanceId", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scheduleInstances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scheduleInstances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "currentWeekEndDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "weeklySnapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "scheduleInstanceId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "weeklySnapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "scheduleInstanceId", "order": "ASCENDING" },
+        { "fieldPath": "weekNumber", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "weeklySnapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "weekNumber", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

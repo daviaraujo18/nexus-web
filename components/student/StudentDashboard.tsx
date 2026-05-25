@@ -25,6 +25,9 @@ import SubjectBarChart, { computeSubjectStats } from '@/components/charts/Subjec
 import { doc, onSnapshot } from 'firebase/firestore';
 import { firestore, auth } from '@/firebase/config';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+const debugLog = (...args: unknown[]) => { if (DEBUG) console.log(...args); };
+
 interface StudentDashboardProps {
   showHeader?: boolean;
 }
@@ -50,7 +53,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     const unsubscribe = onSnapshot(ref, (snap) => {
       const rawData = snap.data();
 
-      console.log('[STUDENT_DASHBOARD_PROFILE_STATS]', {
+      debugLog('[STUDENT_DASHBOARD_PROFILE_STATS]', {
         uid,
         exists: snap.exists(),
         rawData,
@@ -116,12 +119,10 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
     return weekActivities.filter(activity => {
       if (activity.dayOfWeek !== selectedDay) return false;
 
-      // Deduplicação leve para evitar exibir a mesma atividade quando há instâncias repetidas.
-      // Prioriza activityId; se não existir, tenta id do snapshot; por último, usa uma chave semântica.
-      const key =
-        activity.activityId ||
-        activity.activitySnapshot?.id ||
-        `${activity.activitySnapshot?.title}-${activity.dayOfWeek}-${activity.activitySnapshot?.type}`;
+      // Deduplicação por scheduleInstanceId + activityId.
+      // Isso permite que a mesma atividade de templates diferentes apareça, mas
+      // evita duplicatas dentro da mesma instância (regeneração, etc.).
+      const key = `${activity.scheduleInstanceId}_${activity.activityId || activity.activitySnapshot?.id || `${activity.activitySnapshot?.title}-${activity.dayOfWeek}-${activity.activitySnapshot?.type}`}`;
 
       if (seen.has(key)) return false;
 

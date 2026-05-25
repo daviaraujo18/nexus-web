@@ -1,5 +1,5 @@
 // hooks/useComparativeAnalytics.ts
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ComparativeAnalysis, DateRange } from '@/types/analytics';
 import { AnalyticsService } from '@/lib/services/AnalyticsService';
@@ -13,7 +13,7 @@ export function useComparativeAnalytics() {
     previous: ComparativeAnalysis | null;
   }>({ current: null, previous: null });
 
-  const analyticsService = new AnalyticsService();
+  const analyticsService = useMemo(() => new AnalyticsService(user?.role ?? 'psychologist'), [user?.role]);
 
   const comparePeriods = useCallback(async (
     currentRange: DateRange,
@@ -51,48 +51,47 @@ export function useComparativeAnalytics() {
     const current = comparison.current.summary.metrics;
     const previous = comparison.previous.summary.metrics;
 
+    const pctChange = (cur: number, prev: number) =>
+      prev === 0 ? (cur === 0 ? 0 : 100) : ((cur - prev) / prev) * 100;
+
     return {
       completionRate: {
         current: current.averageCompletionRate,
         previous: previous.averageCompletionRate,
-        change: ((current.averageCompletionRate - previous.averageCompletionRate) / previous.averageCompletionRate) * 100
+        change: pctChange(current.averageCompletionRate, previous.averageCompletionRate)
       },
       gad7Score: {
         current: current.averageGAD7Score,
         previous: previous.averageGAD7Score,
-        change: ((current.averageGAD7Score - previous.averageGAD7Score) / previous.averageGAD7Score) * 100
+        change: pctChange(current.averageGAD7Score, previous.averageGAD7Score)
       },
       consistency: {
         current: current.averageConsistencyScore,
         previous: previous.averageConsistencyScore,
-        change: ((current.averageConsistencyScore - previous.averageConsistencyScore) / previous.averageConsistencyScore) * 100
+        change: pctChange(current.averageConsistencyScore, previous.averageConsistencyScore)
       },
       engagement: {
-        current: current.averageCompletionRate,
-        previous: previous.averageCompletionRate,
-        change: ((current.averageCompletionRate - previous.averageCompletionRate) / previous.averageCompletionRate) * 100
+        current: current.averageAdherenceScore,
+        previous: previous.averageAdherenceScore,
+        change: pctChange(current.averageAdherenceScore, previous.averageAdherenceScore)
       }
     };
   }, [comparison]);
 
   const getTopImprovers = useCallback(() => {
-    if (!comparison.current || !comparison.previous) return [];
+    const currentEngagement = comparison.current?.studentRankings?.byEngagement;
+    const previousEngagement = comparison.previous?.studentRankings?.byEngagement;
+    if (!currentEngagement || !previousEngagement) return [];
 
-    // Calcular quais alunos mais melhoraram
-    const currentStudents = new Map(
-      comparison.current.studentRankings.byEngagement.map(s => [s.studentId, s.value])
-    );
-    
-    const previousStudents = new Map(
-      comparison.previous.studentRankings.byEngagement.map(s => [s.studentId, s.value])
-    );
+    const currentStudents = new Map(currentEngagement.map(s => [s.studentId, s.value]));
+    const previousStudents = new Map(previousEngagement.map(s => [s.studentId, s.value]));
 
-    const improvements = Array.from(currentStudents.entries())
+    return Array.from(currentStudents.entries())
       .map(([studentId, currentValue]) => {
         const previousValue = previousStudents.get(studentId) || 0;
         return {
           studentId,
-          studentName: comparison.current!.studentRankings.byEngagement.find(s => s.studentId === studentId)?.studentName || '',
+          studentName: currentEngagement.find(s => s.studentId === studentId)?.studentName || '',
           improvement: currentValue - previousValue,
           currentValue,
           previousValue
@@ -100,8 +99,6 @@ export function useComparativeAnalytics() {
       })
       .sort((a, b) => b.improvement - a.improvement)
       .slice(0, 5);
-
-    return improvements;
   }, [comparison]);
 
   return {

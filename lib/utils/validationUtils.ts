@@ -60,11 +60,11 @@ export class ValidationUtils {
           errors.push(`Atividade ${index + 1}: Dia da semana inválido`);
         }
 
-        if (activity.estimatedDuration <= 0) {
+        if (activity.metadata.estimatedDuration <= 0) {
           errors.push(`Atividade ${index + 1}: Duração estimada deve ser positiva`);
         }
 
-        if (activity.pointsOnCompletion < 0) {
+        if (activity.scoring.pointsOnCompletion < 0) {
           errors.push(`Atividade ${index + 1}: Pontuação não pode ser negativa`);
         }
 

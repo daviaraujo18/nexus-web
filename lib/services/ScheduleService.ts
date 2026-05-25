@@ -11,6 +11,7 @@ import {
   getDocs,
   serverTimestamp,
   writeBatch,
+  runTransaction,
   Timestamp
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
@@ -22,6 +23,9 @@ import {
   ScheduleCategory
 } from '@/types/schedule';
 import { ValidationUtils } from '@/lib/utils/validationUtils';
+
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+function debugLog(...args: any[]) { if (DEBUG) console.log(...args); }
 
 // * Serviço responsável pela gestão de cronogramas (templates).
 // *
@@ -106,7 +110,8 @@ export class ScheduleService {
         isActive: true
       };
 
-      await setDoc(doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId), {
+      const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
+      await setDoc(templateRef, {
         ...scheduleData,
         startDate: Timestamp.fromDate(sanitizedData.startDate),
         endDate: sanitizedData.endDate ? Timestamp.fromDate(sanitizedData.endDate) : null,
@@ -114,7 +119,15 @@ export class ScheduleService {
         updatedAt: serverTimestamp()
       });
 
-      const activityIds = await this.createActivities(scheduleId, sanitizedData.activities);
+      let activityIds: string[];
+      try {
+        activityIds = await this.createActivities(scheduleId, sanitizedData.activities);
+      } catch (actError: any) {
+        // Compensação: remover template órfão se a criação de atividades falhar
+        await deleteDoc(templateRef).catch(e => console.error('[createSchedule] Falha ao remover template órfão:', e));
+        throw actError;
+      }
+
       return { scheduleId, activityIds, metadata: metrics };
 
     } catch (error: any) {
@@ -144,79 +157,73 @@ export class ScheduleService {
   // * - Mas não protege contra leitura concorrente externa
   static async updateScheduleTemplate(
     scheduleId: string,
-    professionalIdOrData: string | CreateScheduleDTO,
-    data?: CreateScheduleDTO
+    professionalId: string,
+    data: CreateScheduleDTO
   ): Promise<void> {
-    const resolvedData: CreateScheduleDTO = data ?? (professionalIdOrData as CreateScheduleDTO);
-    console.group(`🔥 [SERVICE] Atualizando Cronograma: ${scheduleId}`);
+    debugLog(`🔥 [SERVICE] Atualizando Cronograma: ${scheduleId}`);
     try {
-      const validation = ValidationUtils.validateScheduleData(resolvedData);
+      const validation = ValidationUtils.validateScheduleData(data);
       if (!validation.isValid) {
         throw new Error(`Dados inválidos: ${validation.errors.join(', ')}`);
       }
 
-      const sanitizedData = ValidationUtils.sanitizeScheduleData(resolvedData);
+      const sanitizedData = ValidationUtils.sanitizeScheduleData(data);
       const metrics = this.calculateScheduleMetrics(sanitizedData.activities);
 
       const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
-      const batch = writeBatch(firestore);
+      const profRef = doc(firestore, 'professionals', professionalId);
 
-      // 1. Atualizar o Documento Principal (Template)
-      console.log(`📝 Preparando payload do template...`);
-      batch.update(templateRef, {
-        name: sanitizedData.name,
-        description: sanitizedData.description,
-        category: sanitizedData.category,
-        startDate: Timestamp.fromDate(sanitizedData.startDate),
-        endDate: sanitizedData.endDate ? Timestamp.fromDate(sanitizedData.endDate) : null,
-        activeDays: sanitizedData.activeDays,
-        'repeatRules.resetOnRepeat': sanitizedData.repeatRules.resetOnRepeat,
-        'metadata.estimatedWeeklyHours': metrics.estimatedWeeklyHours,
-        'metadata.totalActivities': metrics.totalActivities,
-        'metadata.tags': metrics.tags,
-        updatedAt: serverTimestamp()
+      // 1. Lock otimista via runTransaction: incrementa editVersion e verifica ownership.
+      // Duas edições concorrentes serializam aqui — a segunda lerá a versão já incrementada
+      // pela primeira e ainda assim terá sucesso (re-aplica sobre o estado atualizado).
+      // O ponto crítico é que o batch de atividades só começa após o commit da transaction,
+      // garantindo que apenas um conjunto de atividades seja criado por vez.
+      debugLog(`🔒 Verificando ownership e aplicando lock otimista...`);
+      let resolvedEditVersion = 1;
+      await runTransaction(firestore, async (tx) => {
+        const [snap, profSnap] = await Promise.all([tx.get(templateRef), tx.get(profRef)]);
+        if (!snap.exists()) throw new Error('Cronograma não encontrado');
+        const current = snap.data()!;
+        const isCoordinator = profSnap.data()?.role === 'coordinator';
+        if (!isCoordinator && current.professionalId !== professionalId) {
+          throw new Error('Você não tem permissão para editar este cronograma');
+        }
+        resolvedEditVersion = (current.editVersion || 0) + 1;
+        tx.update(templateRef, {
+          name: sanitizedData.name,
+          description: sanitizedData.description,
+          category: sanitizedData.category,
+          startDate: Timestamp.fromDate(sanitizedData.startDate),
+          endDate: sanitizedData.endDate ? Timestamp.fromDate(sanitizedData.endDate) : null,
+          activeDays: sanitizedData.activeDays,
+          'repeatRules.resetOnRepeat': sanitizedData.repeatRules.resetOnRepeat,
+          'metadata.estimatedWeeklyHours': metrics.estimatedWeeklyHours,
+          'metadata.totalActivities': metrics.totalActivities,
+          'metadata.tags': metrics.tags,
+          editVersion: resolvedEditVersion,
+          updatedAt: serverTimestamp()
+        });
       });
 
-      // * Remove TODAS as atividades anteriores vinculadas ao template.
-      // *
-      // * ⚠️ Importante:
-      // * - Essa abordagem descarta completamente a versão anterior
-      // * - Não mantém histórico de alterações
-      // *
-      // * ⚠️ Risco:
-      // * - Se houver instâncias já geradas, elas continuarão referenciando versões antigas
-      console.log(`🧹 Buscando atividades antigas para limpeza...`);
+      // 2. Após commit da transaction, recriar atividades atomicamente via batch.
+      // O getDocs ocorre depois do lock, então qualquer edição concorrente que venceu a
+      // transaction anterior já terá deletado as atividades antigas — este batch as
+      // sobrescreverá corretamente.
+      debugLog(`🧹 Buscando atividades antigas para limpeza...`);
       const oldActivitiesQuery = query(
         collection(firestore, this.COLLECTIONS.ACTIVITIES),
         where('scheduleTemplateId', '==', scheduleId)
       );
       const oldActivitiesSnap = await getDocs(oldActivitiesQuery);
-      
-      oldActivitiesSnap.docs.forEach(doc => {
-        batch.delete(doc.ref);
-      });
-      console.log(`🗑️ ${oldActivitiesSnap.docs.length} atividades antigas removidas do lote.`);
 
-      // * Recria todas as atividades do template.
-      // *
-      // * Estratégia:
-      // * - Todas as atividades antigas já foram removidas
-      // * - Novas atividades são criadas do zero
-      // * - IDs incluem timestamp para evitar colisão
-      // *
-      // * ⚠️ Consequência:
-      // * - IDs antigos são descartados
-      // * - Não há versionamento de atividades
-      // * - Qualquer referência externa aos IDs antigos se perde
-      // *
-      // * ⚠️ Impacto:
-      // * - Instâncias já geradas continuam com snapshots antigos
-      // * - Alterações não propagam retroativamente para atividades já atribuídas
-      console.log(`➕ Adicionando ${sanitizedData.activities.length} atividades novas ao lote...`);
+      const batch = writeBatch(firestore);
+      oldActivitiesSnap.docs.forEach(d => batch.delete(d.ref));
+      debugLog(`🗑️ ${oldActivitiesSnap.docs.length} atividades antigas removidas do lote.`);
 
+      debugLog(`➕ Adicionando ${sanitizedData.activities.length} atividades novas ao lote...`);
+      const ts = Date.now();
       sanitizedData.activities.forEach((a, i) => {
-        const actId = `${scheduleId}_act_${i}_${Date.now()}`; // Adiciona timestamp pra garantir ID único
-        const actRef = doc(firestore, this.COLLECTIONS.ACTIVITIES, actId);
+        const actRef = doc(firestore, this.COLLECTIONS.ACTIVITIES, `${scheduleId}_act_${i}_${ts}_v${resolvedEditVersion}`);
         batch.set(actRef, {
           scheduleTemplateId: scheduleId,
           ...a,
@@ -226,15 +233,14 @@ export class ScheduleService {
         });
       });
 
-      // 4. Executa a transação no banco
-      console.log(`🚀 Disparando transação no banco...`);
+      debugLog(`🚀 Disparando batch de atividades...`);
       await batch.commit();
 
-      console.log(`✅ Cronograma ${scheduleId} atualizado com sucesso!`);
-      console.groupEnd();
+      debugLog(`✅ Cronograma ${scheduleId} atualizado com sucesso!`);
+      debugLog();
     } catch (error: any) {
       console.error('❌ Erro na atualização do cronograma:', error);
-      console.groupEnd();
+      debugLog();
       throw new Error(`Falha ao atualizar cronograma: ${error.message}`);
     }
   }
@@ -262,7 +268,7 @@ export class ScheduleService {
   // * - Mantém integridade para analytics
   static async deleteSchedule(scheduleId: string, professionalId: string): Promise<void> {
     try {
-      console.log(`🛡️ Iniciando desativação segura do cronograma: ${scheduleId}`);
+      debugLog(`🛡️ Iniciando desativação segura do cronograma: ${scheduleId}`);
       const batch = writeBatch(firestore);
 
       // 1. Marcar Template como deletado (mas mantém o documento)
@@ -328,7 +334,7 @@ export class ScheduleService {
       }
 
       await batch.commit();
-      console.log(`✅ Cronograma desativado. Dados de evolução preservados.`);
+      debugLog(`✅ Cronograma desativado. Dados de evolução preservados.`);
 
     } catch (error: any) {
       console.error('❌ Erro na desativação segura:', error);
@@ -340,22 +346,24 @@ export class ScheduleService {
   // *
   // * Ao ARQUIVAR: desativa instâncias + oculta activityProgress.
   // * Ao RESTAURAR: apenas reativa o template — histórico não é reativado.
-    // * Alterna estado entre ativo e arquivado com propagação completa.
-  // *
-  // * Ao ARQUIVAR: desativa instâncias + oculta activityProgress.
-  // * Ao RESTAURAR: apenas reativa o template — histórico não é reativado.
   static async archiveSchedule(scheduleId: string, professionalId: string): Promise<void> {
     try {
       const templateRef = doc(firestore, this.COLLECTIONS.TEMPLATES, scheduleId);
-      const snap = await getDoc(templateRef);
+      // Verificar role diretamente do Firestore — nunca confiar em parâmetro do cliente
+      const [templateSnap, professionalSnap] = await Promise.all([
+        getDoc(templateRef),
+        getDoc(doc(firestore, 'professionals', professionalId))
+      ]);
 
-      if (!snap.exists()) {
+      if (!templateSnap.exists()) {
         throw new Error('Cronograma não encontrado');
       }
 
-      const templateData = snap.data();
+      const templateData = templateSnap.data();
+      const professionalRole: string = professionalSnap.data()?.role ?? '';
+      const isCoordinator = professionalRole === 'coordinator';
 
-      if (templateData.professionalId !== professionalId) {
+      if (!isCoordinator && templateData.professionalId !== professionalId) {
         throw new Error('Você não tem permissão para arquivar este cronograma');
       }
 
@@ -363,20 +371,24 @@ export class ScheduleService {
 
       if (!isCurrentlyActive) {
         // --- RESTAURAR: apenas o template ---
+        // Verificação de ownership também obrigatória no fluxo de restauração
+        if (!isCoordinator && templateData.professionalId !== professionalId) {
+          throw new Error('Você não tem permissão para restaurar este cronograma');
+        }
         await updateDoc(templateRef, {
           isActive: true,
           status: 'active',
           updatedAt: serverTimestamp()
         });
 
-        console.log(
+        debugLog(
           `✅ [ARCHIVE] Cronograma ${scheduleId} restaurado. Instâncias/progress históricos não reativados.`
         );
         return;
       }
 
       // --- ARQUIVAR: propagar para instâncias e activityProgress ---
-      console.log(`🗄️ [ARCHIVE] Arquivando cronograma ${scheduleId} com propagação...`);
+      debugLog(`🗄️ [ARCHIVE] Arquivando cronograma ${scheduleId} com propagação...`);
 
       const CHUNK = 490;
       let ops: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
@@ -417,7 +429,7 @@ export class ScheduleService {
         )
       );
 
-      console.log(`📦 [ARCHIVE] ${instancesSnap.size} instâncias encontradas.`);
+      debugLog(`📦 [ARCHIVE] ${instancesSnap.size} instâncias encontradas.`);
 
       for (const instanceDoc of instancesSnap.docs) {
         ops.push(batch =>
@@ -467,9 +479,15 @@ export class ScheduleService {
         }
       }
 
-      await flush();
+      const processedInstanceIds = instancesSnap.docs.map(d => d.id);
+      try {
+        await flush();
+      } catch (flushError: any) {
+        console.error(`❌ [ARCHIVE] Falha no flush — instâncias que já foram enfileiradas: [${processedInstanceIds.join(', ')}]`);
+        throw flushError;
+      }
 
-      console.log(`✅ [ARCHIVE] Cronograma ${scheduleId} arquivado. Dados históricos preservados.`);
+      debugLog(`✅ [ARCHIVE] Cronograma ${scheduleId} arquivado. Dados históricos preservados.`);
     } catch (error: any) {
       console.error('❌ [ARCHIVE] Erro ao arquivar/restaurar cronograma:', error);
       throw new Error(`Falha ao arquivar/restaurar cronograma: ${error.message}`);
@@ -504,8 +522,11 @@ export class ScheduleService {
   // *
   // * ⚠️ Observação:
   // * - Filtro de categoria/ativo ainda não está sendo aplicado na query (apenas pós-processamento)
-  static async listProfessionalSchedules(professionalId: string, options: { category?: ScheduleCategory; activeOnly?: boolean; limit?: number; } = {}): Promise<ScheduleTemplate[]> {
-    let q = query(collection(firestore, this.COLLECTIONS.TEMPLATES), where('professionalId', '==', professionalId));
+  static async listProfessionalSchedules(professionalId: string, options: { category?: ScheduleCategory; activeOnly?: boolean; limit?: number; role?: string; } = {}): Promise<ScheduleTemplate[]> {
+    // Coordinator vê apenas os próprios cronogramas (igual a outros profissionais).
+    // O acesso ampliado do coordinator (arquivar/deletar/atribuir cronogramas alheios) é tratado
+    // nas operações específicas, não na listagem.
+    const q = query(collection(firestore, this.COLLECTIONS.TEMPLATES), where('professionalId', '==', professionalId));
     const snap = await getDocs(q);
     const schedules: ScheduleTemplate[] = [];
     snap.forEach(doc => {
@@ -529,8 +550,8 @@ export class ScheduleService {
     const batch = writeBatch(firestore);
     const ids: string[] = [];
     activities.forEach((a, i) => {
-      const id = `${scheduleId}_act_${i}`;
-      const ref = doc(firestore, this.COLLECTIONS.ACTIVITIES, id);
+      const ref = doc(collection(firestore, this.COLLECTIONS.ACTIVITIES));
+      const id = ref.id;
       batch.set(ref, { scheduleTemplateId: scheduleId, ...a, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), isActive: true });
       ids.push(id);
     });

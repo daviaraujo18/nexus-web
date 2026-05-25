@@ -204,8 +204,8 @@ export default function ScheduleWeekView({
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-start gap-4">
-                        <div className={`p-3 rounded-xl ${getActivityColor(activity.activitySnapshot.type)}`}>
-                          {getActivityIcon(activity.activitySnapshot.type)}
+                        <div className={`p-3 rounded-xl ${getActivityColor(activity.activitySnapshot?.type || 'quick')}`}>
+                          {getActivityIcon(activity.activitySnapshot?.type || 'quick')}
                         </div>
                         <div>
                           <h5 className="font-bold text-gray-900 mb-1">{activity.activitySnapshot.title}</h5>

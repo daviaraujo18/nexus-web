@@ -1,6 +1,6 @@
 // pages/debug/schedules.tsx
 'use client'
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   collection,
   query,
@@ -33,7 +33,7 @@ interface TemplateWithData extends ScheduleTemplate {
 }
 
 export default function DebugSchedulesPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateWithData[]>([]);
@@ -48,12 +48,7 @@ export default function DebugSchedulesPage() {
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [professionals, setProfessionals] = useState<Record<string, string>>({});
 
-  // Carregar dados
-  useEffect(() => {
-    loadAllData();
-  }, []);
-
-  const loadAllData = async () => {
+  const loadAllData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -65,10 +60,10 @@ export default function DebugSchedulesPage() {
       );
       const templatesSnapshot = await getDocs(templatesQuery);
 
-      const templatesData: TemplateWithData[] = [];
+      // 2. Processar todos os templates em paralelo (era serial, com await por template)
+      const professionalIdsToFetch = new Set<string>();
 
-      // 2. Para cada template, buscar instâncias relacionadas
-      for (const templateDoc of templatesSnapshot.docs) {
+      const processTemplate = async (templateDoc: any): Promise<TemplateWithData> => {
         const template = {
           id: templateDoc.id,
           ...templateDoc.data(),
@@ -78,88 +73,102 @@ export default function DebugSchedulesPage() {
           endDate: templateDoc.data().endDate?.toDate()
         } as ScheduleTemplate;
 
-        // Buscar instâncias deste template
         const instancesQuery = query(
           collection(firestore, 'scheduleInstances'),
           where('scheduleTemplateId', '==', templateDoc.id)
         );
         const instancesSnapshot = await getDocs(instancesQuery);
 
-        const instances = [];
+        const instanceIds = instancesSnapshot.docs.map(d => d.id);
+        const chunkSize = 30;
+        const activitiesByInstance = new Map<string, (ActivityProgress & { id: string })[]>();
+        const snapshotsByInstance = new Map<string, (WeeklySnapshot & { id: string })[]>();
 
-        for (const instanceDoc of instancesSnapshot.docs) {
-          const instance = {
-            id: instanceDoc.id,
-            ...instanceDoc.data(),
-            createdAt: instanceDoc.data().createdAt?.toDate(),
-            updatedAt: instanceDoc.data().updatedAt?.toDate(),
-            startedAt: instanceDoc.data().startedAt?.toDate(),
-            completedAt: instanceDoc.data().completedAt?.toDate(),
-            currentWeekStartDate: instanceDoc.data().currentWeekStartDate?.toDate(),
-            currentWeekEndDate: instanceDoc.data().currentWeekEndDate?.toDate()
-          } as ScheduleInstance;
-
-          // Buscar activityProgress desta instância
-          const activitiesQuery = query(
-            collection(firestore, 'activityProgress'),
-            where('scheduleInstanceId', '==', instanceDoc.id)
-          );
-          const activitiesSnapshot = await getDocs(activitiesQuery);
-
-          const activities = activitiesSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            createdAt: doc.data().createdAt?.toDate(),
-            updatedAt: doc.data().updatedAt?.toDate(),
-            scheduledDate: doc.data().scheduledDate?.toDate(),
-            startedAt: doc.data().startedAt?.toDate(),
-            completedAt: doc.data().completedAt?.toDate(),
-            dueDate: doc.data().dueDate?.toDate()
-          })) as (ActivityProgress & { id: string })[];
-
-          // Buscar weeklySnapshots desta instância
-          const snapshotsQuery = query(
-            collection(firestore, 'weeklySnapshots'),
-            where('scheduleInstanceId', '==', instanceDoc.id),
-            orderBy('weekNumber', 'desc')
-          );
-          const snapshotsSnapshot = await getDocs(snapshotsQuery);
-
-          const snapshots = snapshotsSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            createdAt: doc.data().createdAt?.toDate(),
-            updatedAt: doc.data().updatedAt?.toDate(),
-            weekStartDate: doc.data().weekStartDate?.toDate(),
-            weekEndDate: doc.data().weekEndDate?.toDate()
-          })) as (WeeklySnapshot & { id: string })[];
-
-          instances.push({
-            ...instance,
-            activities,
-            snapshots
-          });
-
-          // Coletar IDs de profissionais para buscar nomes depois
-          if (instance.professionalId && !professionals[instance.professionalId]) {
-            professionals[instance.professionalId] = 'Carregando...';
+        if (instanceIds.length > 0) {
+          const chunks: string[][] = [];
+          for (let c = 0; c < instanceIds.length; c += chunkSize) {
+            chunks.push(instanceIds.slice(c, c + chunkSize));
           }
+
+          await Promise.all(chunks.map(async (chunk) => {
+            const [actSnap, snapSnap] = await Promise.all([
+              getDocs(query(collection(firestore, 'activityProgress'), where('scheduleInstanceId', 'in', chunk))),
+              getDocs(query(collection(firestore, 'weeklySnapshots'), where('scheduleInstanceId', 'in', chunk), orderBy('weekNumber', 'desc')))
+            ]);
+
+            actSnap.docs.forEach(d => {
+              const sid = d.data().scheduleInstanceId;
+              if (!activitiesByInstance.has(sid)) activitiesByInstance.set(sid, []);
+              activitiesByInstance.get(sid)!.push({
+                id: d.id, ...d.data(),
+                createdAt: d.data().createdAt?.toDate(), updatedAt: d.data().updatedAt?.toDate(),
+                scheduledDate: d.data().scheduledDate?.toDate(), startedAt: d.data().startedAt?.toDate(),
+                completedAt: d.data().completedAt?.toDate(), dueDate: d.data().dueDate?.toDate()
+              } as ActivityProgress & { id: string });
+            });
+
+            snapSnap.docs.forEach(d => {
+              const sid = d.data().scheduleInstanceId;
+              if (!snapshotsByInstance.has(sid)) snapshotsByInstance.set(sid, []);
+              snapshotsByInstance.get(sid)!.push({
+                id: d.id, ...d.data(),
+                createdAt: d.data().createdAt?.toDate(), updatedAt: d.data().updatedAt?.toDate(),
+                weekStartDate: d.data().weekStartDate?.toDate(), weekEndDate: d.data().weekEndDate?.toDate()
+              } as WeeklySnapshot & { id: string });
+            });
+          }));
         }
 
-        templatesData.push({
-          ...template,
-          instances
+        const instances = instancesSnapshot.docs.map(instanceDoc => {
+          const iData = instanceDoc.data();
+          const instance = {
+            id: instanceDoc.id,
+            ...iData,
+            createdAt: iData.createdAt?.toDate(),
+            updatedAt: iData.updatedAt?.toDate(),
+            startedAt: iData.startedAt?.toDate(),
+            completedAt: iData.completedAt?.toDate(),
+            currentWeekStartDate: iData.currentWeekStartDate?.toDate(),
+            currentWeekEndDate: iData.currentWeekEndDate?.toDate(),
+            progressCache: iData.progressCache ? {
+              ...iData.progressCache,
+              lastUpdatedAt: iData.progressCache.lastUpdatedAt?.toDate?.() ?? iData.progressCache.lastUpdatedAt
+            } : iData.progressCache
+          } as ScheduleInstance;
+
+          if (instance.professionalId) {
+            professionalIdsToFetch.add(instance.professionalId);
+          }
+
+          return {
+            ...instance,
+            activities: activitiesByInstance.get(instanceDoc.id) ?? [],
+            snapshots: snapshotsByInstance.get(instanceDoc.id) ?? []
+          };
         });
-      }
+
+        return { ...template, instances };
+      };
+
+      const templatesData = (await Promise.all(
+        templatesSnapshot.docs.map(async (doc) => {
+          try {
+            return await processTemplate(doc);
+          } catch (e) {
+            console.error(' Template ignorado devido a erro:', doc.id, e);
+            return null as unknown as TemplateWithData;
+          }
+        })
+      )).filter(Boolean);
 
       setTemplates(templatesData);
 
       // Buscar nomes dos profissionais
-      const professionalIds = Object.keys(professionals);
+      const professionalIds = Array.from(professionalIdsToFetch);
       if (professionalIds.length > 0) {
         const professionalNames: Record<string, string> = {};
 
-        for (const id of professionalIds) {
+        await Promise.all(professionalIds.map(async (id) => {
           try {
             const profDoc = await getDoc(doc(firestore, 'professionals', id));
             if (profDoc.exists()) {
@@ -171,7 +180,7 @@ export default function DebugSchedulesPage() {
           } catch (err) {
             professionalNames[id] = 'Erro ao carregar';
           }
-        }
+        }));
 
         setProfessionals(professionalNames);
       }
@@ -182,7 +191,15 @@ export default function DebugSchedulesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  // Carregar dados — apenas quando debug habilitado e para profissionais/admins
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_ENABLE_DEBUG !== 'true') return;
+    if (!user) return;
+    if (user.role === 'student') return;
+    loadAllData();
+  }, [user, loadAllData]);
 
   const toggleTemplate = () => {
     setExpandedSections(prev => ({
@@ -234,8 +251,19 @@ export default function DebugSchedulesPage() {
     }
   };
 
-  const formatDate = (date: Date | null | undefined) => {
-    if (!date) return '—';
+  const formatDate = (date: unknown) => {
+    if (date == null) return '—';
+
+    let safeDate: Date;
+    if (date instanceof Date) {
+      safeDate = date;
+    } else if (typeof (date as any)?.toDate === 'function') {
+      safeDate = (date as any).toDate();
+    } else {
+      return '—';
+    }
+
+    if (isNaN(safeDate.getTime())) return '—';
 
     return new Intl.DateTimeFormat('pt-BR', {
       day: '2-digit',
@@ -243,17 +271,68 @@ export default function DebugSchedulesPage() {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false // Garante o formato 24h
-    }).format(date);
+      hour12: false
+    }).format(safeDate);
   };
 
   const filteredTemplates = templates.filter(template => {
     if (searchTerm) {
-      return template.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        template.id?.toLowerCase().includes(searchTerm.toLowerCase());
+      const term = searchTerm.toLowerCase();
+      if (!template.name.toLowerCase().includes(term) && !template.id?.toLowerCase().includes(term)) {
+        return false;
+      }
+    }
+    if (filterProfessional) {
+      const term = filterProfessional.toLowerCase();
+      const hasMatch = template.instances.some(i => {
+        const name = professionals[i.professionalId] ?? '';
+        return (i.professionalId?.toLowerCase().includes(term) ?? false) || name.toLowerCase().includes(term);
+      });
+      if (!hasMatch) return false;
     }
     return true;
   });
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-white rounded-lg shadow-lg p-8">
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <span className="ml-3 text-lg text-gray-700">Verificando acesso...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (process.env.NEXT_PUBLIC_ENABLE_DEBUG !== 'true') {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+            <h2 className="text-xl font-semibold text-red-800 mb-2">Não disponível</h2>
+            <p className="text-red-600">Ferramentas de debug estão desabilitadas neste ambiente.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || user.role === 'student') {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+            <h2 className="text-xl font-semibold text-red-800 mb-2">Acesso restrito</h2>
+            <p className="text-red-600">Esta página é exclusiva para profissionais e administradores.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -295,7 +374,7 @@ export default function DebugSchedulesPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-4">
-            🐛 Debug: Cronogramas
+            Debug: Cronogramas
           </h1>
 
           {/* Stats */}
@@ -338,11 +417,18 @@ export default function DebugSchedulesPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
+              <input
+                type="text"
+                placeholder="Filtrar por profissional..."
+                value={filterProfessional}
+                onChange={(e) => setFilterProfessional(e.target.value)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
               <button
                 onClick={loadAllData}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
-                🔄 Recarregar
+                Recarregar
               </button>
             </div>
           </div>
@@ -440,7 +526,7 @@ export default function DebugSchedulesPage() {
                                     <div className="text-xs text-gray-600 mt-1">
                                       Semana {instance.currentWeekNumber} |
                                       Aluno: {instance.studentId.slice(0, 8)}... |
-                                      Prof: {professionals[instance.professionalId] || instance.professionalId.slice(0, 8)}...
+                                      Prof: {professionals[instance.professionalId] || instance.professionalId?.slice(0, 8) || '—'}...
                                     </div>
                                   </div>
                                 </div>
@@ -455,12 +541,12 @@ export default function DebugSchedulesPage() {
                                   {/* Progress Cache */}
                                   {instance.progressCache && (
                                     <div className="bg-white rounded p-3 text-sm">
-                                      <div className="font-medium mb-2">📊 Progress Cache</div>
+                                      <div className="font-medium mb-2">Progress Cache</div>
                                       <div className="grid grid-cols-4 gap-2 text-xs">
                                         <div>Completadas: {instance.progressCache.completedActivities}/{instance.progressCache.totalActivities}</div>
                                         <div>Progresso: {instance.progressCache.completionPercentage?.toFixed(1)}%</div>
                                         <div>Pontos: {instance.progressCache.totalPointsEarned}</div>
-                                        <div>Streak: {instance.progressCache.streakDays} dias</div>
+                                        <div>Streak: {instance.progressCache?.streakDays ?? 0} dias</div>
                                         <div className="col-span-4 text-gray-500">
                                           Última atualização: {formatDate(instance.progressCache.lastUpdatedAt)}
                                         </div>
@@ -568,7 +654,7 @@ export default function DebugSchedulesPage() {
                                             {/* Daily Breakdown */}
                                             {snapshot.dailyBreakdown && (
                                               <div className="mt-2">
-                                                <div className="text-xs font-medium mb-1">📅 Por dia:</div>
+                                                <div className="text-xs font-medium mb-1">Por dia:</div>
                                                 <div className="flex space-x-1">
                                                   {Object.entries(snapshot.dailyBreakdown).map(([day, data]: [string, any]) => (
                                                     <div key={day} className="flex-1 bg-gray-50 p-1 rounded text-center">

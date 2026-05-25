@@ -4,14 +4,16 @@ import {
   query,
   where,
   getDocs,
-  orderBy,
   limit,
   DocumentData,
   doc,
   getDoc,
   updateDoc,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  documentId,
+  runTransaction,
+  QueryConstraint
 } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 import { Student, StudentProfile, UserRole } from '@/types/auth';
@@ -31,7 +33,7 @@ export class StudentService {
   ): Promise<Student> {
     try {
       // Buscar aluno
-      const studentRef = doc(firestore, 'students', studentId);
+      const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
       const studentDoc = await getDoc(studentRef);
 
       if (!studentDoc.exists()) {
@@ -77,7 +79,7 @@ export class StudentService {
         lastLoginAt: studentData.lastLoginAt?.toDate(),
         profile: {
           cpf: studentData.profile?.cpf || '',
-          birthday: studentData.profile?.birthday?.toDate() ?? new Date(),
+          birthday: studentData.profile?.birthday?.toDate() ?? undefined,
           phone: studentData.profile?.phone,
           school: studentData.profile?.school || '',
           grade: studentData.profile?.grade || '',
@@ -109,55 +111,50 @@ export class StudentService {
     professionalId: string
   ): Promise<void> {
     try {
-      const studentRef = doc(firestore, 'students', studentId);
+      const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
       const professionalRef = doc(firestore, 'professionals', professionalId);
 
-      // Verificar se ambos existem
-      const [studentDoc, professionalDoc] = await Promise.all([
-        getDoc(studentRef),
-        getDoc(professionalRef)
-      ]);
+      await runTransaction(firestore, async (transaction) => {
+        const [studentSnap, professionalSnap] = await Promise.all([
+          transaction.get(studentRef),
+          transaction.get(professionalRef)
+        ]);
 
-      if (!studentDoc.exists()) {
-        throw new Error('Aluno não encontrado');
-      }
+        if (!studentSnap.exists()) {
+          throw new Error('Aluno não encontrado');
+        }
 
-      if (!professionalDoc.exists()) {
-        throw new Error('Profissional não encontrado');
-      }
+        if (!professionalSnap.exists()) {
+          throw new Error('Profissional não encontrado');
+        }
 
-      const studentData = studentDoc.data();
-      const professionalData = professionalDoc.data();
+        const studentData = studentSnap.data();
+        const professionalData = professionalSnap.data();
 
-      // Verificar se o usuário é realmente um aluno
-      if (studentData.role !== 'student') {
-        throw new Error('Usuário não é um aluno');
-      }
+        if (studentData.role !== 'student') {
+          throw new Error('Usuário não é um aluno');
+        }
 
-      // Verificar se o profissional pode gerenciar alunos
-      if (!professionalData.profile?.canManageStudents && professionalData.role !== 'coordinator') {
-        throw new Error('Profissional não pode gerenciar alunos');
-      }
+        if (!professionalData.profile?.canManageStudents && professionalData.role !== 'coordinator') {
+          throw new Error('Profissional não pode gerenciar alunos');
+        }
 
-      // Verificar se já está atribuído
-      const currentAssigned = studentData.profile?.assignedProfessionals || [];
-      if (currentAssigned.includes(professionalId)) {
-        throw new Error('Aluno já está atribuído a este profissional');
-      }
+        const currentAssigned = studentData.profile?.assignedProfessionals || [];
+        if (currentAssigned.includes(professionalId)) {
+          throw new Error('Aluno já está atribuído a este profissional');
+        }
 
-      // Atualizar aluno: adicionar profissional à lista
-      await updateDoc(studentRef, {
-        'profile.assignedProfessionals': arrayUnion(professionalId),
-        updatedAt: new Date()
+        transaction.update(studentRef, {
+          'profile.assignedProfessionals': arrayUnion(professionalId),
+          updatedAt: new Date()
+        });
+
+        transaction.update(professionalRef, {
+          'profile.assignedStudents': arrayUnion(studentId),
+          updatedAt: new Date()
+        });
       });
 
-      // Atualizar profissional: adicionar aluno à lista
-      await updateDoc(professionalRef, {
-        'profile.assignedStudents': arrayUnion(studentId),
-        updatedAt: new Date()
-      });
-
-      // Registrar auditoria
       console.log(`Aluno ${studentId} atribuído ao profissional ${professionalId}`);
 
     } catch (error: any) {
@@ -174,45 +171,42 @@ export class StudentService {
     professionalId: string
   ): Promise<void> {
     try {
-      const studentRef = doc(firestore, 'students', studentId);
+      const studentRef = doc(firestore, this.COLLECTIONS.STUDENTS, studentId);
       const professionalRef = doc(firestore, 'professionals', professionalId);
 
-      // Verificar se ambos existem
-      const [studentDoc, professionalDoc] = await Promise.all([
-        getDoc(studentRef),
-        getDoc(professionalRef)
-      ]);
+      await runTransaction(firestore, async (transaction) => {
+        const [studentSnap, professionalSnap] = await Promise.all([
+          transaction.get(studentRef),
+          transaction.get(professionalRef)
+        ]);
 
-      if (!studentDoc.exists()) {
-        throw new Error('Aluno não encontrado');
-      }
+        if (!studentSnap.exists()) {
+          throw new Error('Aluno não encontrado');
+        }
 
-      if (!professionalDoc.exists()) {
-        throw new Error('Profissional não encontrado');
-      }
+        if (!professionalSnap.exists()) {
+          throw new Error('Profissional não encontrado');
+        }
 
-      const studentData = studentDoc.data();
-      const professionalData = professionalDoc.data();
+        const studentData = studentSnap.data();
+        const professionalData = professionalSnap.data();
 
-      // Verificar se está realmente atribuído
-      const currentAssigned = studentData.profile?.assignedProfessionals || [];
-      if (!currentAssigned.includes(professionalId)) {
-        throw new Error('Aluno não está atribuído a este profissional');
-      }
+        const currentAssigned = studentData.profile?.assignedProfessionals || [];
+        if (!currentAssigned.includes(professionalId)) {
+          throw new Error('Aluno não está atribuído a este profissional');
+        }
 
-      // Atualizar aluno: remover profissional da lista
-      await updateDoc(studentRef, {
-        'profile.assignedProfessionals': arrayRemove(professionalId),
-        updatedAt: new Date()
+        transaction.update(studentRef, {
+          'profile.assignedProfessionals': arrayRemove(professionalId),
+          updatedAt: new Date()
+        });
+
+        transaction.update(professionalRef, {
+          'profile.assignedStudents': arrayRemove(studentId),
+          updatedAt: new Date()
+        });
       });
 
-      // Atualizar profissional: remover aluno da lista
-      await updateDoc(professionalRef, {
-        'profile.assignedStudents': arrayRemove(studentId),
-        updatedAt: new Date()
-      });
-
-      // Registrar auditoria
       console.log(`Aluno ${studentId} removido do profissional ${professionalId}`);
 
     } catch (error: any) {
@@ -228,24 +222,21 @@ export class StudentService {
     studentIds: string[],
     professionalId: string
   ): Promise<{ success: string[]; failed: Array<{ studentId: string; error: string }> }> {
-    const results = {
-      success: [] as string[],
-      failed: [] as Array<{ studentId: string; error: string }>
-    };
+    const settled = await Promise.allSettled(
+      studentIds.map(studentId => this.assignStudentToProfessional(studentId, professionalId).then(() => studentId))
+    );
 
-    for (const studentId of studentIds) {
-      try {
-        await this.assignStudentToProfessional(studentId, professionalId);
-        results.success.push(studentId);
-      } catch (error: any) {
-        results.failed.push({
-          studentId,
-          error: error.message || 'Erro desconhecido'
-        });
-      }
-    }
-
-    return results;
+    return settled.reduce<{ success: string[]; failed: Array<{ studentId: string; error: string }> }>(
+      (acc, result, i) => {
+        if (result.status === 'fulfilled') {
+          acc.success.push(result.value);
+        } else {
+          acc.failed.push({ studentId: studentIds[i], error: (result.reason as any)?.message || 'Erro desconhecido' });
+        }
+        return acc;
+      },
+      { success: [], failed: [] }
+    );
   }
 
   /**
@@ -255,24 +246,21 @@ export class StudentService {
     studentIds: string[],
     professionalId: string
   ): Promise<{ success: string[]; failed: Array<{ studentId: string; error: string }> }> {
-    const results = {
-      success: [] as string[],
-      failed: [] as Array<{ studentId: string; error: string }>
-    };
+    const settled = await Promise.allSettled(
+      studentIds.map(studentId => this.removeStudentFromProfessional(studentId, professionalId).then(() => studentId))
+    );
 
-    for (const studentId of studentIds) {
-      try {
-        await this.removeStudentFromProfessional(studentId, professionalId);
-        results.success.push(studentId);
-      } catch (error: any) {
-        results.failed.push({
-          studentId,
-          error: error.message || 'Erro desconhecido'
-        });
-      }
-    }
-
-    return results;
+    return settled.reduce<{ success: string[]; failed: Array<{ studentId: string; error: string }> }>(
+      (acc, result, i) => {
+        if (result.status === 'fulfilled') {
+          acc.success.push(result.value);
+        } else {
+          acc.failed.push({ studentId: studentIds[i], error: (result.reason as any)?.message || 'Erro desconhecido' });
+        }
+        return acc;
+      },
+      { success: [], failed: [] }
+    );
   }
 
   /**
@@ -292,17 +280,17 @@ export class StudentService {
     }
   ): Promise<Student[]> {
     try {
-      const studentsRef = collection(firestore, 'students');
+      const studentsRef = collection(firestore, this.COLLECTIONS.STUDENTS);
 
       if (professionalRole === 'coordinator') {
         // Coordenador: Buscar TODOS os alunos do sistema
         console.log('📋 Coordenador acessando TODOS os alunos do sistema');
 
-        let q = query(
-          studentsRef,
-          where('role', '==', 'student'),
-          where('isActive', '==', true)
-        );
+        const constraints: QueryConstraint[] = [where('role', '==', 'student')];
+        if (options?.activeOnly !== false) {
+          constraints.push(where('isActive', '==', true));
+        }
+        let q = query(studentsRef, ...constraints);
 
         if (options?.filters?.grade) {
           q = query(q, where('profile.grade', '==', options.filters.grade));
@@ -334,12 +322,14 @@ export class StudentService {
         // Outros profissionais: Buscar apenas alunos atribuídos a eles
         console.log('📋 Profissional acessando seus alunos atribuídos');
 
-        let q = query(
-          studentsRef,
+        const constraints: QueryConstraint[] = [
           where('role', '==', 'student'),
-          where('isActive', '==', true),
           where('profile.assignedProfessionals', 'array-contains', professionalId)
-        );
+        ];
+        if (options?.activeOnly !== false) {
+          constraints.push(where('isActive', '==', true));
+        }
+        let q = query(studentsRef, ...constraints);
 
         if (options?.filters?.grade) {
           q = query(q, where('profile.grade', '==', options.filters.grade));
@@ -415,7 +405,7 @@ export class StudentService {
 
         let q = query(
           collection(firestore, this.COLLECTIONS.STUDENTS),
-          where('id', 'in', batchIds)
+          where(documentId(), 'in', batchIds)
         );
 
         if (options.activeOnly) {
@@ -430,10 +420,9 @@ export class StudentService {
           q = query(q, where('profile.school', '==', options.filters.school));
         }
 
-        q = query(q, orderBy('name'));
-
-        if (options.limit && students.length + batchSize > options.limit) {
+        if (options.limit) {
           const remaining = options.limit - students.length;
+          if (remaining <= 0) break;
           q = query(q, limit(remaining));
         }
 
@@ -459,7 +448,10 @@ export class StudentService {
         }
       }
 
-      // 3. Aplicar filtro de busca se necessário
+      // 3. Ordenar em memória (documentId() impede orderBy no Firestore)
+      students.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+
+      // 4. Aplicar filtro de busca se necessário
       if (options.search) {
         const searchLower = options.search.toLowerCase();
         return students.filter(student =>
@@ -509,7 +501,7 @@ export class StudentService {
       return temAtivo;
     } catch (error) {
       console.error(`❌ Erro ao verificar cronograma ativo para aluno ${studentId}:`, error);
-      return false;
+      throw error;
     }
   }
 
@@ -524,7 +516,7 @@ export class StudentService {
     hasActiveSchedule: boolean;
   }> {
     try {
-      const studentDoc = await getDoc(doc(firestore, 'students', studentId));
+      const studentDoc = await getDoc(doc(firestore, this.COLLECTIONS.STUDENTS, studentId));
       if (!studentDoc.exists()) {
         throw new Error('Aluno não encontrado');
       }

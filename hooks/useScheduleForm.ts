@@ -6,8 +6,11 @@ import { ScheduleService } from '@/lib/services/ScheduleService';
 import { CreateScheduleDTO, CreateActivityDTO } from '@/types/schedule';
 import { ValidationUtils } from '@/lib/utils/validationUtils';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+const debugLog = (...args: unknown[]) => { if (DEBUG) console.log(...args); };
+
 export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
-  console.log('🎯 useScheduleForm chamado com initialData:', {
+  debugLog('🎯 useScheduleForm chamado com initialData:', {
     hasInitialData: !!initialData,
     name: initialData?.name,
     activitiesCount: initialData?.activities?.length,
@@ -29,10 +32,10 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
   };
 
   const getInitialState = (data?: Partial<CreateScheduleDTO>): CreateScheduleDTO => {
-    console.log('🔄 getInitialState chamado com data:', data);
+    debugLog('🔄 getInitialState chamado com data:', data);
 
     if (data && Object.keys(data).length > 0) {
-      console.log('📥 Usando data para estado inicial:', {
+      debugLog('📥 Usando data para estado inicial:', {
         name: data.name,
         activitiesCount: data.activities?.length,
         activeDays: data.activeDays
@@ -52,7 +55,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
       };
     }
 
-    console.log('🆕 Usando estado padrão (criação)');
+    debugLog('🆕 Usando estado padrão (criação)');
     return {
       name: '',
       description: '',
@@ -77,11 +80,11 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
     }
 
     if (Object.keys(initialData).length === 0 || !initialData.name) {
-      console.log('⚠️ initialData vazio ou incompleto, ignorando...');
+      debugLog('⚠️ initialData vazio ou incompleto, ignorando...');
       return;
     }
 
-    console.log('♻️ REIDRATAÇÃO: Atualizando formulário com initialData:', {
+    debugLog('♻️ REIDRATAÇÃO: Atualizando formulário com initialData:', {
       name: initialData.name,
       activities: initialData.activities?.length,
       activeDays: initialData.activeDays
@@ -89,7 +92,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
 
     const newState = getInitialState(initialData);
 
-    console.log('📋 Novo estado definido:', {
+    debugLog('📋 Novo estado definido:', {
       name: newState.name,
       activities: newState.activities.length,
       activeDays: newState.activeDays
@@ -101,7 +104,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
   }, [initialData]);
 
   useEffect(() => {
-    console.log('📊 formData atualizado:', {
+    debugLog('📊 formData atualizado:', {
       name: formData.name,
       activities: formData.activities.length,
       activeDays: formData.activeDays
@@ -109,7 +112,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
   }, [formData]);
 
   const updateField = useCallback((field: keyof CreateScheduleDTO, value: any) => {
-    console.log(`📝 Atualizando campo ${field}:`, value);
+    debugLog(`📝 Atualizando campo ${field}:`, value);
 
     setFormData(prev => ({
       ...prev,
@@ -126,7 +129,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
   }, [errors]);
 
   const addActivity = useCallback((activity: CreateActivityDTO) => {
-    console.log('➕ Adicionando atividade:', {
+    debugLog('➕ Adicionando atividade:', {
       title: activity.title,
       day: activity.dayOfWeek,
       orderIndex: activity.orderIndex
@@ -162,7 +165,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
       }
 
       const newActivities = [...prev.activities, activityWithAdjustedIndex];
-      console.log(`✅ Atividade adicionada. Total: ${newActivities.length}`);
+      debugLog(`✅ Atividade adicionada. Total: ${newActivities.length}`);
 
       return {
         ...prev,
@@ -172,7 +175,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
   }, [errors]);
 
   const updateActivity = useCallback((index: number, activity: Partial<CreateActivityDTO>) => {
-    console.log('✏️ Atualizando atividade:', { index, title: activity.title });
+    debugLog('✏️ Atualizando atividade:', { index, title: activity.title });
 
     setFormData(prev => {
       if (index < 0 || index >= prev.activities.length) {
@@ -202,7 +205,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
   }, []);
 
   const removeActivity = useCallback((index: number) => {
-    console.log('🗑️ Removendo atividade:', index);
+    debugLog('🗑️ Removendo atividade:', index);
 
     setFormData(prev => {
       if (index < 0 || index >= prev.activities.length) {
@@ -224,7 +227,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
         return activity;
       });
 
-      console.log(`✅ Atividade removida. Restantes: ${reorderedActivities.length}`);
+      debugLog(`✅ Atividade removida. Restantes: ${reorderedActivities.length}`);
 
       return {
         ...prev,
@@ -234,7 +237,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
   }, []);
 
   const validateForm = useCallback((): boolean => {
-    console.log('🔍 Validando formulário...');
+    debugLog('🔍 Validando formulário...');
     const validation = ValidationUtils.validateScheduleData(formData);
 
     if (!validation.isValid) {
@@ -267,13 +270,13 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
       return false;
     }
 
-    console.log('✅ Formulário válido');
+    debugLog('✅ Formulário válido');
     setErrors({});
     return true;
   }, [formData]);
 
   const submitForm = useCallback(async (professionalId: string) => {
-    console.log('🚀 Submetendo formulário (criação)...', {
+    debugLog('🚀 Submetendo formulário (criação)...', {
       professionalId,
       name: formData.name,
       activities: formData.activities.length
@@ -286,14 +289,14 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
     setSubmitting(true);
     try {
       const sanitizedData = ValidationUtils.sanitizeScheduleData(formData);
-      console.log('📤 Dados sanitizados para envio:', sanitizedData);
+      debugLog('📤 Dados sanitizados para envio:', sanitizedData);
 
       const result = await ScheduleService.createScheduleTemplate(
         professionalId,
         sanitizedData
       );
 
-      console.log('✅ Cronograma criado com sucesso:', result.scheduleId);
+      debugLog('✅ Cronograma criado com sucesso:', result.scheduleId);
 
       if (!initialData) {
         const today = new Date();
@@ -327,7 +330,7 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
   }, [formData, validateForm, initialData]);
 
   const updateExistingSchedule = useCallback(async (scheduleId: string, professionalId: string) => {
-    console.log('🔄 Atualizando cronograma existente:', { scheduleId, professionalId });
+    debugLog('🔄 Atualizando cronograma existente:', { scheduleId, professionalId });
 
     if (!validateForm()) {
       throw new Error('Formulário inválido. Corrija os erros antes de atualizar.');
@@ -336,15 +339,15 @@ export function useScheduleForm(initialData?: Partial<CreateScheduleDTO>) {
     setSubmitting(true);
     try {
       const sanitizedData = ValidationUtils.sanitizeScheduleData(formData);
-      console.log('📤 Dados para atualização:', sanitizedData);
+      debugLog('📤 Dados para atualização:', sanitizedData);
 
-      // 🔥 CORREÇÃO: Removido o argumento extra (professionalId) da chamada
       await ScheduleService.updateScheduleTemplate(
         scheduleId,
+        professionalId,
         sanitizedData
       );
 
-      console.log('✅ Cronograma atualizado com sucesso. ID:', scheduleId);
+      debugLog('✅ Cronograma atualizado com sucesso. ID:', scheduleId);
 
       return scheduleId;
     } catch (error: any) {

@@ -38,8 +38,7 @@ import { useStudentAnalytics } from '@/hooks/useStudentAnalytics';
 import { useAuth } from '@/context/AuthContext';
 import { getGradeLabel, getSchoolLabel } from '@/lib/utils/constants';
 
-// 🔥 IMPORTS PARA O FIREBASE PLUGAR OS DADOS REAIS
-import { collectionGroup, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 
 /**
@@ -74,8 +73,6 @@ export default function StudentAnalyticsPage() {
   const [expandedWeeks, setExpandedWeeks] = useState<number[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'gad7' | 'insights'>('overview');
 
-  // 🔥 ESTADOS PARA CARREGAR AS ATIVIDADES DA PLANILHA (MAPEADO PELO SEU TXT)
-  const [completedActivities, setCompletedActivities] = useState<any[]>([]);
   const [dbAdherence, setDbAdherence] = useState<number>(0);
   const [isFetching, setIsFetching] = useState(false);
 
@@ -90,131 +87,44 @@ export default function StudentAnalyticsPage() {
     isAtRisk
   } = useStudentAnalytics(studentId);
 
-  /**
-   * Busca dados reais diretamente do Firestore para complementar analytics.
-   *
-   * O que busca:
-   * 1. Adesão → scheduleInstances.progressCache
-   * 2. Atividades concluídas → activityProgress
-   *
-   * Motivo:
-   * - snapshots podem estar desatualizados
-   * - dados reais garantem precisão
-   *
-   * ⚠️ Risco:
-   * - múltiplas queries pesadas (collectionGroup)
-   * - pode impactar performance
-   */
+  // Busca adesão real de scheduleInstances (top-level collection, sem collectionGroup)
   useEffect(() => {
-    const fetchNexusData = async () => {
+    const fetchAdherence = async () => {
       if (!studentId) return;
       setIsFetching(true);
       try {
-        
-        /**
-         * Busca instâncias de cronograma do aluno.
-         *
-         * Estratégia:
-         * - usa collectionGroup → busca global
-         * - pega maior completionPercentage como adesão real
-         *
-         * ⚠️ Risco:
-         * - múltiplas instâncias podem distorcer resultado
-         */
         const qInstances = query(
-          collectionGroup(firestore, 'scheduleInstances'),
+          collection(firestore, 'scheduleInstances'),
           where('studentId', '==', studentId)
         );
         const snapInstances = await getDocs(qInstances);
         if (!snapInstances.empty) {
           const percentages = snapInstances.docs.map(d => d.data().progressCache?.completionPercentage || 0);
-          setDbAdherence(Math.max(...percentages)); 
+          setDbAdherence(Math.max(...percentages));
         }
-
-        /**
-         * Busca atividades concluídas para reconstruir dados reais.
-         *
-         * Campos extraídos:
-         * - título
-         * - tipo
-         * - duração estimada
-         * - anexos
-         *
-         * ⚠️ Importante:
-         * duração = estimatedDuration (não tempo real)
-         */
-        const activityCollections = ['activityProgress'];
-        let allDocs: any[] = [];
-
-        for (const col of activityCollections) {
-          const q = query(
-            collectionGroup(firestore, col),
-            where('studentId', '==', studentId),
-            where('status', '==', 'completed')
-          );
-          const snap = await getDocs(q);
-
-          /**
-           * Normaliza estrutura de diferentes formatos de atividade.
-           *
-           * Motivo:
-           * - compatibilidade com versões antigas
-           * - evitar quebra na UI
-           */
-          snap.forEach(doc => {
-            const d = doc.data();
-            const snapshot = d.activitySnapshot || {};
-            const meta = snapshot.metadata || d.metadata || {};
-
-            allDocs.push({
-              id: doc.id,
-              name: snapshot.title || d.title || 'Atividade',
-              activityType: snapshot.type || d.type || 'quick',
-              subject: meta.subject || null,
-              gradeLevel: meta.gradeLevel || null,
-              description: snapshot.description || d.description || snapshot.instructions || d.instructions || '',
-              completedAt: d.updatedAt || d.createdAt || null,
-              duration: Number(meta.estimatedDuration || 15),
-              attachments: (d.executionData?.attachments || []) as string[]
-            });
-          });
-        }
-
-        // Ordenar pela data de conclusão mais recente
-        allDocs.sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
-        setCompletedActivities(allDocs);
       } catch (err) {
-        console.error("Erro ao plugar dados do banco nam5:", err);
+        console.error('Erro ao buscar adesão:', err);
       } finally {
         setIsFetching(false);
       }
     };
 
-    fetchNexusData();
+    fetchAdherence();
   }, [studentId]);
 
   useEffect(() => {
     if (studentId) {
-      loadStudentData(12); // Carregar 12 semanas de histórico
+      loadStudentData(52); // Mesma janela que /student/progress (52 semanas)
     }
   }, [studentId, loadStudentData]);
 
-  /**
-   * Soma total do tempo estimado das atividades concluídas.
-   *
-   * ⚠️ IMPORTANTE:
-   * Não representa tempo real do aluno.
-   * Baseado em metadata.estimatedDuration.
-   */
+  // Usa completedActivities do hook (mesmo dado que /student/progress: activityProgress where status=completed)
+  const completedActivities = useMemo(() => student?.completedActivities ?? [], [student]);
+
   const totalRealTime = useMemo(() => {
     return completedActivities.reduce((acc, act) => acc + (act.duration || 0), 0);
   }, [completedActivities]);
 
-  /**
-   * Calcula média de tempo por atividade.
-   *
-   * ⚠️ Depende da qualidade do estimatedDuration
-   */
   const avgTimePerActivity = useMemo(() => {
     return completedActivities.length > 0 ? Math.round(totalRealTime / completedActivities.length) : 0;
   }, [completedActivities, totalRealTime]);

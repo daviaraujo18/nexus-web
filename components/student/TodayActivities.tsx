@@ -48,13 +48,13 @@ export default function TodayActivities({
   const sortedActivities = [...filteredActivities].sort((a, b) => {
     switch (sortBy) {
       case 'time':
-        return a.activitySnapshot.metadata.estimatedDuration - b.activitySnapshot.metadata.estimatedDuration;
+        return (a.activitySnapshot?.metadata?.estimatedDuration ?? 0) - (b.activitySnapshot?.metadata?.estimatedDuration ?? 0);
       case 'priority':
-        const priorityA = a.activitySnapshot.scoring.isRequired ? 1 : 0;
-        const priorityB = b.activitySnapshot.scoring.isRequired ? 1 : 0;
+        const priorityA = a.activitySnapshot?.scoring?.isRequired ? 1 : 0;
+        const priorityB = b.activitySnapshot?.scoring?.isRequired ? 1 : 0;
         return priorityB - priorityA;
       case 'type':
-        return a.activitySnapshot.type.localeCompare(b.activitySnapshot.type);
+        return (a.activitySnapshot?.type ?? '').localeCompare(b.activitySnapshot?.type ?? '');
       default:
         return 0;
     }
@@ -252,20 +252,20 @@ export default function TodayActivities({
                       <div
                         className={`
                           w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center flex-shrink-0
-                          ${getActivityIconStyle(activity.activitySnapshot.type as ActivityType, isCompleted)}
+                          ${getActivityIconStyle((activity.activitySnapshot?.type || 'quick') as ActivityType, isCompleted)}
                         `}
                       >
-                        {getActivityIcon(activity.activitySnapshot.type)}
+                        {getActivityIcon(activity.activitySnapshot?.type || 'quick')}
                       </div>
 
                       {/* INFO */}
                       <div className="flex flex-col gap-1 flex-1 min-w-0">
                         <div className="flex items-center gap-1 md:gap-2">
                           <span className="text-xs md:text-sm font-semibold text-slate-900 line-clamp-2 md:line-clamp-1">
-                            {activity.activitySnapshot.title}
+                            {activity.activitySnapshot?.title || 'Atividade'}
                           </span>
 
-                          {activity.activitySnapshot.scoring.isRequired && (
+                          {activity.activitySnapshot?.scoring?.isRequired && (
                             <span
                               title="Atividade obrigatória"
                               className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0 hidden md:block"
@@ -296,15 +296,15 @@ export default function TodayActivities({
                   <div className="flex flex-wrap gap-2 md:gap-3 text-slate-500 text-[10px] md:text-xs mt-2 md:mt-3">
                     <div className="flex items-center gap-1">
                       <FaClock className="w-2.5 h-2.5 md:w-3 md:h-3" />
-                      {activity.activitySnapshot.metadata.estimatedDuration}min
+                      {activity.activitySnapshot?.metadata?.estimatedDuration ?? 0}min
                     </div>
 
                     <div className="flex items-center gap-1">
                       <FaStar className="w-2.5 h-2.5 md:w-3 md:h-3" />
-                      {activity.activitySnapshot.scoring.pointsOnCompletion}pts
+                      {activity.activitySnapshot?.scoring?.pointsOnCompletion ?? 0}pts
                     </div>
 
-                    {activity.activitySnapshot.metadata.difficulty && (
+                    {activity.activitySnapshot?.metadata?.difficulty && (
                       <div className={`flex items-center gap-1 px-1 py-0.5 rounded text-[9px] md:text-[10px] font-medium ${
                         activity.activitySnapshot.metadata.difficulty === 'easy' ? 'bg-emerald-100 text-emerald-700' :
                         activity.activitySnapshot.metadata.difficulty === 'medium' ? 'bg-amber-100 text-amber-700' :

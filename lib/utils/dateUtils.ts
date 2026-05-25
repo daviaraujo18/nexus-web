@@ -9,13 +9,11 @@ export class DateUtils {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
     const day = d.getDay(); // 0 = Domingo, 1 = Segunda...
-    
     // Ajuste: Se for domingo (0), volta 6 dias. Se não, volta (dia - 1)
     const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(d.setDate(diff));
-    
-    console.log(`📏 [DateUtils] Calculando Início da Semana para ${date.toLocaleDateString()}:`, monday.toLocaleDateString());
-    return monday;
+    d.setDate(diff);
+    d.setHours(0, 0, 0, 0); // Re-normaliza após setDate (proteção DST)
+    return new Date(d);
   }
 
   /**
@@ -31,16 +29,25 @@ export class DateUtils {
   }
 
   /**
+   * Converte dayOfWeek de Convenção A (0=Dom, 1=Seg…6=Sáb) para Convenção B (0=Seg…6=Dom).
+   * Convencção A é a usada nos templates; Convenção B é a usada internamente nos relatórios.
+   */
+  static convertDayOfWeekToMondayBased(dayOfWeekSundayBased: number): number {
+    return (dayOfWeekSundayBased + 6) % 7;
+  }
+
+  /**
    * 🛠️ Calcula a data real de uma atividade baseada no dia da semana (0-6)
-   * Onde 0 = Segunda, 6 = Domingo (seguindo seu padrão de cronograma)
+   * dayOfWeek segue Convenção A (0=Dom, 1=Seg, ..., 6=Sáb) conforme armazenado
+   * no template e no activityProgress.
    */
   static calculateActivityDate(weekStartDate: Date, dayOfWeek: number): Date {
     const result = new Date(weekStartDate);
-    // Se weekStartDate é Segunda, somar dayOfWeek (0 = Segunda, 1 = Terça...)
-    result.setDate(weekStartDate.getDate() + dayOfWeek);
-    result.setHours(0, 0, 0, 0);
-    
-    return result;
+    // Converte de Conv A (0=Dom) para Conv B (0=Seg) antes de somar
+    // Conv B é usada internamente: 0=Segunda (weekStartDate), 1=Terça...
+    const scheduleDay = DateUtils.convertDayOfWeekToMondayBased(dayOfWeek);
+    result.setDate(weekStartDate.getDate() + scheduleDay);
+    return new Date(result.getFullYear(), result.getMonth(), result.getDate(), 12, 0, 0);
   }
 
   /**
@@ -63,13 +70,23 @@ export class DateUtils {
   }
 
   static addWeeks(date: Date, weeks: number): Date {
-    const result = new Date(date);
-    result.setDate(result.getDate() + weeks * 7);
-    return result;
+    // Construir via componentes locais preserva o horário original
+    // e evita edge case de DST onde setDate/setHours podem avançar/retroceder 1h
+    // em dias de início/término de horário de verão.
+    return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate() + weeks * 7,
+      date.getHours(),
+      date.getMinutes(),
+      date.getSeconds(),
+      date.getMilliseconds()
+    );
   }
 
+  // Retorna 0=Seg, 1=Ter, ..., 6=Dom (convenção do sistema, não a JS nativa 0=Dom)
   static getDayOfWeek(date: Date): number {
-    return date.getDay();
+    return (date.getDay() + 6) % 7;
   }
 
   static getDaysBetween(d1: Date, d2: Date): number {

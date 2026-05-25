@@ -37,6 +37,7 @@ import { collectionGroup, collection, query, where, getDocs } from 'firebase/fir
 import { firestore } from '@/firebase/config';
 import SubjectBarChart, { computeSubjectStats, SubjectStat } from '@/components/charts/SubjectBarChart';
 import { GRADE_OPTIONS, getGradeLabel } from '@/lib/utils/constants';
+import { Student } from '@/types/auth';
 
 /**
  * Dashboard operacional do profissional.
@@ -99,8 +100,8 @@ export default function ProfessionalDashboardPage() {
   });
   const [loadingStats, setLoadingStats] = useState(true);
   const [recentActivities, setRecentActivities] = useState<any[]>([]);
-  const [topStudents, setTopStudents] = useState<any[]>([]);
-  const [allStudents, setAllStudents] = useState<any[]>([]);
+  const [topStudents, setTopStudents] = useState<Array<Student & { engagement: number }>>([]);
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
   const [chartGrade, setChartGrade] = useState<string>('');
   const [chartStudentId, setChartStudentId] = useState<string>('');
   const [chartData, setChartData] = useState<SubjectStat[]>([]);
@@ -146,14 +147,14 @@ export default function ProfessionalDashboardPage() {
             where('isActive', '==', true)
           )
         );
-        const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as Student));
         setAllStudents(students);
         
         // Contar instâncias ativas e calcular engajamento
         let activeInstances = 0;
         let totalCompletion = 0;
         let totalInstances = 0;
-        const studentEngagement: any[] = [];
+        const studentEngagement: Array<Student & { engagement: number }> = [];
         
         /**
          * Calcula engajamento por aluno.
@@ -178,10 +179,8 @@ export default function ProfessionalDashboardPage() {
               totalCompletion += instance.progressCache.completionPercentage;
               totalInstances++;
               studentEngagement.push({
-                id: student.id,
-                name: student.name,
+                ...student,
                 engagement: instance.progressCache.completionPercentage,
-                streak: instance.progressCache.streakDays || 0
               });
             }
           }

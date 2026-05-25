@@ -1,4 +1,20 @@
 // components/analytics/AnalyticsDashboard.tsx
+//
+// COMPONENTE LEGADO — NÃO UTILIZADO EM PRODUÇÃO
+//
+// Este componente foi a implementação original do dashboard analítico do profissional.
+// Foi substituído pela implementação inline em `app/professional/analytics/page.tsx`,
+// que migrou para o hook `useAnalytics` e passou a incluir o dashboard e a lista de
+// alunos na mesma página (via alternância de `view`).
+//
+// Diferenças em relação à versão atual:
+//   - Consumia `SimpleReportService` e `StudentService` diretamente
+//   - Não usava `useAnalytics` nem `SnapshotAggregator`
+//   - Não tinha paginação nem filtros de escola/série no ranking
+//
+// Mantido para referência histórica e para facilitar eventual rollback
+// ou reaproveitamento de partes da UI. Não deve ser importado por novas rotas.
+//
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -95,7 +111,7 @@ export default function AnalyticsDashboard() {
       setLoading(true);
       setError(null);
 
-      console.log('🔄 Carregando dados do dashboard...');
+      console.log('Carregando dados do dashboard...');
 
       // 1. Buscar alunos atribuídos ao profissional
       const students = await StudentService.getStudentsByProfessionalOrAll(
@@ -107,7 +123,7 @@ export default function AnalyticsDashboard() {
         }
       );
 
-      console.log(`📊 ${students.length} alunos encontrados`);
+      console.log(` ${students.length} alunos encontrados`);
 
       if (students.length === 0) {
         setMetrics({
@@ -136,7 +152,7 @@ export default function AnalyticsDashboard() {
       const reports = await Promise.all(reportPromises);
       const validReports = reports.filter((r): r is StudentReport => r !== null);
 
-      console.log(`📈 ${validReports.length} relatórios gerados com sucesso`);
+      console.log(` ${validReports.length} relatórios gerados com sucesso`);
 
       // 3. Calcular métricas agregadas
       const aggregatedMetrics = await calculateAggregatedMetrics(validReports, students);

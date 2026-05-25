@@ -21,6 +21,7 @@ import {
 } from '@/types/schedule';
 import { ScheduleInstanceService } from './ScheduleInstanceService';
 import { DateUtils } from '@/lib/utils/dateUtils';
+import { ActivityData, calculateWeeklyMetrics as computeMetrics } from '@/lib/utils/weeklyMetrics';
 
 export class WeeklySnapshotService {
   private static readonly COLLECTIONS = {
@@ -75,6 +76,7 @@ export class WeeklySnapshotService {
 
       // 5. Criar ID único
       const snapshotId = this.generateSnapshotId(
+        instance.studentId,
         dto.scheduleInstanceId,
         dto.weekNumber
       );
@@ -94,7 +96,7 @@ export class WeeklySnapshotService {
         dailyBreakdown,
         activityTypeBreakdown,
         metadata: {
-          scheduleTemplateName: 'Não disponível', // Seria buscado do template
+          scheduleTemplateName: instance.scheduleName || 'Cronograma',
           scheduleTemplateId: instance.scheduleTemplateId,
           professionalId: instance.professionalId,
           generatedBy: 'system',
@@ -138,72 +140,18 @@ export class WeeklySnapshotService {
   }
 
   /**
-   * Calcula métricas básicas da semana
+   * Calcula métricas básicas da semana usando shared utils
    */
   private static calculateWeeklyMetrics(progress: ActivityProgress[]) {
-    const total = progress.length;
-    const completed = progress.filter(p => p.status === 'completed').length;
-    const skipped = progress.filter(p => p.status === 'skipped').length;
-
-    const completionRate = total > 0 ? (completed / total) * 100 : 0;
-
-    // Pontuação total
-    const totalPoints = progress
-      .filter(p => p.status === 'completed')
-      .reduce((sum, p) => sum + (p.scoring?.pointsEarned || 0), 0);
-
-    const averagePoints = completed > 0 ? totalPoints / completed : 0;
-
-    // Tempo total
-    const totalTime = progress
-      .filter(p => p.status === 'completed' && p.executionData?.timeSpent)
-      .reduce((sum, p) => sum + (p.executionData!.timeSpent || 0), 0);
-
-    const averageTime = completed > 0 ? totalTime / completed : 0;
-
-    // Consistência (dias únicos com atividades completadas)
-    const uniqueDays = new Set(
-      progress
-        .filter(p => p.status === 'completed')
-        .map(p => p.dayOfWeek)
-    ).size;
-
-    const consistencyScore = (uniqueDays / 7) * 100;
-
-    // Aderência (completou no dia correto)
-    const onTimeActivities = progress.filter(p => {
-      if (p.status !== 'completed' || !p.completedAt || !p.scheduledDate) return false;
-      return DateUtils.isSameDay(p.completedAt, p.scheduledDate);
-    }).length;
-
-    const adherenceScore = completed > 0 ? (onTimeActivities / completed) * 100 : 0;
-
-    // Streak no final da semana (último dia com atividade)
-    let streak = 0;
-    const completedDates = progress
-      .filter(p => p.status === 'completed' && p.completedAt)
-      .map(p => p.completedAt!.toISOString().split('T')[0])
-      .sort();
-
-    if (completedDates.length > 0) {
-      const lastDate = new Date(completedDates[completedDates.length - 1]);
-      const today = new Date();
-      streak = DateUtils.getDaysBetween(lastDate, today) + 1;
-    }
-
-    return {
-      totalActivities: total,
-      completedActivities: completed,
-      skippedActivities: skipped,
-      completionRate: Math.round(completionRate),
-      totalPointsEarned: totalPoints,
-      averagePointsPerActivity: parseFloat(averagePoints.toFixed(1)),
-      totalTimeSpent: totalTime,
-      averageTimePerActivity: parseFloat(averageTime.toFixed(1)),
-      consistencyScore: Math.round(consistencyScore),
-      adherenceScore: Math.round(adherenceScore),
-      streakAtEndOfWeek: streak
-    };
+    const adapted: ActivityData[] = progress.map(p => ({
+      status: p.status,
+      dayOfWeek: p.dayOfWeek,
+      scoring: p.scoring,
+      executionData: p.executionData,
+      scheduledDate: p.scheduledDate,
+      completedAt: p.completedAt,
+    }));
+    return computeMetrics(adapted);
   }
 
   /**
@@ -367,6 +315,9 @@ export class WeeklySnapshotService {
         where('weekNumber', '==', weekNumber),
         where('isActive', '==', true)
       );
+      // Nota: a query usa scheduleInstanceId+weekNumber (sem studentId)
+      // porque GenerateSnapshotDTO não carrega studentId.
+      // O ID do documento inclui studentId, mas a query busca por campos.
 
       const snapshot = await getDocs(q);
 
@@ -394,9 +345,10 @@ export class WeeklySnapshotService {
    * Gera ID único para snapshot
    */
   private static generateSnapshotId(
+    studentId: string,
     scheduleInstanceId: string,
     weekNumber: number
   ): string {
-    return `snapshot_${scheduleInstanceId}_week${weekNumber}`;
+    return `${studentId}_${scheduleInstanceId}_week_${weekNumber}`;
   }
 }

@@ -230,10 +230,10 @@ export default function DebugSchedulesScannerPage() {
 
   const getActionLabel = (action: string) => {
     switch (action) {
-      case 'deactivated': return '🔴 Desativado';
-      case 'already_inactive': return '⚪ Já inativo';
-      case 'still_active': return '🟢 Ativo';
-      case 'error': return '🟠 Erro';
+      case 'deactivated': return ' Desativado';
+      case 'already_inactive': return ' Já inativo';
+      case 'still_active': return ' Ativo';
+      case 'error': return ' Erro';
       default: return action;
     }
   };
@@ -276,7 +276,7 @@ export default function DebugSchedulesScannerPage() {
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-3xl font-bold text-gray-900">
-              🔍 Scanner de Cronogramas
+              Scanner de Cronogramas
             </h1>
             <button
               onClick={() => router.push('/debug/schedules')}
@@ -310,7 +310,7 @@ export default function DebugSchedulesScannerPage() {
           {autoScanEnabled && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
               <div className="flex items-start">
-                <span className="text-yellow-600 text-xl mr-3">⚠️</span>
+                <span className="text-yellow-600 text-xl mr-3"></span>
                 <div>
                   <h3 className="font-medium text-yellow-800">Cronogramas expirados detectados</h3>
                   <p className="text-yellow-700 text-sm">
@@ -345,7 +345,6 @@ export default function DebugSchedulesScannerPage() {
                     </>
                   ) : (
                     <>
-                      <span>🔍</span>
                       <span>Executar Varredura</span>
                     </>
                   )}
@@ -366,7 +365,7 @@ export default function DebugSchedulesScannerPage() {
                   onClick={loadSchedules}
                   className="px-4 py-3 text-gray-600 hover:text-gray-900 border rounded-lg"
                 >
-                  🔄 Recarregar
+                  Recarregar
                 </button>
               </div>
 
@@ -463,9 +462,9 @@ export default function DebugSchedulesScannerPage() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getStatusColor(schedule.status)}`}>
-                        {schedule.status === 'active' && '✅ Ativo'}
-                        {schedule.status === 'expired' && '❌ Expirado'}
-                        {schedule.status === 'inactive' && '⚪ Inativo'}
+                        {schedule.status === 'active' && ' Ativo'}
+                        {schedule.status === 'expired' && ' Expirado'}
+                        {schedule.status === 'inactive' && ' Inativo'}
                       </span>
                       <span className="text-xs bg-gray-100 px-2 py-1 rounded">
                         {schedule.category}
@@ -507,7 +506,7 @@ export default function DebugSchedulesScannerPage() {
                     </code>
                     {schedule.isExpired && schedule.isActive !== false && (
                       <span className="ml-2 text-red-600 font-medium">
-                        ⚠️ Deveria estar inativo!
+                        Deveria estar inativo!
                       </span>
                     )}
                   </div>

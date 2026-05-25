@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
+  FaChevronLeft,
   FaChartLine,
   FaTrophy,
   FaFire,
@@ -55,14 +56,30 @@ interface WeeklyProgress {
   trend: 'up' | 'down' | 'stable';
   isImprovement: boolean;
   isDecline: boolean;
+  scheduleName?: string;
 }
 
 export default function ProgressTracking() {
   // 1. IMPORTAÇÃO CORRETA E LIMPA: Puxamos o "data" REAL que o novo hook gera consultando o banco
-  const { data, loading, error, refresh } = useStudentWeeklyProgress();
+  const { data, loading, error, refresh, selectedDate, setSelectedDate, availableMonths } = useStudentWeeklyProgress();
   
   const [activeTab, setActiveTab] = useState<'overview' | 'achievements' | 'stats'>('overview');
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
+
+  const navigateMonth = (direction: -1 | 1) => {
+    const newDate = new Date(selectedDate);
+    newDate.setMonth(newDate.getMonth() + direction);
+    const now = new Date();
+    if (newDate > now) return;
+    setSelectedDate(newDate);
+  };
+
+  const currentMonthLabel = selectedDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
+  const now = new Date();
+  const canGoNext = selectedDate.getFullYear() < now.getFullYear() ||
+    (selectedDate.getFullYear() === now.getFullYear() && selectedDate.getMonth() < now.getMonth());
+  const canGoPrev = true;
 
   useEffect(() => {
     console.log(`👁️ [UI-RENDER] Renderizando ProgressTracking. Aba ativa: ${activeTab}`);
@@ -104,7 +121,8 @@ export default function ProgressTracking() {
         completedActivities: snapshot.metrics.completedActivities,
         trend,
         isImprovement: improvement > 5,
-        isDecline: improvement < -5
+        isDecline: improvement < -5,
+        scheduleName: (snapshot as any).scheduleName || (snapshot as any).metadata?.scheduleName,
       };
     }).sort((a: WeeklyProgress, b: WeeklyProgress) => b.weekNumber - a.weekNumber);
   };
@@ -442,15 +460,46 @@ export default function ProgressTracking() {
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center">
                   <FaCalendarWeek className="w-5 h-5 text-indigo-600" />
                 </div>
-                <div>
-                  <h3 className="font-bold text-gray-900">Histórico Semanal</h3>
-                  <p className="text-sm text-gray-600">{weeklyProgress.length} semanas analisadas</p>
+                  <div>
+                    <h3 className="font-bold text-gray-900">Histórico Semanal</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      <button
+                        onClick={() => navigateMonth(-1)}
+                        disabled={!canGoPrev}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          canGoPrev
+                            ? 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
+                            : 'text-gray-300 cursor-not-allowed'
+                        }`}
+                        title="Mês anterior"
+                      >
+                        <FaChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-sm font-medium text-gray-700 min-w-[140px] text-center capitalize">
+                        {currentMonthLabel}
+                      </span>
+                      <button
+                        onClick={() => navigateMonth(1)}
+                        disabled={!canGoNext}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          canGoNext
+                            ? 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
+                            : 'text-gray-300 cursor-not-allowed'
+                        }`}
+                        title="Próximo mês"
+                      >
+                        <FaChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                  </div>
                 </div>
               </div>
               
               <div className="flex items-center gap-2">
                 <div className="text-sm text-gray-500">Tendência:</div>
-                <div className={`px-3 py-1 rounded-full text-xs font-medium border ${getTrendColor(data.performanceTrend)}`}>
+                <div
+                  className={`px-3 py-1 rounded-full text-xs font-medium border ${getTrendColor(data.performanceTrend)}`}
+                  title="Baseada nas semanas do mês selecionado"
+                >
                   {data.performanceTrend === 'improving' ? 'Melhorando' :
                     data.performanceTrend === 'declining' ? 'Precisa de atenção' : 'Estável'}
                 </div>
@@ -489,6 +538,11 @@ export default function ProgressTracking() {
                                 <span className="font-semibold text-gray-900">
                                   Semana {week.weekNumber}
                                 </span>
+                                {week.scheduleName && (
+                                  <span className="text-xs text-gray-400 font-normal">
+                                    {week.scheduleName}
+                                  </span>
+                                )}
                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCompletionBgColor(week.completionRate)} ${getCompletionTextColor(week.completionRate)}`}>
                                   {status.icon} {status.label}
                                 </span>

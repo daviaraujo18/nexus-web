@@ -149,6 +149,7 @@ export interface ScheduleActivity extends BaseModel {
 
 export interface ScheduleInstance extends BaseModel {
   scheduleTemplateId: string;
+  scheduleName?: string;
   studentId: string;
   professionalId: string;
 
@@ -159,7 +160,7 @@ export interface ScheduleInstance extends BaseModel {
 
   // Estado
   status: InstanceStatus;
-  startedAt: Date;
+  startedAt?: Date;
   completedAt?: Date;
 
   // Personalizações
@@ -178,6 +179,10 @@ export interface ScheduleInstance extends BaseModel {
     streakDays: number;
     lastUpdatedAt: Date;
   };
+
+  // Reset semanal
+  activitiesReady?: boolean;
+  recoveryAttempts?: number;
 }
 
 export interface ActivityProgress extends BaseModel {
@@ -321,8 +326,6 @@ export interface CreateActivityDTO {
     gradeLevel?: string | null;
     subject?: string | null;
   };
-  estimatedDuration: number; // ADICIONADO, COMENTADO - DEVE SER RETIRADO
-  pointsOnCompletion: number; // ADICIONADO, COMENTADO - DEVE SER RETIRADO
 }
 
 export interface AssignScheduleDTO {
@@ -484,6 +487,7 @@ export interface WeeklySnapshot extends BaseModel {
     professionalId: string;
     generatedBy: 'system' | 'manual';
     dataSource: 'calculated' | 'cached';
+    scheduleName?: string;
   };
 }
 
@@ -495,6 +499,7 @@ export interface WeeklyResetResult {
   snapshotId?: string;
   newActivitiesCount: number;
   status: 'success' | 'skipped' | 'error';
+  isDryRun?: boolean;
   error?: string;
 }
 

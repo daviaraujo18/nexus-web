@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ScheduleInstanceService } from '@/lib/services/ScheduleInstanceService';
 import { ActivityProgress, WeeklySnapshot } from '@/types/schedule';
 import { useAuth } from '@/context/AuthContext';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { firestore } from '@/firebase/config';
 
 export interface ProgressData {
@@ -22,104 +22,56 @@ export interface ProgressData {
   weeklySnapshots: WeeklySnapshot[];
 }
 
-/**
- * Hook responsável por consolidar o progresso semanal do aluno.
- *
- * Responsabilidades:
- * - Buscar métricas reais do perfil (XP, streak, nível)
- * - Carregar snapshots semanais históricos
- * - Buscar atividades da semana atual
- * - Calcular métricas derivadas (completionRate, tempo, trend)
- *
- * Fontes de dados:
- * - students (perfil)
- * - weeklySnapshots (histórico)
- * - ScheduleInstanceService (atividades atuais)
- *
- * ⚠️ IMPORTANTE:
- * Este hook mistura:
- * - dados persistidos (Firestore)
- * - dados calculados em tempo real
- *
- * ⚠️ Impacto:
- * - dashboard do aluno
- * - progresso semanal
- * - analytics
- */
+export interface MonthOption {
+  label: string;
+  value: string;
+  year: number;
+  month: number;
+}
+
+function snapshotOverlapsMonth(s: WeeklySnapshot, year: number, month: number): boolean {
+  if (!s.weekStartDate || !s.weekEndDate) return false;
+  const monthStart = new Date(year, month, 1);
+  const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+  const monthEndWithMargin = new Date(monthEnd);
+  monthEndWithMargin.setDate(monthEndWithMargin.getDate() + 6);
+  return s.weekStartDate <= monthEndWithMargin && s.weekEndDate >= monthStart;
+}
+
+function computeTrend(snapshots: WeeklySnapshot[]): 'improving' | 'declining' | 'stable' {
+  if (snapshots.length < 2) return 'stable';
+  const latestRate = snapshots[0].metrics.completionRate || 0;
+  const previousRate = snapshots[1].metrics.completionRate || 0;
+  if (latestRate > previousRate + 5) return 'improving';
+  if (latestRate < previousRate - 5) return 'declining';
+  return 'stable';
+}
+
 export function useStudentWeeklyProgress() {
   const { user } = useAuth();
-  const [data, setData] = useState<ProgressData | null>(null);
+  const [allSnapshots, setAllSnapshots] = useState<WeeklySnapshot[]>([]);
   const [weeklyActivities, setWeeklyActivities] = useState<ActivityProgress[]>([]);
+  const [currentMetrics, setCurrentMetrics] = useState<ProgressData['currentMetrics'] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(new Date());
 
-  /**
-   * Calcula tempo total gasto nas atividades.
-   *
-   * Prioridade:
-   * 1. Usa tempo real (executionData.timeSpent)
-   * 2. Fallback para tempo estimado (metadata.estimatedDuration)
-   *
-   * ⚠️ Importante:
-   * - garante consistência mesmo sem dados reais
-   */
   const calculateTimeSpent = useCallback((activities: ActivityProgress[]): number => {
     const completed = activities.filter(activity => activity.status === 'completed');
-
     return completed.reduce((total, activity) => {
-      /**
-       * Tempo real registrado durante execução da atividade
-       */
       const realTime = Number(activity.executionData?.timeSpent);
-
-      /**
-       * Tempo estimado definido no cronograma
-       */
       const estimatedTime = Number(activity.activitySnapshot?.metadata?.estimatedDuration);
-
-      if (Number.isFinite(realTime) && realTime > 0) {
-        return total + realTime;
-      }
-
-      if (Number.isFinite(estimatedTime) && estimatedTime > 0) {
-        return total + estimatedTime;
-      }
-
+      if (Number.isFinite(realTime) && realTime > 0) return total + realTime;
+      if (Number.isFinite(estimatedTime) && estimatedTime > 0) return total + estimatedTime;
       return total;
     }, 0);
   }, []);
 
-  /**
-   * Carrega e consolida todos os dados de progresso do aluno.
-   *
-   * Fluxo:
-   * 1. Lê perfil (XP, streak, nível)
-   * 2. Busca snapshots históricos
-   * 3. Busca atividades da semana atual
-   * 4. Calcula métricas (completion, tempo)
-   * 5. Define tendência (trend)
-   *
-   * ⚠️ IMPORTANTE:
-   * Esse método é o ponto central de sincronização do progresso
-   */
   const loadProgressData = useCallback(async () => {
     if (!user?.id || user.role !== 'student') return;
-
     console.group('📊 [PROGRESS-HOOK] Sincronizando Métricas Reais');
-
     try {
       setLoading(true);
-
-      console.log('🔍 [PASSO 1] Lendo perfil do aluno para XP e Streak...');
-
-      /**
-       * Busca dados permanentes do aluno.
-       *
-       * Inclui:
-       * - totalPoints
-       * - streak
-       * - level
-       */
       const studentRef = doc(firestore, 'students', user.id);
       const studentSnap = await getDoc(studentRef);
       const studentProfile = studentSnap.data()?.profile || {};
@@ -128,144 +80,36 @@ export function useStudentWeeklyProgress() {
       const streak = Number(studentProfile.streak ?? 0);
       const level = Number(studentProfile.level ?? Math.floor(totalPoints / 200) + 1);
 
-      console.log('🔍 [PASSO 2] Buscando WeeklySnapshots...');
-
-      /** 
-       * Busca histórico semanal do aluno.
-       *
-       * Fonte:
-       * - weeklySnapshots collection
-       *
-       * ⚠️ Pode conter dados antigos ou inconsistentes
-       */
       const snapshotsQuery = query(
         collection(firestore, 'weeklySnapshots'),
-        where('studentId', '==', user.id)
+        where('studentId', '==', user.id),
+        orderBy('weekNumber', 'desc'),
+        limit(52)
       );
-
       const snapshotsSnap = await getDocs(snapshotsQuery);
-      const snapshots = snapshotsSnap.docs
+      const snapshots: WeeklySnapshot[] = snapshotsSnap.docs
         .map(snapshotDoc => {
           const snapshotData = snapshotDoc.data();
-
           return {
             id: snapshotDoc.id,
             ...snapshotData,
-            /**
-             * Converte Timestamp do Firestore para Date
-             */
             weekStartDate: snapshotData.weekStartDate?.toDate(),
             weekEndDate: snapshotData.weekEndDate?.toDate(),
           } as WeeklySnapshot;
-        })
-        .sort((a, b) => b.weekNumber - a.weekNumber);
+        });
 
-      console.log('🔍 [PASSO 3] Chamando Service para buscar atividades da semana...');
-      /**
-       * Busca atividades da semana atual.
-       *
-       * Fonte:
-       * - ScheduleInstanceService
-       *
-       * ⚠️ Dados mais próximos da execução real
-       */
+      setAllSnapshots(snapshots);
+
       const currentActivities = await ScheduleInstanceService.getWeekActivities(user.id);
-      console.log(`📦 [DADOS] Recebidas ${currentActivities.length} atividades brutas do Service.`);
-
       setWeeklyActivities(currentActivities);
-      
-      /**
-       * Agrupa atividades por status (completed, pending, etc.)
-       */
-      const byStatusWP = currentActivities.reduce<Record<string, number>>((acc, activity) => {
-        acc[activity.status] = (acc[activity.status] || 0) + 1;
-        return acc;
-      }, {});
 
-      console.log('[WEEKLY_PROGRESS_DIAG] currentActivities por status:', byStatusWP);
-
-      const completedActivities = currentActivities.filter(
-        activity => activity.status === 'completed'
-      );
-
+      const completedCount = currentActivities.filter(a => a.status === 'completed').length;
       const totalActivities = currentActivities.length;
-      const completedCount = completedActivities.length;
-
-      /**
-       * Calcula taxa de conclusão da semana.
-       *
-       * Fórmula:
-       * completed / total * 100
-       */
-      const completionRate =
-        totalActivities > 0
-          ? Math.round((completedCount / totalActivities) * 100)
-          : 0;
-
-      /**
-       * Tempo total gasto (real ou estimado)
-       */    
+      const completionRate = totalActivities > 0 ? Math.round((completedCount / totalActivities) * 100) : 0;
       const timeSpent = calculateTimeSpent(currentActivities);
 
-      console.log(
-        `[WEEKLY_PROGRESS_DIAG] completedCount=${completedCount} totalActivities=${totalActivities} rate=${completionRate}% timeSpent=${timeSpent}min`
-      );
-      
-      /**
-       * Calcula tendência de desempenho do aluno.
-       *
-       * Base:
-       * - compara completionRate das últimas semanas
-       *
-       * Regras:
-       * - +5% → improving
-       * - -5% → declining
-       * - resto → stable
-       */
-      let trend: 'improving' | 'declining' | 'stable' = 'stable';
-
-      if (snapshots.length >= 2) {
-        const latestRate = snapshots[0].metrics.completionRate || 0;
-        const previousRate = snapshots[1].metrics.completionRate || 0;
-
-        if (latestRate > previousRate + 5) {
-          trend = 'improving';
-        } else if (latestRate < previousRate - 5) {
-          trend = 'declining';
-        }
-      }
-
-      console.log('✨ [HOOK] Preparando objeto final de DATA para a UI...');
-      
-      /**
-       * Monta objeto final consumido pela UI.
-       *
-       * Inclui:
-       * - métricas atuais
-       * - tendência
-       * - histórico semanal
-       */
-      setData({
-        performanceTrend: trend,
-        currentMetrics: {
-          streak,
-          totalPoints,
-          level,
-          completedActivities: completedCount,
-          totalActivities,
-          completionRate,
-          timeSpent,
-        },
-        weeklySnapshots: snapshots,
-      });
-
+      setCurrentMetrics({ streak, totalPoints, level, completedActivities: completedCount, totalActivities, completionRate, timeSpent });
       setError(null);
-
-      /**
-       * Tratamento de erro global do hook.
-       *
-       * ⚠️ Qualquer falha aqui impacta toda a UI do aluno
-       */
     } catch (err: unknown) {
       console.error('❌ [PROGRESS-HOOK] Erro Fatal:', err);
       setError('Erro ao sincronizar progresso.');
@@ -274,53 +118,60 @@ export function useStudentWeeklyProgress() {
       console.groupEnd();
     }
   }, [user?.id, user?.role, calculateTimeSpent]);
-  
-  /**
-   * Executa carregamento automático ao montar o hook
-   */
+
   useEffect(() => {
     loadProgressData();
   }, [loadProgressData]);
 
-  /**
-   * Estatísticas rápidas da semana.
-   *
-   * Inclui:
-   * - total de atividades
-   * - concluídas
-   * - pendentes
-   * - percentual
-   *
-   * ⚠️ Derivado de weeklyActivities
-   */
+  const filteredSnapshots = useMemo(() =>
+    allSnapshots.filter(s => snapshotOverlapsMonth(s, selectedDate.getFullYear(), selectedDate.getMonth())),
+    [allSnapshots, selectedDate]
+  );
+
+  const filteredData = useMemo((): ProgressData | null => {
+    if (!currentMetrics) return null;
+    return {
+      performanceTrend: computeTrend(filteredSnapshots),
+      currentMetrics,
+      weeklySnapshots: filteredSnapshots,
+    };
+  }, [currentMetrics, filteredSnapshots]);
+
+  const availableMonths = useMemo((): MonthOption[] => {
+    const seen = new Set<string>();
+    const months: MonthOption[] = [];
+    for (const s of allSnapshots) {
+      if (!s.weekStartDate) continue;
+      const y = s.weekStartDate.getFullYear();
+      const m = s.weekStartDate.getMonth();
+      const key = `${y}-${String(m).padStart(2, '0')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      months.push({
+        label: new Date(y, m).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }),
+        value: key,
+        year: y,
+        month: m,
+      });
+    }
+    return months.sort((a, b) => b.year - a.year || b.month - a.month);
+  }, [allSnapshots]);
+
   const stats = useMemo(() => {
     const total = weeklyActivities.length;
     const completed = weeklyActivities.filter(activity => activity.status === 'completed').length;
-    
-    /**
-     * API pública do hook.
-     *
-     * Fornece:
-     * - data → métricas completas
-     * - weeklyActivities → atividades atuais
-     * - stats → resumo rápido
-     * - loading / error
-     * - refresh → recarregar dados
-     */
-    return {
-      total,
-      completed,
-      percent: total > 0 ? Math.round((completed / total) * 100) : 0,
-      pending: total - completed,
-    };
+    return { total, completed, percent: total > 0 ? Math.round((completed / total) * 100) : 0, pending: total - completed };
   }, [weeklyActivities]);
 
   return {
-    data,
+    data: filteredData,
     weeklyActivities,
     stats,
     loading,
     error,
     refresh: loadProgressData,
+    selectedDate,
+    setSelectedDate,
+    availableMonths,
   };
 }

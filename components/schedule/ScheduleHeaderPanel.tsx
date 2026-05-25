@@ -11,6 +11,9 @@ import {
   FaCalendarCheck
 } from 'react-icons/fa';
 
+const DEBUG = process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+const debugLog = (...args: unknown[]) => { if (DEBUG) console.log(...args); };
+
 interface ScheduleHeaderPanelProps {
   formData: CreateScheduleDTO;
   errors: Record<string, string>;
@@ -53,20 +56,20 @@ export default function ScheduleHeaderPanel({
 
   const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const localDate = stringToDate(e.target.value);
-    console.log('📅 [HEADER] Alterando Início para:', localDate.toLocaleDateString('pt-BR'));
+    debugLog('📅 [HEADER] Alterando Início para:', localDate.toLocaleDateString('pt-BR'));
     
     updateField('startDate', localDate);
     
     // Sugestão inteligente: define o fim para o domingo subsequente, mas o usuário pode mudar
     const nextSunday = getNextSunday(localDate);
-    console.log('💡 [HEADER] Sugerindo Término (Próximo Domingo):', nextSunday.toLocaleDateString('pt-BR'));
+    debugLog('💡 [HEADER] Sugerindo Término (Próximo Domingo):', nextSunday.toLocaleDateString('pt-BR'));
     updateField('endDate', nextSunday);
   };
 
   // 🔥 NOVA FUNÇÃO: Handler para mudança manual da data de término
   const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const localDate = stringToDate(e.target.value);
-    console.log('🎯 [HEADER] Alterando Término MANUALMENTE para:', localDate.toLocaleDateString('pt-BR'));
+    debugLog('🎯 [HEADER] Alterando Término MANUALMENTE para:', localDate.toLocaleDateString('pt-BR'));
     updateField('endDate', localDate);
   };
 

@@ -56,7 +56,7 @@ export default function StudentScheduleDetailPage() {
 
   const [activeTab, setActiveTab] = useState<'today' | 'week' | 'progress' | 'history'>('today');
   const [expandedActivity, setExpandedActivity] = useState<string | null>(null);
-  const [selectedDay, setSelectedDay] = useState<number>(new Date().getDay());
+  const [selectedDay, setSelectedDay] = useState<number>((new Date().getDay() + 6) % 7);
   const [showEmotionalModal, setShowEmotionalModal] = useState(false);
 
   const {
@@ -108,9 +108,10 @@ export default function StudentScheduleDetailPage() {
     }
   };
 
-  // Filtrar atividades por dia
   const getActivitiesByDay = (day: number) => {
-    return activities.filter(activity => activity.dayOfWeek === day);
+    // activities vêm do template (Conv A: 0=Dom), day é Conv B (0=Seg).
+    // Converter day para Conv A: (day + 1) % 7
+    return activities.filter(activity => activity.dayOfWeek === (day + 1) % 7);
   };
 
   // Encontrar progresso de uma atividade
@@ -141,7 +142,7 @@ export default function StudentScheduleDetailPage() {
 
   // Obter atividades de hoje
   const getTodayActivities = () => {
-    const today = new Date().getDay();
+    const today = (new Date().getDay() + 6) % 7;
     return getActivitiesByDay(today);
   };
 
@@ -149,8 +150,9 @@ export default function StudentScheduleDetailPage() {
   const totalPoints = calculatePoints();
   const todayActivities = getTodayActivities();
 
-  // Nome dos dias da semana
-  const daysOfWeek = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  // Nome dos dias da semana (convenção do sistema: 0=Segunda, 6=Domingo)
+  const daysOfWeek = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+  const scheduleToJS = (d: number) => (d + 1) % 7;
 
   if (loading) {
     return (
@@ -199,7 +201,8 @@ export default function StudentScheduleDetailPage() {
   }
 
   // Formatar datas
-  const formatDate = (date: Date) => {
+  const formatDate = (date: Date | null | undefined) => {
+    if (!date) return '—';
     return new Date(date).toLocaleDateString('pt-BR', {
       weekday: 'long',
       day: '2-digit',
@@ -639,7 +642,7 @@ export default function StudentScheduleDetailPage() {
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {daysOfWeek.map((day, index) => {
                     const dayActivities = getActivitiesByDay(index);
-                    const isActiveDay = schedule.activeDays.includes(index);
+                    const isActiveDay = schedule.activeDays.includes(scheduleToJS(index));
                     const isSelected = selectedDay === index;
                     
                     return (
@@ -904,7 +907,7 @@ export default function StudentScheduleDetailPage() {
                           <span
                             key={day}
                             className={`px-3 py-1 text-xs rounded-full ${
-                              schedule.activeDays.includes(index)
+                              schedule.activeDays.includes(scheduleToJS(index))
                                 ? 'bg-gradient-to-r from-purple-100 to-indigo-100 text-purple-800'
                                 : 'bg-gray-200 text-gray-500'
                             }`}

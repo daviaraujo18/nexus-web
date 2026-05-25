@@ -1,29 +1,9 @@
 # Documentação — Atualizações do Sistema Nexus Web
 
-<<<<<<< HEAD
-Esta documentação explica, de forma clara, o que foi alterado no sistema, por que essas mudanças foram feitas e quais impactos elas trazem.
-
-Em resumo: essa atualização corrige falhas importantes, melhora a confiabilidade dos dados e adiciona novas funcionalidades para alunos e profissionais.
-
-O que mudou no geral?
-
-- Agora é possível editar cronogramas corretamente (antes não funcionava direito)
-- O progresso do aluno (nível, pontos, sequência) está sendo calculado corretamente
-- Os dados de analytics foram corrigidos (antes mostravam valores impossíveis, como 200%)
-- Foi adicionado um timer visual para atividades do aluno
-- Lógica de vida útil de cronogramas implementada
-- Mais de um cronograma por aluno
-
-Branch: `feature/edicao-planilhas`
-Base de comparação: `origin/main...HEAD`
-Data da análise: 2026-04-30
-Working tree no momento da análise: limpo — `nothing to commit, working tree clean`
-=======
 **Branch:** `feature/edicao-planilhas`
 **Base de comparação:** `origin/main...HEAD`
 **Data da análise:** 2026-04-30
 **Working tree no momento da análise:** sem modificações rastreadas; `docs/CHANGE_REPORT.md` não rastreado.
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 ---
 
@@ -40,9 +20,6 @@ Working tree no momento da análise: limpo — `nothing to commit, working tree 
 |  Arquivos alterados (commitados)  | `git diff --name-status`    |               45 arquivos                   |
 |-----------------------------------|-----------------------------|---------------------------------------------|
 
-<<<<<<< HEAD
-Conclusão do pré-diagnóstico: Working tree completamente limpo. Todo o conteúdo documentado abaixo está versionado nos 8 commits da branch.
-=======
 | Verificação | Comando | Resultado |
 |---|---|---|
 | Modificações locais | `git diff --stat` | **Nenhuma** |
@@ -52,16 +29,11 @@ Conclusão do pré-diagnóstico: Working tree completamente limpo. Todo o conte�
 | HEAD sincronizado com origin | `git log --decorate` | ✅ `HEAD = origin/feature/edicao-planilhas` |
 | Commits à frente de `origin/main` | `git log origin/main..HEAD` | **10 commits** |
 | Arquivos alterados (commitados) | `git diff --name-status` | **43 arquivos** |
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 ---
 
 ## Uncommitted / Local WIP — Não é uma parte oficial da branch
 
-<<<<<<< HEAD
-> Não existem arquivos modificados localmente, arquivos em stage ou untracked files no momento desta análise. O working tree está limpo e em sincronia com `origin/feature/edicao-planilhas`.
-
-=======
 > **Esta seção está vazia.**
 > Working tree sem modificações em arquivos rastreados. O único item não rastreado é `docs/CHANGE_REPORT.md`, referente a este relatório, ainda não commitado.
 
@@ -78,8 +50,6 @@ Os seguintes artefatos foram identificados na análise, presentes em commits int
 | `123` | Arquivo vazio sem extensão criado por acidente. |
 
 **Resultado:** Nenhum desses artefatos aparece no diff `origin/main...HEAD`. A branch, no estado do HEAD atual, não contém rota admin sem autenticação, patch WIP versionado ou arquivo acidental.
-
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 ---
 
 Quem foi impactado por essas mudanças?
@@ -102,11 +72,7 @@ Alunos
 
 ## 1. Executive Summary
 
-<<<<<<< HEAD
-Esta branch contém 8 commits com alterações em 45 arquivos organizadas em quatro eixos:
-=======
 Esta branch contém **10 commits** com alterações em **43 arquivos** (42 de produto + este relatório) organizadas em quatro eixos:
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 1. Edição de cronogramas (core) — reescrita do `ScheduleService`, `ScheduleInstanceService`, `AssignmentInterface`, `ScheduleBuilder`, `ScheduleHeaderPanel`. Batch operations atômicas para update de template; guard contra instâncias duplicadas via `collectionGroup`.
 
@@ -116,58 +82,13 @@ Esta branch contém **10 commits** com alterações em **43 arquivos** (42 de pr
 
 4. Novas funcionalidades para aluno — `FloatingTimer` (relógio analógico SVG) + `ActivityTimerContext` (timer global) + `SubjectBarChart` (gráfico de matérias).
 
-<<<<<<< HEAD
-Esta atualização focou em três pontos principais:
-
-1. Correção de erros importantes
-- Cronogramas não eram editados corretamente
-- Progresso do aluno era calculado de forma errada
-- Relatórios mostravam valores inconsistentes
-
-2. Melhoria na confiabilidade dos dados
-- Agora o sistema calcula corretamente nível, pontos e progresso
-- Evita duplicação de dados
-- Garante que as informações exibidas são reais
-
-3. Novas funcionalidades
-- Timer visual para atividades do aluno
-- Melhor visualização de progresso
-- Gráfico de matérias para acompanhamento
-=======
 **Artefatos temporários/inseguros:** removidos em commits de limpeza antes do HEAD final. A branch está livre de rotas admin sem auth, patches WIP versionados e arquivos acidentais.
 
 **Validações obrigatórias antes do merge:** índices Firestore para `collectionGroup`, convenção de `dayOfWeek`, logs de diagnóstico excessivos, cleanup de instâncias duplicadas históricas, build/typecheck/lint.
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 ---
 
 ## 2. Branch & Diff Metadata
-<<<<<<< HEAD
-|--------------------------|--------------------------------------------------|
-|           Campo          |                       Valor                      |
-|--------------------------|--------------------------------------------------|
-|           Branch         |`feature/edicao-planilhas`                        |
-|            HEAD          |`1720870`                                         |
-|    Base de comparação    |`origin/main...HEAD`                              |
-|    Ponto de divergência  |`b1b75b4` (commit `notification` em `origin/main`)|
-| Commits à frente de main | 8                                                |
-|    Arquivos alterados    | 45                                               |
-|        Insertions        | 5.829                                            |
-|         Deletions        | 5.688                                            |
-|       Working tree       | Limpo                                            |
-|--------------------------|--------------------------------------------------|
-Commits — cronológico inverso:
-|-----------|-----------------------------------------------------------------------------|
-|    Hash   |                                 Mensagem                                    |
-|-----------|-----------------------------------------------------------------------------|
-| `1720870` | aplicacao prototipo completa                                                |
-| `108aaf9` | fix(student): restore metrics and progress calculations                     |
-| `d8888e3` | prototipo final 1.1                                                         |
-| `2e27db0` | prototipo final                                                             |
-| `b4e774a` | protótipo teste                                                             |  
-| `df0abef` | mudanças finais para produção                                               |
-| `8b565ff` | lógica calendário civil estabelecida                                        |
-=======
 
 | Campo | Valor |
 |---|---|
@@ -194,9 +115,7 @@ Commits — cronológico inverso:
 | `b4e774a` | protótipo teste |
 | `df0abef` | mudanças finais para produção |
 | `8b565ff` | lógica calendário civil estabelecida |
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 | `e809e52` | fix(schedules): estabilizando edição e corrigindo persistência no firestore |
-|-----------|-----------------------------------------------------------------------------|
 
 ---
 
@@ -210,13 +129,8 @@ Dentro do escopo desta branch:
 - Timer de atividade: `FloatingTimer` + `ActivityTimerContext`
 - Gráfico de matérias: `SubjectBarChart`
 
-<<<<<<< HEAD
-Fora do escopo — não alterado nesta branch:
-- Dark mode — patch WIP existe em `temp_patches/` mas não está aplicado ao código-fonte
-=======
 **Fora do escopo — não alterado nesta branch:**
 - Dark mode — patch WIP foi removido da branch; código-fonte não modificado
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 - Firestore Security Rules
 - Sistema de notificações
 - Páginas de debug `app/debug/` — inalteradas, confirmado via diff
@@ -224,23 +138,6 @@ Fora do escopo — não alterado nesta branch:
 
 ---
 
-<<<<<<< HEAD
-## 4. High-Level Change Map (versão interpretável)
-|------------------------|--------------------------------------------------------------------------|--------------------------------|------------|
-|          Área          |                        O que mudou na prática                            |              Tipo              |   Impacto  |
-|------------------------|--------------------------------------------------------------------------|--------------------------------|------------|
-| Schedule / Cronogramas | Agora é possível editar cronogramas e ver mudanças nas métricas do aluno |         Reescrita grande       |  🔴 Alto   |
-|   Student Experience   | Aluno agora vê progresso atualizado em tempo real + timer de atividade   | Nova funcionalidade + melhoria |  🔴 Alto   |
-|       Analytics        | Métricas corrigidas (não passam mais de 100%)                            |     Correção + simplificação   |  🟡 Médio  |
-|   Professional Pages   | Páginas de gestão e analytics atualizadas para refletir dados reais      |             Ajustes            |  🟡 Médio  |
-|     Student Pages      | Páginas do aluno agora mostram progresso correto e timer ativo           |             Ajustes            |  🟡 Médio  |
-|   Progress / Metrics   | Sistema de pontuação e nível corrigido                                   |         Reescrita lógica       |  🔴 Alto   |
-|     Infrastructure     | Ajustes internos sem impacto direto no usuário                           |             Técnico            |  🟢 Baixo  |
-|     Types / Utils      | Ajustes de suporte ao sistema                                            |             Técnico            |  🟢 Baixo  |
-|        Segurança       | Rota administrativa insegura existia mas já foi removida                 |            Resolvido           | 🚨 Crítico |
-|         WIP !!         | Arquivos incompletos e não usados                                        |           Lixo técnico         | ❌ Remover |
-|------------------------|--------------------------------------------------------------------------|--------------------------------|------------|
-=======
 ## 4. High-Level Change Map
 
 | Área | Arquivos | Tipo | Impacto |
@@ -254,8 +151,6 @@ Fora do escopo — não alterado nesta branch:
 | Infrastructure | `firebase/config.ts`, `tsconfig.json`, `package-lock.json` | Modified | Baixo |
 | Types / Utils | `types/schedule.ts`, `types/analytics.ts`, `dateUtils.ts`, `validationUtils.ts` | Modified | Baixo–Médio |
 | Documentation | `docs/CHANGE_REPORT.md` | Added | N/A |
-
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 ---
 
 ## 5. Detailed Changes by Feature
@@ -432,65 +327,6 @@ Impacto em produção: zero. Impacto em desenvolvimento local: devs que dependem
 
 ---
 
-<<<<<<< HEAD
-### 5.9  — Segurança (Atualizado)
-
-Durante o desenvolvimento, existiu uma rota administrativa para recalcular métricas de alunos.
-
-Essa rota permitia recalcular:
-- Pontuação total
-- Nível do aluno
-- Atividades concluídas
-
- Importante:
-Essa rota já foi REMOVIDA do sistema e NÃO está presente na versão atual.
-
-Motivo da remoção:
-- Não possuía autenticação
-- Poderia permitir alteração indevida de dados
-
-Situação atual:
- Risco eliminado  
- Nenhuma rota administrativa exposta  
-
-### 5.10  — WIP Patch de Dark Mode + Arquivo Acidental
-
-`temp_patches/wip-dark-mode-baguncado.patch` (1.287 linhas commitadas)
-- Implementação parcial de dark mode: CSS variables, `suppressHydrationWarning`, classes `dark:` em componentes
-- Não está aplicado ao código-fonte — existe apenas como arquivo rastreado pelo git
-- O nome do arquivo (`baguncado`) indica estado instável explicitamente
-
-Classificação: Do not include in PR unless explicitly reviewed.
-Recomendação: Remover ambos antes do merge.
-
----
-
-## 6. File-by-File Breakdown
-|----------------------------------------------|------------|-----------------|-------------|----------------------------------|
-|                     Arquivo                  |    Tipo    |      Delta      |    Risco    |               Prod?              |
-|----------------------------------------------|------------|-----------------|-------------|----------------------------------|
-|       `lib/services/ProgressService.ts`      | Modificada | +242            |    Alto     |         Sim — após review        |
-|       `lib/services/AnalyticsService.ts`     | Modificada | +1.781 / −1.545 |    Alto     |        Sim — validar clamp       |
-|   `lib/services/ScheduleInstanceService.ts`  | Modificada | +859 / −719     |    Alto     | Sim — cleanup histórico primeiro |
-|       `lib/services/ScheduleService.ts`      | Modificada | +455            |    Alto     |                Sim               |
-|      `hooks/useStudentWeeklyProgress.ts`     | Modificada | +296 / −226     |    Médio    |        Sim — remover logs        |
-|         `hooks/useStudentSchedule.ts`        | Modificada | +388            |    Médio    |       Sim — validar dayOfWeek    |
-|   `components/student/StudentDashboard.tsx`  | Modificada | +229            |    Médio    | Sim — validar onSnapshot cleanup |
-| `components/schedule/AssignmentInterface.tsx`| Modificada | −641 (net)      |    Médio    |                Sim               |
-|    `components/student/FloatingTimer.tsx`    | adicionada | +167            |    Médio    |     Sim — revisar catch vazio    |
-|      `context/ActivityTimerContext.tsx`      | adicionada | +65             |    Baixo    |                Sim               |
-|    `components/charts/SubjectBarChart.tsx`   | adicionada | +74             |    Baixo    |                Sim               |
-| `app/api/admin/recalculate-metrics/route.ts` |  removida  | +26             | **Crítico** |              **NÃO**             |
-| `temp_patches/wip-dark-mode-baguncado.patch` | adicionada | +1.287          |    Alto     |              **NÃO**             |
-|            `firebase/config.ts`              | Modificada | −16             |    Baixo    |       Sim — comunicar equipe     |
-|              `tsconfig.json`                 | Modificada | +8              |    Nenhum   |                Sim               |
-|          `lib/utils/dateUtils.ts`            | Modificada | +167 / −100     |    Baixo    |      Sim — remover console.log   |
-|            `types/schedule.ts`               | Modificada | +7              |    Nenhum   |                Sim               |
-|            `types/analytics.ts`              | Modificada | +5              |    Nenhum   |                Sim               |
-|            `package-lock.json`               | Modificada | +1.843          |    Nenhum   |                Sim               |
-|        Demais páginas e componentes          | Modificada | variado         | Baixo–Médio |                Sim               |
-|----------------------------------------------|------------|-----------------|-------------|----------------------------------|
-=======
 ## 6. File-by-File Breakdown
 
 | Arquivo | Tipo | Delta | Risco | Prod? |
@@ -514,7 +350,6 @@ Recomendação: Remover ambos antes do merge.
 | `package-lock.json` | Modified | +1.843 | Nenhum | Sim |
 | Demais páginas e componentes | Modified | variado | Baixo–Médio | Sim |
 | `docs/CHANGE_REPORT.md` | **Added** | +557 | N/A | N/A |
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 ---
 
@@ -529,9 +364,6 @@ Recomendação: Remover ambos antes do merge.
 |     Uploads / anexos    |    N/A    | Não modificado nesta branch.                                                                                            |
 |-------------------------|-----------|-------------------------------------------------------------------------------------------------------------------------|
 
-<<<<<<< HEAD
-Risco de perda de dados: Baixo. Nenhum `delete` destrutivo identificado nos caminhos principais de execução. Risco principal é sobrescrita de `totalPoints`/`level` por recálculo incorreto.
-=======
 | Coleção Firestore | Risco | Detalhe |
 |---|---|---|
 | `students/{id}/profile` | **Médio** | `updateStudentStats` sobrescreve `level`; race condition teórica em atividades simultâneas. |
@@ -541,25 +373,10 @@ Risco de perda de dados: Baixo. Nenhum `delete` destrutivo identificado nos cami
 | Uploads / anexos | N/A | Não modificado nesta branch. |
 
 **Risco de perda de dados:** Baixo. Nenhum `delete` destrutivo identificado nos caminhos principais. Risco principal é sobrescrita de `totalPoints`/`level` por recálculo incorreto.
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 ---
 
 ## 8. Regression Risk Assessment
-<<<<<<< HEAD
-|----------------------------------------------|---------------------------------|---------|--------------------------------------------------------------------|
-|                     Risco                    |         Probabilidade           | Impacto |                            Mitigação                               |
-|----------------------------------------------|---------------------------------|---------|--------------------------------------------------------------------|
-|        Rota admin sem auth removida          |          já removido            | Alto    | Nenhuma ação necessária                                            |
-|    Race condition em `updateStudentStats`    |            Baixa                | Médio   | Monitorar; transaction como solução definitiva                     |
-|    `onSnapshot` sem cleanup no Dashboard     |            Média                | Médio (memory leak) | Verificar `unsubscribe` no return do `useEffect`       |
-|       `completionRate` > 100% residual       |            Baixa                | Médio   | Validar edge cases em staging                                      |
-|     `dayOfWeek` convention inconsistente     |            Média                | **Alto** (atividades no dia errado) | Teste manual todos os dias da semana   |
-|      Emulador comentado quebra dev local     | Alta (para devs com emulador)   | Baixo   | Comunicar equipe; restaurar condicional                            |
-| Instâncias duplicadas históricas visíveis    | Alta (dados de prod existentes) | Médio   | Cleanup via `/debug/instances-cleaner` antes de deploy             |
-|    FloatingTimer conclui sem confirmação     |            Média                | Médio   | Avaliar confirm dialog                                             |
-|----------------------------------------------|---------------------------------|---------|--------------------------------------------------------------------|
-=======
 
 | Risco | Probabilidade | Impacto | Mitigação |
 |---|---|---|---|
@@ -571,7 +388,6 @@ Risco de perda de dados: Baixo. Nenhum `delete` destrutivo identificado nos cami
 | Instâncias duplicadas históricas visíveis | Alta (dados de prod existentes) | Médio | Cleanup via `/debug/instances-cleaner` antes de deploy |
 | FloatingTimer conclui sem confirmação | Média | Médio | Avaliar confirm dialog |
 | ~~Rota admin sem auth exposta em produção~~ | ~~Alta~~ | ~~Alto~~ | ✅ **Mitigado** — removida em `20ff5a1`/`902352d` |
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 ---
 
@@ -587,16 +403,6 @@ Métricas do aluno
 5. Completar 1ª atividade do dia → `streak` +1; completar 2ª no mesmo dia → `streak` não muda
 6. Completar atividade → verificar `profile.level = floor((currentPoints+pts)/200)+1` no Firestore
 
-<<<<<<< HEAD
-FloatingTimer
-8. Iniciar atividade → timer aparece `fixed bottom-6 right-6`
-9. Navegar entre páginas do layout do aluno → timer persiste
-10. Clicar "Concluir" → atividade marcada como `completed` no Firestore
-
-Analytics
-11. Dashboard profissional → `completionRate` ≤ 100% em todos os cenários
-12. Analytics de aluno com 0 atividades → sem crash, sem NaN
-=======
 **FloatingTimer**
 7. Iniciar atividade → timer aparece `fixed bottom-6 right-6`
 8. Navegar entre páginas do layout do aluno → timer persiste
@@ -605,7 +411,6 @@ Analytics
 **Analytics**
 10. Dashboard profissional → `completionRate` ≤ 100% em todos os cenários
 11. Analytics de aluno com 0 atividades → sem crash, sem NaN
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 Regressão
 - `ProgressTracking` exibe dados corretos após mudança em `useStudentWeeklyProgress`
@@ -616,29 +421,18 @@ Regressão
 
 ## 10. Deployment Notes
 
-<<<<<<< HEAD
-1. Remover antes do deploy: `temp_patches/wip-dark-mode-baguncado.patch`
-3. Cleanup de instâncias duplicadas: Executar `/debug/instances-cleaner` em staging → validar → executar em produção
-4. Emulador: Comunicar equipe sobre `connectFunctionsEmulator` comentado em `firebase/config.ts`
-5. Variáveis de ambiente: Nenhuma nova identificada
-=======
 1. **Índices Firestore:** Confirmar índices compostos para `collectionGroup('scheduleInstances')` e `collectionGroup('activityProgress')` no Firebase Console antes de deploy
 2. **Cleanup de instâncias duplicadas:** Executar `/debug/instances-cleaner` em staging → validar → executar em produção
 3. **Emulador:** Comunicar equipe sobre `connectFunctionsEmulator` comentado em `firebase/config.ts`
 4. **Variáveis de ambiente:** Nenhuma nova identificada
 5. **Artefatos temporários:** Já removidos em commits `20ff5a1` e `902352d` — nenhuma ação adicional necessária
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 
 ---
 
 ## 11. Rollback Plan
 
 1. `git revert <commits>` — preserva histórico; preferível a `reset --hard`
-<<<<<<< HEAD
-2. Dados já escritos no Firestore por `updateStudentStats` ou `recalculateStudentPermanentMetrics` não são revertidos pelo git — necessita script de restore manual se métricas foram sobrescritas em produção
-=======
 2. Dados escritos no Firestore por `updateStudentStats` **não são revertidos pelo git** — necessita script de restore manual se métricas foram sobrescritas em produção
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 3. `weeklySnapshots` criados nesta branch são ignorados pelo código revertido — sem dano residual
 4. `scheduleInstances` criadas pelo novo `assignScheduleToStudents` devem ser avaliadas caso a caso
 
@@ -683,13 +477,6 @@ Os itens abaixo estão funcionalmente corretos com base no diff analisado, mas r
 - `lib/utils/dateUtils.ts` — remover `console.log` de diagnóstico
 - Logs excessivos em `useStudentWeeklyProgress` e `ProgressService`
 
-<<<<<<< HEAD
-### Do not include in PR unless explicitly reviewed
-- `app/api/admin/recalculate-metrics/route.ts` — rota sem auth
-- `temp_patches/wip-dark-mode-baguncado.patch` — WIP não aplicado
-
-=======
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 ---
 
 ## 14. PR Description Draft
@@ -716,13 +503,7 @@ Os itens abaixo estão funcionalmente corretos com base no diff analisado, mas r
 - Dark mode (WIP patch removed from branch; source code unmodified)
 - Firestore Security Rules | Debug pages | GAD-7
 
-<<<<<<< HEAD
-### Pre-merge required
-- [ ] Delete `temp_patches/wip-dark-mode-baguncado.patch`
-- [ ] Delete file `123`
-=======
 ### Pre-merge validation required
->>>>>>> 45840dab110bbc5ffac893f55e39c6fbdb2bb5e4
 - [ ] Verify Firestore `collectionGroup` indexes
 - [ ] Run schedule duplicate cleanup in staging
 - [ ] Validate `dayOfWeek` convention across all hooks and services

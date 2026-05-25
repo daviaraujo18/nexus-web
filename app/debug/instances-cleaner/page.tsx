@@ -216,7 +216,7 @@ export default function DebugInstancesCleanerPage() {
         const isExpired = templateEndDate ? isAfter(now, templateEndDate) : false;
         const daysSinceEnd = templateEndDate ? differenceInDays(now, templateEndDate) : 0;
 
-        console.log(`📊 Instância ${instance.id.slice(0, 8)}:`, {
+        console.log(` Instância ${instance.id.slice(0, 8)}:`, {
           templateName: template?.name,
           templateEndDate: template?.endDate ? format(template.endDate, 'dd/MM/yyyy') : 'sem data',
           hoje: format(now, 'dd/MM/yyyy'),
@@ -271,7 +271,7 @@ export default function DebugInstancesCleanerPage() {
       const now = new Date();
       const todayStart = startOfDay(now);
 
-      console.log('📊 Todas as atividades da instância:', allActivitiesSnapshot.docs.map(doc => {
+      console.log(' Todas as atividades da instância:', allActivitiesSnapshot.docs.map(doc => {
         const data = doc.data();
         const scheduledDate = data.scheduledDate?.toDate();
         return {
@@ -305,7 +305,7 @@ export default function DebugInstancesCleanerPage() {
             status: data.status
           });
         } else {
-          console.log('⚠️ Atividade futura (não será deletada):', {
+          console.log(' Atividade futura (não será deletada):', {
             id: doc.id,
             scheduledDate: format(scheduledDate, 'dd/MM/yyyy'),
             status: data.status
@@ -315,7 +315,7 @@ export default function DebugInstancesCleanerPage() {
 
       activitiesToDelete.sort((a, b) => a.scheduledDate.getTime() - b.scheduledDate.getTime());
 
-      console.log('🎯 Atividades a serem deletadas:', activitiesToDelete.map(a => ({
+      console.log(' Atividades a serem deletadas:', activitiesToDelete.map(a => ({
         id: a.id,
         weekNumber: a.weekNumber,
         scheduledDate: format(a.scheduledDate, 'dd/MM/yyyy'),
@@ -323,7 +323,7 @@ export default function DebugInstancesCleanerPage() {
       })));
 
       if (activitiesToDelete.length !== instance.pastActivitiesCount) {
-        console.warn('⚠️ Discrepância detectada:', {
+        console.warn(' Discrepância detectada:', {
           esperado: instance.pastActivitiesCount,
           encontrado: activitiesToDelete.length,
           diferenca: instance.pastActivitiesCount - activitiesToDelete.length,
@@ -394,7 +394,7 @@ export default function DebugInstancesCleanerPage() {
       await loadInstances();
       setShowConfirmDialog(false);
 
-      const message = `✅ Limpeza concluída!\n${deletedCount} atividades deletadas\n${errors.length} erros`;
+      const message = ` Limpeza concluída!\n${deletedCount} atividades deletadas\n${errors.length} erros`;
       alert(message);
 
     } catch (error) {
@@ -577,7 +577,7 @@ export default function DebugInstancesCleanerPage() {
       await loadInstances();
       setShowMassConfirmDialog(false);
 
-      alert(`✅ Limpeza em massa concluída!\n\n` +
+      alert(` Limpeza em massa concluída!\n\n` +
         `Total de instâncias: ${filteredInstances.length}\n` +
         `Instâncias processadas: ${processedInstances}\n` +
         `Atividades deletadas: ${totalDeleted}\n` +
@@ -680,7 +680,7 @@ export default function DebugInstancesCleanerPage() {
       await loadInstances();
       setShowExpiredConfirmDialog(false);
 
-      alert(`✅ Instâncias finalizadas!\n\n` +
+      alert(` Instâncias finalizadas!\n\n` +
         `Total encontradas: ${expiredResult.total}\n` +
         `Finalizadas: ${updatedCount}\n` +
         `Erros: ${errorCount}`);
@@ -818,7 +818,6 @@ export default function DebugInstancesCleanerPage() {
                   </>
                 ) : (
                   <>
-                    <span>⚡</span>
                     <span>Limpeza em Massa</span>
                     <span className="ml-1 bg-white bg-opacity-20 px-2 py-0.5 rounded-full text-gray-800 text-xs">
                       {filteredInstances.filter(i => i.pastActivitiesCount > 0).length}
@@ -879,7 +878,7 @@ export default function DebugInstancesCleanerPage() {
                 onClick={loadInstances}
                 className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
               >
-                🔄 Recarregar
+                Recarregar
               </button>
             </div>
           </div>
@@ -913,7 +912,7 @@ export default function DebugInstancesCleanerPage() {
                         </span>
                         {instance.isExpired && (
                           <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded">
-                            ⚠️ Expirada
+                            Expirada
                           </span>
                         )}
                       </div>
@@ -937,7 +936,7 @@ export default function DebugInstancesCleanerPage() {
                         </div>
                         <div>
                           <span className="text-gray-500">Início:</span>
-                          <span className="ml-1">{format(instance.startedAt, 'dd/MM/yyyy')}</span>
+                          <span className="ml-1">{instance.startedAt ? format(instance.startedAt, 'dd/MM/yyyy') : '-'}</span>
                         </div>
                       </div>
                     </div>
@@ -1052,7 +1051,7 @@ export default function DebugInstancesCleanerPage() {
                 </div>
 
                 <p className="text-sm text-red-600 mb-4">
-                  ⚠️ Esta ação é irreversível! As atividades serão permanentemente removidas.
+                  Esta ação é irreversível! As atividades serão permanentemente removidas.
                 </p>
 
                 <div className="border rounded-lg overflow-hidden">
@@ -1103,7 +1102,7 @@ export default function DebugInstancesCleanerPage() {
                     }
                   `}
                 >
-                  {cleaning ? 'Deletando...' : '✅ Confirmar Deleção'}
+                  {cleaning ? 'Deletando...' : ' Confirmar Deleção'}
                 </button>
               </div>
             </div>
@@ -1116,7 +1115,7 @@ export default function DebugInstancesCleanerPage() {
             <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
               <div className="bg-gray-50 px-6 py-4 border-b">
                 <h3 className="text-lg font-semibold text-gray-900">
-                  {massCleaning ? '🔄 Limpeza em Andamento' : '⚡ Confirmar Limpeza em Massa'}
+                  {massCleaning ? ' Limpeza em Andamento' : ' Confirmar Limpeza em Massa'}
                 </h3>
               </div>
 
@@ -1145,7 +1144,7 @@ export default function DebugInstancesCleanerPage() {
                     </div>
 
                     <p className="text-sm text-red-600 mb-4">
-                      ⚠️ Esta ação é irreversível! Todas as atividades passadas serão permanentemente removidas.
+                      Esta ação é irreversível! Todas as atividades passadas serão permanentemente removidas.
                     </p>
 
                     <div className="border rounded-lg overflow-hidden">
@@ -1227,9 +1226,9 @@ export default function DebugInstancesCleanerPage() {
                               `}></span>
                               <span className="font-medium">{result.instanceName}</span>
                               <span className="text-gray-500 ml-1">
-                                {result.status === 'completed' && `✓ ${result.deleted} atividades`}
-                                {result.status === 'processing' && '🔄 processando...'}
-                                {result.status === 'error' && `❌ ${result.message}`}
+                                {result.status === 'completed' && ` ${result.deleted} atividades`}
+                                {result.status === 'processing' && ' processando...'}
+                                {result.status === 'error' && ` ${result.message}`}
                               </span>
                             </div>
                           ))}
@@ -1257,7 +1256,7 @@ export default function DebugInstancesCleanerPage() {
                     onClick={runMassCleanup}
                     className="px-6 py-2 rounded-lg font-medium text-white bg-purple-600 hover:bg-purple-700"
                   >
-                    ✅ Iniciar Limpeza em Massa
+                    Iniciar Limpeza em Massa
                   </button>
                 )}
               </div>
@@ -1271,7 +1270,7 @@ export default function DebugInstancesCleanerPage() {
             <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
               <div className="bg-gray-50 px-6 py-4 border-b">
                 <h3 className="text-lg font-semibold text-gray-900">
-                  {completingExpired ? '🔄 Finalizando Instâncias' : '🏁 Confirmar Finalização de Instâncias Expiradas'}
+                  {completingExpired ? ' Finalizando Instâncias' : '🏁 Confirmar Finalização de Instâncias Expiradas'}
                 </h3>
               </div>
 
@@ -1304,7 +1303,7 @@ export default function DebugInstancesCleanerPage() {
                     </div>
 
                     <p className="text-sm text-yellow-600 mb-4">
-                      ⚠️ Esta ação irá alterar o status das instâncias para <strong>"completed"</strong>.
+                      Esta ação irá alterar o status das instâncias para <strong>"completed"</strong>.
                       As atividades destas instâncias NÃO serão afetadas (use a limpeza em massa separadamente).
                     </p>
 
@@ -1401,7 +1400,7 @@ export default function DebugInstancesCleanerPage() {
                     onClick={completeExpiredInstances}
                     className="px-6 py-2 rounded-lg font-medium text-white bg-blue-600 hover:bg-blue-700"
                   >
-                    ✅ Finalizar Instâncias
+                    Finalizar Instâncias
                   </button>
                 )}
               </div>

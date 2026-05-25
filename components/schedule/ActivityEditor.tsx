@@ -363,7 +363,7 @@ export default function ActivityEditor({
               onChange={(e) => {
                 const duration = parseInt(e.target.value);
                 handleMetadataChange('estimatedDuration', duration);
-                onUpdate({ estimatedDuration: duration });
+                onUpdate({ metadata: { ...activity.metadata, estimatedDuration: duration } });
               }}
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
             />
@@ -498,7 +498,7 @@ export default function ActivityEditor({
               onChange={(e) => {
                 const points = parseInt(e.target.value);
                 handleScoringChange('pointsOnCompletion', points);
-                onUpdate({ pointsOnCompletion: points });
+                onUpdate({ scoring: { ...activity.scoring, pointsOnCompletion: points } });
               }}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg"
             />

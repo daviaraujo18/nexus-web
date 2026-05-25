@@ -31,9 +31,6 @@ const convertActivityToDTO = (activity: ScheduleActivity): CreateActivityDTO => 
       therapeuticFocus: activity.metadata.therapeuticFocus || [],
       educationalFocus: activity.metadata.educationalFocus || []
     },
-    // Campos duplicados (para compatibilidade)
-    estimatedDuration: activity.metadata.estimatedDuration,
-    pointsOnCompletion: activity.scoring.pointsOnCompletion
   };
 };
 
