@@ -29,6 +29,13 @@ export function useStudentSchedule() {
   const [error, setError] = useState<string | null>(null);
   const [instancesTruncated, setInstancesTruncated] = useState(false);
 
+  // Chave estável que muda somente quando o conjunto de IDs de instâncias ativas muda.
+  // Usado como dependência do listener de activityProgress para evitar reconexões desnecessárias.
+  const instanceIdsKey = useMemo(
+    () => instances.map(i => i.id).sort().join(','),
+    [instances]
+  );
+
   /**
    * 1. CARREGAR INSTÂNCIAS — reativo via onSnapshot em scheduleInstances.
    *    Quando uma instância muda (delete/archive seta isActive=false),
