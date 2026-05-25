@@ -3,15 +3,17 @@
 
 import React, { useState } from 'react';
 import { CreateActivityDTO, ActivityType, DifficultyLevel } from '@/types/schedule';
-import { 
-  FaClock, 
-  FaStar, 
+import { SUBJECTS_BY_GRADE, GRADE_LABELS } from '@/lib/constants/subjects';
+import {
+  FaClock,
+  FaStar,
   FaEdit,
   FaBook,
   FaBrain,
   FaGraduationCap,
   FaLink,
-  FaPaperclip
+  FaPaperclip,
+  FaChevronDown
 } from 'react-icons/fa';
 
 interface ActivityEditorProps {
@@ -395,6 +397,60 @@ export default function ActivityEditor({
           placeholder="Adicione uma descrição mais detalhada da atividade..."
           maxLength={500}
         />
+      </div>
+
+      {/* Série e Matéria */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+            <FaGraduationCap />
+            Série (opcional)
+          </label>
+          <div className="relative">
+            <select
+              value={activity.metadata.gradeLevel || ''}
+              onChange={(e) => {
+                onUpdate({
+                  metadata: {
+                    ...activity.metadata,
+                    gradeLevel: e.target.value || null,
+                    subject: null,
+                  },
+                });
+              }}
+              className="w-full appearance-none px-4 py-3 pr-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="">Selecionar série</option>
+              {Object.entries(GRADE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+            <FaChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+            <FaBook />
+            Matéria (opcional)
+          </label>
+          <div className="relative">
+            <select
+              value={activity.metadata.subject || ''}
+              onChange={(e) => handleMetadataChange('subject', e.target.value || null)}
+              disabled={!activity.metadata.gradeLevel}
+              className="w-full appearance-none px-4 py-3 pr-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+            >
+              <option value="">
+                {activity.metadata.gradeLevel ? 'Selecionar matéria' : 'Selecione a série primeiro'}
+              </option>
+              {(SUBJECTS_BY_GRADE[activity.metadata.gradeLevel || ''] || []).map((subject) => (
+                <option key={subject} value={subject}>{subject}</option>
+              ))}
+            </select>
+            <FaChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+          </div>
+        </div>
       </div>
 
       {/* Configurações Específicas */}

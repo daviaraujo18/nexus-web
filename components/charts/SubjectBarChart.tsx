@@ -64,7 +64,10 @@ export function computeSubjectStats(activities: Array<{ status: string; activity
   const map = new Map<string, number>();
   for (const act of activities) {
     if (act.status !== 'completed') continue;
-    const subject = act.activitySnapshot?.metadata?.subject;
+    const meta = act.activitySnapshot?.metadata;
+    // Usa subject explícito; cai para o primeiro item de educationalFocus como fallback
+    // para atividades criadas antes do campo subject existir no editor
+    const subject = meta?.subject || (meta?.educationalFocus?.[0] ?? '').trim() || null;
     if (!subject) continue;
     map.set(subject, (map.get(subject) || 0) + 1);
   }

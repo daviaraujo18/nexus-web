@@ -78,6 +78,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
 
   const {
     weekActivities,
+    allActivities,
     instances,
     loading,
     error,
@@ -152,8 +153,7 @@ export default function StudentDashboard({ showHeader = true }: StudentDashboard
       ? Math.round((completedToday / totalTodayActivities) * 100)
       : 0;
 
-  // Gráfico de matérias: atividades concluídas da semana agrupadas por matéria
-  const subjectStats = useMemo(() => computeSubjectStats(weekActivities || []), [weekActivities]);
+  const subjectStats = useMemo(() => computeSubjectStats(allActivities), [allActivities]);
 
   const getMotivationalMessage = () => {
     const messages = [

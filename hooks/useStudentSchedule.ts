@@ -14,6 +14,7 @@ export function useStudentSchedule() {
   const [instances, setInstances] = useState<ScheduleInstance[]>([]);
   const [instancesLoaded, setInstancesLoaded] = useState(false); // 🟢 A Verdadeira Luz Verde
   const [weekActivities, setWeekActivities] = useState<ActivityProgress[]>([]);
+  const [allActivities, setAllActivities] = useState<ActivityProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +44,39 @@ export function useStudentSchedule() {
   useEffect(() => {
     fetchInstances();
   }, [fetchInstances]);
+
+  /**
+   * 2b. LISTENER INDEPENDENTE: todas as atividades históricas (sem filtro de semana ou isActive)
+   *     Alimenta allActivities para o gráfico de matérias, que precisa de dados históricos completos.
+   */
+  useEffect(() => {
+    if (!user?.id || user.role !== 'student') return;
+
+    const q = query(
+      collection(firestore, 'activityProgress'),
+      where('studentId', '==', user.id)
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const docs = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            scheduledDate: data.scheduledDate?.toDate(),
+            startedAt: data.startedAt?.toDate(),
+            completedAt: data.completedAt?.toDate(),
+          } as ActivityProgress;
+        });
+        setAllActivities(docs);
+      },
+      (err) => console.error('[useStudentSchedule:allActivities]', err)
+    );
+
+    return () => unsubscribe();
+  }, [user?.id, user?.role]);
 
   /**
    * 2. LISTENER REAL-TIME COM TRAVA BLINDADA E JANELA AMPLIADA
@@ -234,6 +268,7 @@ export function useStudentSchedule() {
   return {
     instances,
     weekActivities,
+    allActivities,
     todayActivities,
     totalTodayActivities,
     loading,
