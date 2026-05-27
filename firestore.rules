@@ -168,6 +168,20 @@ service cloud.firestore {
       allow read, write: if isProfessional(request.auth.uid);
     }
 
+    // ── CPF Index ─────────────────────────────────────────
+    // Índice atômico de CPFs para prevenção de duplicatas sem expor dados.
+    // O doc ID é o CPF criptografado (caracteres especiais substituídos).
+    // Apenas o dono do registro pode criar; ninguém pode ler/deletar via cliente.
+    // A verificação de existência ocorre dentro de runTransaction(), que usa
+    // o SDK cliente autenticado — por isso 'create' exige isAuthenticated().
+    match /cpfIndex/{cpfHash} {
+      // Leitura permitida para autenticados — necessário para tx.get() dentro de runTransaction()
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // Update e delete bloqueados: o índice é imutável após criação
+      allow update, delete: if false;
+    }
+
     // ── Rate Limits ───────────────────────────────────────
     // Usuário só pode ler/escrever seu próprio documento de rate limit
     match /rate_limits/{docId} {

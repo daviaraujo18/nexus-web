@@ -5,7 +5,7 @@ import {
   updateProfile as updateAuthProfile,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, getDocs, query, collection, where, limit, getDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, getDocs, query, collection, where, runTransaction } from 'firebase/firestore';
 import { auth, firestore } from '@/firebase/config';
 import {
   RegisterData,
@@ -18,7 +18,7 @@ import {
 import { ValidationService } from '@/lib/validation';
 import { AuditService } from './AuditService';
 import { UserService } from './UserService';
-import { encryptData, decryptData } from '@/lib/utils/encryption';
+import { encryptData } from '@/lib/utils/encryption';
 
 export class AuthService {
   // SINGLE SOURCE OF TRUTH para login
@@ -98,10 +98,11 @@ export class AuthService {
         throw new AuthError(validation.error!, 'VALIDATION_ERROR', validation.metadata);
       }
 
-      // 2. Verificar unicidade
-      await this.checkUniqueness(data);
-
-      // 3. Criar usuário no Firebase Auth
+      // 2. Criar usuário no Firebase Auth
+      // OBS: a verificação de email duplicado é feita pelo próprio Firebase Auth
+      // (retorna auth/email-already-in-use). Não fazemos query prévia no Firestore
+      // pois o usuário ainda não está autenticado e as regras de segurança negariam
+      // o acesso às coleções students/professionals.
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         data.email,
@@ -110,19 +111,52 @@ export class AuthService {
 
       const userId = userCredential.user.uid;
 
-      // 4. Atualizar nome no perfil do Auth
+      // 3. Atualizar nome no perfil do Auth
       await updateAuthProfile(userCredential.user, {
         displayName: data.name
       });
 
-      // 5. Criar perfil específico no Firestore
-      if (data.type === 'student') {
-        await this.createStudentProfile(userId, data);
-      } else {
-        await this.createProfessionalProfile(userId, data);
+      // 4. Criar perfil no Firestore com reserva atômica do CPF (BLOCKER 1 + 3)
+      //
+      // A verificação de unicidade e a criação do perfil ocorrem dentro de uma
+      // única transação Firestore. Isso elimina a race condition entre dois
+      // registros simultâneos com o mesmo CPF: o segundo a commitar recebe
+      // ABORTED do servidor e nunca cria o documento de perfil.
+      //
+      // Em caso de qualquer falha neste bloco, o usuário recém-criado no Auth
+      // é removido (rollback) para evitar estado zumbi (Auth sem perfil).
+      try {
+        await runTransaction(firestore, async (tx) => {
+          // Reservar o CPF no índice atômico antes de criar o perfil
+          if (data.cpf) {
+            const cpfIndexRef = this.getCpfIndexRef(data.cpf);
+            const cpfSnap = await tx.get(cpfIndexRef);
+            if (cpfSnap.exists()) {
+              throw new AuthError('Este CPF já está cadastrado', 'CPF_EXISTS');
+            }
+            // Reservar o slot — qualquer transação concorrente lerá este doc e abortará
+            tx.set(cpfIndexRef, { userId, createdAt: serverTimestamp() });
+          }
+
+          // Criar perfil dentro da mesma transação
+          if (data.type === 'student') {
+            await this.createStudentProfileTx(tx, userId, data);
+          } else {
+            await this.createProfessionalProfileTx(tx, userId, data);
+          }
+        });
+      } catch (txError: any) {
+        // Rollback no Firebase Auth: remove o usuário para evitar estado zumbi.
+        // Se o delete também falhar, logamos mas mantemos o erro original.
+        try {
+          await userCredential.user.delete();
+        } catch (deleteError) {
+          console.error('⚠️ Auth rollback falhou — usuário zumbi criado:', userId, deleteError);
+        }
+        throw txError; // re-lança o erro original (CPF_EXISTS, INCOMPLETE_DATA, etc.)
       }
 
-      // 6. Log de auditoria
+      // 6. Log de auditoria (silencioso — falhas não interrompem o fluxo)
       await AuditService.logRegistration(userId, data.type, {
         name: data.name,
         hasConsent: true
@@ -147,8 +181,12 @@ export class AuthService {
     } catch (error: any) {
       console.error('❌ Registration error:', error);
 
-      // Log de registro falho
-      await AuditService.logFailedRegistration(data.email, data.type, error.code);
+      // Log de registro falho (silencioso — não deve mascarar o erro original)
+      try {
+        await AuditService.logFailedRegistration(data.email, data.type, error.code);
+      } catch (auditError) {
+        console.warn('⚠️ Failed to log registration failure:', auditError);
+      }
 
       const mappedError = this.mapFirebaseAuthError(error);
       throw mappedError;
@@ -169,13 +207,31 @@ export class AuthService {
     }
   }
 
-  // Métodos privados
-  private static async createStudentProfile(userId: string, data: RegisterData) {
+  // ── Helpers privados ────────────────────────────────────────────────────────
+
+  /**
+   * Retorna a referência do documento de índice de CPF.
+   * O ID é derivado deterministicamente do CPF criptografado, com substituição
+   * de caracteres inválidos para doc IDs do Firestore ('/' não é permitido).
+   */
+  private static getCpfIndexRef(cpf: string) {
+    const normalizedCPF = cpf.replace(/\D/g, '');
+    const encryptedCPF = encryptData(normalizedCPF);
+    // Base64 pode conter '/', '+', '=' — tornar seguro para Firestore doc ID
+    const docId = encryptedCPF.replace(/\//g, '_').replace(/\+/g, '-').replace(/=/g, '');
+    return doc(firestore, 'cpfIndex', docId);
+  }
+
+  // Versão da criação de perfil de aluno compatível com Transaction
+  private static async createStudentProfileTx(
+    tx: Parameters<Parameters<typeof runTransaction>[1]>[0],
+    userId: string,
+    data: RegisterData
+  ) {
     if (!data.cpf || !data.birthday || !data.school || !data.grade) {
       throw new AuthError('Dados do aluno incompletos', 'INCOMPLETE_DATA');
     }
 
-    // Criptografar dados sensíveis
     const encryptedCPF = encryptData(data.cpf);
     const encryptedBirthday = encryptData(data.birthday);
 
@@ -185,11 +241,11 @@ export class AuthService {
       role: 'student',
       profileComplete: false,
       isActive: true,
-      consentVersion: '1.0', // ← NOVO: Versão do consentimento
-      consentDate: new Date(), // ← NOVO: Data do consentimento
+      consentVersion: '1.0',
+      consentDate: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      lastLoginAt: new Date(),
+      lastLoginAt: null as any, // preenchido no primeiro login
       profile: {
         cpf: encryptedCPF,
         birthday: new Date(data.birthday),
@@ -205,38 +261,43 @@ export class AuthService {
       }
     };
 
-    await setDoc(doc(firestore, 'students', userId), {
+    tx.set(doc(firestore, 'students', userId), {
       ...studentData,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      consentDate: serverTimestamp()
+      consentDate: serverTimestamp(),
+      lastLoginAt: null
     });
   }
 
-  private static async createProfessionalProfile(userId: string, data: RegisterData) {
-    if (!data.cpf) { // ← NOVA VALIDAÇÃO: CPF obrigatório
+  // Versão da criação de perfil de profissional compatível com Transaction
+  private static async createProfessionalProfileTx(
+    tx: Parameters<Parameters<typeof runTransaction>[1]>[0],
+    userId: string,
+    data: RegisterData
+  ) {
+    if (!data.cpf) {
       throw new AuthError('CPF é obrigatório para profissionais', 'CPF_REQUIRED');
     }
 
-    // Criptografar dados sensíveis
     const encryptedCPF = encryptData(data.cpf);
 
     const professionalData: Omit<Professional, 'id'> = {
       email: data.email,
       name: data.name,
       role: data.role || 'coordinator',
-      profileComplete: false, // ← Perfil incompleto (campos opcionais faltando)
+      profileComplete: false,
       isActive: true,
-      consentVersion: '1.0', // ← NOVO: Versão do consentimento
-      consentDate: new Date(), // ← NOVO: Data do consentimento
+      consentVersion: '1.0',
+      consentDate: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      lastLoginAt: new Date(),
+      lastLoginAt: null as any, // preenchido no primeiro login
       profile: {
-        cpf: encryptedCPF, // ← NOVO CAMPO OBRIGATÓRIO
-        licenseNumber: '', // ← VAZIO (será preenchido no perfil)
-        specialization: '', // ← VAZIO (será preenchido no perfil)
-        institution: '', // ← VAZIO (será preenchido no perfil)
+        cpf: encryptedCPF,
+        licenseNumber: '',
+        specialization: '',
+        institution: '',
         department: '',
         assignedStudents: [],
         canCreatePrograms: data.role === 'coordinator' || data.role === 'monitor',
@@ -246,57 +307,13 @@ export class AuthService {
       }
     };
 
-    await setDoc(doc(firestore, 'professionals', userId), {
+    tx.set(doc(firestore, 'professionals', userId), {
       ...professionalData,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      consentDate: serverTimestamp() // ← NOVO
+      consentDate: serverTimestamp(),
+      lastLoginAt: null
     });
-  }
-
-  private static async checkUniqueness(data: RegisterData): Promise<void> {
-    // Verificar email único
-    const emailExists = await UserService.checkEmailExists(data.email);
-    if (emailExists) {
-      throw new AuthError('Este email já está em uso', 'EMAIL_EXISTS');
-    }
-
-    // Verificar CPF único (para estudantes E profissionais)
-    if (data.cpf) {
-      const cpfExists = await this.checkCPFExists(data.cpf);
-      if (cpfExists) {
-        throw new AuthError('Este CPF já está cadastrado', 'CPF_EXISTS');
-      }
-    }
-
-    // Removida verificação de licenseNumber (agora opcional)
-  }
-
-  private static async checkCPFExists(cpf: string): Promise<boolean> {
-    try {
-      const encryptedCPF = encryptData(cpf);
-
-      // Verificar em students
-      const studentsQuery = query(
-        collection(firestore, 'students'),
-        where('profile.cpf', '==', encryptedCPF),
-        limit(1)
-      );
-      const studentsSnapshot = await getDocs(studentsQuery);
-      if (!studentsSnapshot.empty) return true;
-
-      // Verificar em professionals
-      const professionalsQuery = query(
-        collection(firestore, 'professionals'),
-        where('profile.cpf', '==', encryptedCPF),
-        limit(1)
-      );
-      const professionalsSnapshot = await getDocs(professionalsQuery);
-      return !professionalsSnapshot.empty;
-    } catch (error) {
-      console.error('Error checking CPF existence:', error);
-      return false;
-    }
   }
 
   private static async checkRateLimit(email: string): Promise<boolean> {

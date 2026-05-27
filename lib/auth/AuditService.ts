@@ -16,6 +16,8 @@ export type AuditEventType =
 export class AuditService {
   private static readonly COLLECTION = 'auditLogs';
 
+  // Eventos autenticados: escreve diretamente no Firestore via SDK cliente.
+  // A regra auditLogs exige isProfessional — usada apenas para usuários já logados.
   static async logEvent(
     userId: string,
     eventType: AuditEventType,
@@ -27,8 +29,7 @@ export class AuditService {
         eventType,
         metadata,
         timestamp: serverTimestamp(),
-        userAgent: navigator.userAgent,
-        ipAddress: await this.getClientIP(), // Será implementado via API route
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'server',
         environment: process.env.NODE_ENV
       });
     } catch (error) {
@@ -58,8 +59,7 @@ export class AuditService {
         email,
         errorCode,
         timestamp: serverTimestamp(),
-        userAgent: navigator.userAgent,
-        ipAddress: await this.getClientIP()
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'server',
       });
     } catch (error) {
       console.error('Failed to log failed login event:', error);
@@ -81,20 +81,30 @@ export class AuditService {
     });
   }
 
+  // BLOCKER 2 corrigido: eventos pré-autenticação são enviados via API Route
+  // que usa o Admin SDK, ignorando as regras do Firestore.
+  // Isso garante que REGISTRATION_FAILED seja sempre gravado, mesmo quando
+  // o usuário não está autenticado (ex.: auth/email-already-in-use).
   static async logFailedRegistration(
     email: string,
     userType: string,
     errorCode?: string
   ): Promise<void> {
-    await addDoc(collection(firestore, this.COLLECTION), {
-      eventType: 'REGISTRATION_FAILED',
-      email,
-      userType,
-      errorCode,
-      timestamp: serverTimestamp(),
-      userAgent: navigator.userAgent,
-      ipAddress: await this.getClientIP()
-    });
+    try {
+      await fetch('/api/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: 'REGISTRATION_FAILED',
+          email,
+          userType,
+          errorCode,
+        }),
+      });
+    } catch (error) {
+      // Log de auditoria nunca deve mascarar o erro original
+      console.error('Failed to log failed registration event:', error);
+    }
   }
 
   static async logSensitiveDataAccess(
@@ -108,15 +118,5 @@ export class AuditService {
       dataType,
       reason
     });
-  }
-
-  private static async getClientIP(): Promise<string> {
-    try {
-      // Em produção, isso seria feito via API route que pega o IP real
-      // Por enquanto, retornar um placeholder
-      return '127.0.0.1';
-    } catch {
-      return 'unknown';
-    }
   }
 }
