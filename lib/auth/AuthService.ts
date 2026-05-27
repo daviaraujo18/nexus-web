@@ -5,7 +5,7 @@ import {
   updateProfile as updateAuthProfile,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, getDocs, query, collection, where, runTransaction } from 'firebase/firestore';
+import { doc, setDoc, addDoc, serverTimestamp, getDocs, query, collection, where, runTransaction } from 'firebase/firestore';
 import { auth, firestore } from '@/firebase/config';
 import {
   RegisterData,
@@ -337,10 +337,10 @@ export class AuthService {
         return false;
       }
 
-      // Registrar nova tentativa
-      await setDoc(doc(rateLimitRef), {
+      // Registrar nova tentativa (addDoc gera ID automático no Firestore)
+      await addDoc(rateLimitRef, {
         email,
-        timestamp: new Date(now),
+        timestamp: serverTimestamp(),
         type: 'login_attempt'
       });
 
