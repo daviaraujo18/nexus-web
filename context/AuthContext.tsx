@@ -97,18 +97,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // Registro unificado — navegação é responsabilidade exclusiva do componente chamador
-  // loading é resetado no finally pois registro não autentica o usuário
+  // Após o registro, fetchUserData é chamado manualmente pois o Firebase não dispara
+  // um segundo onAuthStateChanged quando isRegisteringRef volta a false.
   const register = async (data: any): Promise<RegisterResult> => {
     setLoading(true);
     isRegisteringRef.current = true;
+    let result: RegisterResult | undefined;
     try {
-      const result = await AuthService.register(data);
+      result = await AuthService.register(data);
       return result;
     } catch (error: unknown) {
       console.error('Registration error in context:', error);
       throw error;
     } finally {
       isRegisteringRef.current = false;
+      if (result?.success && result.userId) {
+        try {
+          const userData = await fetchUserData(result.userId);
+          setUser(userData);
+        } catch (fetchError: unknown) {
+          console.error('❌ Erro ao buscar dados do usuário após registro:', fetchError);
+          setUser(null);
+        }
+      }
       setLoading(false);
     }
   };
