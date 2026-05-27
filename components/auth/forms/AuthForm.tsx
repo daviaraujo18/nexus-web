@@ -256,6 +256,7 @@ export default function AuthForm({
           register={register}
           errors={errors}
           loading={loading}
+          setValue={setValue}
         />
       )}
 

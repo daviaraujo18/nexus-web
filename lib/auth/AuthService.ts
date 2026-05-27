@@ -209,8 +209,7 @@ export class AuthService {
       ...studentData,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      consentDate: serverTimestamp(), // ← NOVO
-      'profile.birthday': new Date(data.birthday)
+      consentDate: serverTimestamp()
     });
   }
 

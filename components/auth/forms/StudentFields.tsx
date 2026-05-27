@@ -12,6 +12,7 @@ interface StudentFieldsProps {
   register: any;
   errors: any;
   loading: boolean;
+  setValue?: any;
   onCPFChange?: (cleanCPF: string, isValid: boolean) => void;
 }
 
@@ -19,6 +20,7 @@ export default function StudentFields({
   register,
   errors,
   loading,
+  setValue,
   onCPFChange
 }: StudentFieldsProps) {
   const [cpfValid, setCpfValid] = useState(false);
@@ -31,9 +33,15 @@ export default function StudentFields({
     const validation = cpfValidator.validate(cleanCPF);
     setCpfValid(validation.valid);
 
+    // Garantir que o form armazene apenas dígitos (sem máscara)
+    if (setValue) {
+      setValue('cpf', cleanCPF);
+    }
+
     // Notificar componente pai (para criptografia)
     onCPFChange?.(cleanCPF, validation.valid);
 
+    // Mostrar versão formatada no input para o usuário
     e.target.value = formatted;
   };
 

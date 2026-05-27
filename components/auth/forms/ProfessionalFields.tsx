@@ -39,12 +39,8 @@ export default function ProfessionalFields({
   const [formattedCPF, setFormattedCPF] = useState('');
   const [cpfValid, setCpfValid] = useState<boolean>(false);
 
-  // Sincronizar com o valor do formulário
-  useEffect(() => {
-    if (setValue && watchedRole !== selectedRole) {
-      setValue('role', selectedRole);
-    }
-  }, [selectedRole, setValue, watchedRole]);
+  // Sincronização removida: setValue é chamado diretamente no handleRoleClick
+  // para evitar dessincronização quando o usuário alterna entre os mesmos cards.
 
   // Formatar CPF enquanto digita
   useEffect(() => {
@@ -102,6 +98,9 @@ export default function ProfessionalFields({
 
   const handleRoleClick = (roleValue: string) => {
     setSelectedRole(roleValue);
+    if (setValue) {
+      setValue('role', roleValue);
+    }
   };
 
   const handleLicenseChange = (e: React.ChangeEvent<HTMLInputElement>) => {

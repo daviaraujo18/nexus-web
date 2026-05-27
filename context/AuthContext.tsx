@@ -20,6 +20,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
   const [profileReady, setProfileReady] = useState(false);
+  const isRegisteringRef = React.useRef(false);
 
 
   // Função para buscar usuário completo
@@ -95,22 +96,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Registro unificado com redirecionamento
+  // Registro unificado — navegação é responsabilidade exclusiva do componente chamador
   // loading é resetado no finally pois registro não autentica o usuário
   const register = async (data: any): Promise<RegisterResult> => {
     setLoading(true);
+    isRegisteringRef.current = true;
     try {
       const result = await AuthService.register(data);
-
-      if (result.success && result.userId) {
-        router.push('/login');
-      }
-
       return result;
     } catch (error: unknown) {
       console.error('Registration error in context:', error);
       throw error;
     } finally {
+      isRegisteringRef.current = false;
       setLoading(false);
     }
   };
@@ -141,6 +139,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        // Se o registro ainda está em andamento, ignorar este disparo:
+        // o onAuthStateChanged é acionado imediatamente após createUserWithEmailAndPassword,
+        // antes de o setDoc terminar. Após o register() completar, o listener será
+        // acionado novamente (ou fetchUserData será chamado manualmente se necessário).
+        if (isRegisteringRef.current) {
+          return;
+        }
         try {
           const userData = await fetchUserData(firebaseUser.uid);
           setUser(userData);
